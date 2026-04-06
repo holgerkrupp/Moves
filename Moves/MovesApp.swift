@@ -10,23 +10,51 @@ import SwiftData
 
 @main
 struct MovesApp: App {
-    var sharedModelContainer: ModelContainer = {
+    @Environment(\.scenePhase) private var scenePhase
+
+    private let sharedModelContainer: ModelContainer
+    @StateObject private var captureManager: MovesLocationCaptureManager
+
+    init() {
         let schema = Schema([
-            Item.self,
+            DayTimeline.self,
+            VisitPlace.self,
+            MoveSegment.self,
+            LocationSample.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false
+        )
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
+            self.sharedModelContainer = container
+            _captureManager = StateObject(
+                wrappedValue: MovesLocationCaptureManager(modelContainer: container)
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(captureManager)
         }
         .modelContainer(sharedModelContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task {
+                    await captureManager.start()
+                    await captureManager.refreshHistoricalBackfill()
+                }
+            }
+        }
     }
 }

@@ -1,0 +1,168 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Moves",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 46
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh timeline with a one-shot location sample",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 55
+        }
+      },
+      {
+        "comment": "",
+        "key": "Last sample: %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 78
+        }
+      },
+      {
+        "comment": "",
+        "key": "No timeline yet",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 99
+        }
+      },
+      {
+        "comment": "",
+        "key": "Keep Moves running in the background. Visits and movement segments appear automatically as iOS records them.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 102
+        }
+      },
+      {
+        "comment": "",
+        "key": "No segments for this day yet.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 181
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld moves",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 216
+        }
+      },
+      {
+        "comment": "",
+        "key": "Arrive",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 255
+        }
+      },
+      {
+        "comment": "",
+        "key": "Stay",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 262
+        }
+      },
+      {
+        "comment": "",
+        "key": "Duration",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 288
+        }
+      },
+      {
+        "comment": "",
+        "key": "Distance",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "Steps",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 303
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 305
+        }
+      },
+      {
+        "comment": "",
+        "key": "Place",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 340
+        }
+      },
+      {
+        "comment": "",
+        "key": "Arrived %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 346
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 410
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 396
+        }
+      },
+      {
+        "comment": "",
+        "key": "End",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 406
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ • %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 416
+        }
+      }
+    ]
+  },
+  "version": 1
+}

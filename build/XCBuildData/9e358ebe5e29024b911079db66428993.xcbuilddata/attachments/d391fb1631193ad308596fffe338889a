@@ -1,0 +1,59 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/Moves-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/Moves-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/Moves-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/Moves-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/Moves-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/ContentView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/ContentView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/LocationChange.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/LocationChange~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/MovesApp.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/MovesApp~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/VisitedLocation.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/VisitedLocation~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/Moves.build/Objects-normal/x86_64/GeneratedAssetSymbols~partial.swiftmodule"
+  }
+}
