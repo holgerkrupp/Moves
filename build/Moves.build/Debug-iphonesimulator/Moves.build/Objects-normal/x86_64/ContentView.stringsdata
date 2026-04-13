@@ -7,7 +7,7 @@
         "key": "Moves",
         "location": {
           "startingColumn": 30,
-          "startingLine": 46
+          "startingLine": 59
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Refresh timeline with a one-shot location sample",
         "location": {
           "startingColumn": 27,
-          "startingLine": 55
+          "startingLine": 68
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Last sample: %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 78
+          "startingLine": 91
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "No timeline yet",
         "location": {
           "startingColumn": 18,
-          "startingLine": 99
+          "startingLine": 112
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "Keep Moves running in the background. Visits and movement segments appear automatically as iOS records them.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 102
+          "startingLine": 115
         }
       },
       {
@@ -47,23 +47,39 @@
         "key": "No segments for this day yet.",
         "location": {
           "startingColumn": 26,
-          "startingLine": 181
+          "startingLine": 228
         }
       },
       {
         "comment": "",
         "key": "%lld places",
         "location": {
-          "startingColumn": 19,
-          "startingLine": 214
+          "startingColumn": 23,
+          "startingLine": 268
         }
       },
       {
         "comment": "",
         "key": "%lld moves",
         "location": {
+          "startingColumn": 23,
+          "startingLine": 270
+        }
+      },
+      {
+        "comment": "",
+        "key": "Carried over from previous day",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 314
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start at %@",
+        "location": {
           "startingColumn": 19,
-          "startingLine": 216
+          "startingLine": 311
         }
       },
       {
@@ -71,7 +87,7 @@
         "key": "Arrive",
         "location": {
           "startingColumn": 22,
-          "startingLine": 255
+          "startingLine": 332
         }
       },
       {
@@ -79,7 +95,7 @@
         "key": "Stay",
         "location": {
           "startingColumn": 22,
-          "startingLine": 262
+          "startingLine": 339
         }
       },
       {
@@ -87,7 +103,7 @@
         "key": "Duration",
         "location": {
           "startingColumn": 22,
-          "startingLine": 288
+          "startingLine": 369
         }
       },
       {
@@ -95,7 +111,7 @@
         "key": "Distance",
         "location": {
           "startingColumn": 22,
-          "startingLine": 295
+          "startingLine": 376
         }
       },
       {
@@ -103,7 +119,7 @@
         "key": "Steps",
         "location": {
           "startingColumn": 26,
-          "startingLine": 303
+          "startingLine": 384
         }
       },
       {
@@ -111,7 +127,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 26,
-          "startingLine": 305
+          "startingLine": 386
         }
       },
       {
@@ -119,7 +135,7 @@
         "key": "Place",
         "location": {
           "startingColumn": 26,
-          "startingLine": 340
+          "startingLine": 430
         }
       },
       {
@@ -127,7 +143,31 @@
         "key": "Arrived %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 346
+          "startingLine": 436
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-detected: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 442
+        }
+      },
+      {
+        "comment": "",
+        "key": "Label (Home, Work...)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 448
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 459
         }
       },
       {
@@ -135,7 +175,7 @@
         "key": "Move",
         "location": {
           "startingColumn": 26,
-          "startingLine": 410
+          "startingLine": 567
         }
       },
       {
@@ -143,7 +183,7 @@
         "key": "Start",
         "location": {
           "startingColumn": 24,
-          "startingLine": 396
+          "startingLine": 553
         }
       },
       {
@@ -151,7 +191,7 @@
         "key": "End",
         "location": {
           "startingColumn": 24,
-          "startingLine": 406
+          "startingLine": 563
         }
       },
       {
@@ -159,7 +199,7 @@
         "key": "%@ • %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 416
+          "startingLine": 575
         }
       }
     ]

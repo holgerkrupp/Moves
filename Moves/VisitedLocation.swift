@@ -83,6 +83,7 @@ final class VisitPlace {
     var longitude: Double
     var horizontalAccuracy: Double
     var userLabel: String?
+    var autoLabel: String?
     var createdAt: Date
 
     var dayTimeline: DayTimeline?
@@ -99,7 +100,8 @@ final class VisitPlace {
         latitude: Double,
         longitude: Double,
         horizontalAccuracy: Double,
-        userLabel: String? = nil
+        userLabel: String? = nil,
+        autoLabel: String? = nil
     ) {
         self.id = UUID()
         self.arrivalDate = arrivalDate
@@ -108,6 +110,7 @@ final class VisitPlace {
         self.longitude = longitude
         self.horizontalAccuracy = horizontalAccuracy
         self.userLabel = userLabel
+        self.autoLabel = autoLabel
         self.createdAt = .now
     }
 
@@ -118,6 +121,9 @@ final class VisitPlace {
     var displayTitle: String {
         if let userLabel, !userLabel.isEmpty {
             return userLabel
+        }
+        if let autoLabel, !autoLabel.isEmpty {
+            return autoLabel
         }
 
         let lat = String(format: "%.5f", latitude)
@@ -165,6 +171,16 @@ final class MoveSegment {
     var transportMode: TransportMode {
         get { TransportMode(rawValue: transportModeRawValue) ?? .unknown }
         set { transportModeRawValue = newValue.rawValue }
+    }
+
+    var timelineStartDate: Date {
+        let departureBasedStart = startPlace?.departureDate ?? startDate
+        let normalizedStart = max(departureBasedStart, startDate)
+        return min(normalizedStart, endDate)
+    }
+
+    var timelineDuration: TimeInterval {
+        max(endDate.timeIntervalSince(timelineStartDate), 0)
     }
 }
 
@@ -233,6 +249,7 @@ protocol TimelineRepository {
         stepCount: Int?,
         samples: [LocationSample]
     ) throws -> MoveSegment
+    func setAutomaticLabel(_ label: String, for placeID: UUID) throws
     func saveIfNeeded() throws
 }
 
@@ -259,12 +276,15 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             return existing
         }
 
+        let inferredUserLabel = try inferredUserLabel(near: visit.coordinate)
+
         let place = VisitPlace(
             arrivalDate: arrival,
             departureDate: departure,
             latitude: visit.coordinate.latitude,
             longitude: visit.coordinate.longitude,
-            horizontalAccuracy: visit.horizontalAccuracy
+            horizontalAccuracy: visit.horizontalAccuracy,
+            userLabel: inferredUserLabel
         )
         place.dayTimeline = try timeline(for: arrival)
         modelContext.insert(place)
@@ -343,8 +363,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         let timeline = try timeline(for: startDate)
 
         let move: MoveSegment
-        if let existing = try findMove(byDedupeKey: dedupeKey) {
+        if let existing = try findMove(byDedupeKey: dedupeKey)
+            ?? findMove(startPlaceID: startPlace.id, endPlaceID: endPlace.id) {
             move = existing
+            move.dedupeKey = dedupeKey
             move.transportMode = transportMode
             move.distanceMeters = distanceMeters
             move.stepCount = stepCount
@@ -372,6 +394,32 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         try saveIfNeeded()
         return move
+    }
+
+    func setAutomaticLabel(_ label: String, for placeID: UUID) throws {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        var descriptor = FetchDescriptor<VisitPlace>(
+            predicate: #Predicate { place in
+                place.id == placeID
+            }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let place = try modelContext.fetch(descriptor).first else {
+            return
+        }
+
+        if let userLabel = place.userLabel, !userLabel.isEmpty {
+            return
+        }
+        if let existingAuto = place.autoLabel, !existingAuto.isEmpty {
+            return
+        }
+
+        place.autoLabel = trimmed
+        try saveIfNeeded()
     }
 
     func saveIfNeeded() throws {
@@ -440,8 +488,22 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         return try modelContext.fetch(descriptor).first
     }
 
+    private func findMove(startPlaceID: UUID, endPlaceID: UUID) throws -> MoveSegment? {
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.startPlace?.id == startPlaceID && move.endPlace?.id == endPlaceID
+            },
+            sortBy: [SortDescriptor(\MoveSegment.createdAt, order: .forward)]
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
     private func normalizedArrivalDate(for visit: CLVisit) -> Date {
         if visit.arrivalDate == .distantPast {
+            if let departure = normalizedDepartureDate(for: visit) {
+                return departure.addingTimeInterval(-300)
+            }
             return .now
         }
         return visit.arrivalDate
@@ -474,6 +536,33 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
     private static func roundedCoordinate(_ value: Double) -> String {
         String(format: "%.5f", value)
+    }
+
+    private func inferredUserLabel(near coordinate: CLLocationCoordinate2D) throws -> String? {
+        let descriptor = FetchDescriptor<VisitPlace>(
+            predicate: #Predicate { place in
+                place.userLabel != nil
+            }
+        )
+
+        let labeledPlaces = try modelContext.fetch(descriptor)
+
+        let nearest = labeledPlaces
+            .compactMap { place -> (String, CLLocationDistance)? in
+                guard let label = place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else {
+                    return nil
+                }
+
+                let distance = Self.distanceMeters(
+                    from: coordinate,
+                    to: CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
+                )
+                return (label, distance)
+            }
+            .filter { $0.1 <= 120 }
+            .min(by: { $0.1 < $1.1 })
+
+        return nearest?.0
     }
 
     private static func distanceMeters(from lhs: CLLocationCoordinate2D, to rhs: CLLocationCoordinate2D) -> CLLocationDistance {

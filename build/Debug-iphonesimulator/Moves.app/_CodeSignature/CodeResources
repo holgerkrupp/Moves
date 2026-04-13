@@ -4,6 +4,18 @@
 <dict>
 	<key>files</key>
 	<dict>
+		<key>AppIcon60x60@2x.png</key>
+		<data>
+		0Ly8SoEW3mjnwo392ahwZim8S5s=
+		</data>
+		<key>AppIcon76x76@2x~ipad.png</key>
+		<data>
+		96wAgylvs4m2nUpc4nxaYT9NpAo=
+		</data>
+		<key>Assets.car</key>
+		<data>
+		mfjl1/w82AXI3hZ9c0mtLcrzBFI=
+		</data>
 		<key>Frameworks/Testing.framework/Info.plist</key>
 		<data>
 		t22RQqcrJgTYoLu6rqibsgWMSEo=
@@ -126,7 +138,7 @@
 		</data>
 		<key>Info.plist</key>
 		<data>
-		4+QevbWh0OPNuy8lv/ExyTv6lnc=
+		O0zhaTUhef2uESJ3Y1dO9ElWSkc=
 		</data>
 		<key>PkgInfo</key>
 		<data>
@@ -138,7 +150,7 @@
 		</data>
 		<key>PlugIns/MovesTests.xctest/MovesTests</key>
 		<data>
-		6cJR39PIJBEP+kJLgICm5fpp7jM=
+		cjie0qZ+tPtfnO6ipSxNeIWmLoY=
 		</data>
 		<key>PlugIns/MovesTests.xctest/_CodeSignature/CodeResources</key>
 		<data>
@@ -147,6 +159,27 @@
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>AppIcon60x60@2x.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			blHAhRq6ZI6013b7GGtHJyYiZ3sRA+CekzkpDAU3KIA=
+			</data>
+		</dict>
+		<key>AppIcon76x76@2x~ipad.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			hujwZiE4avWvkcVA0ZrBDKWi7PLoPxKVhxz9vXSV+7I=
+			</data>
+		</dict>
+		<key>Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			A0z/4iqhq0GL+Spmw7pJ8eFjzZOfyKf4eoDRjBaFQGo=
+			</data>
+		</dict>
 		<key>Frameworks/Testing.framework/Info.plist</key>
 		<dict>
 			<key>hash2</key>
@@ -368,7 +401,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			D+8V1+f3FmBvyRkrYyLdx8K10RczqvX7GjsKo/+/Gfo=
+			AvLcrsr8hTdWAiM/NNSvaIv28Cqw9uZ9+13B/xVJZdM=
 			</data>
 		</dict>
 		<key>PlugIns/MovesTests.xctest/_CodeSignature/CodeResources</key>

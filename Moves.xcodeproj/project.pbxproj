@@ -13,6 +13,9 @@
 		489A763E2C4FC6F500F43B69 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763D2C4FC6F500F43B69 /* Preview Assets.xcassets */; };
 		489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76442C4FC70D00F43B69 /* LocationChange.swift */; };
 		489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */; };
+		48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
+		48A8FC0F2F8CCC7E000EAECA /* CreatedByView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8FC0E2F8CCC7E000EAECA /* CreatedByView.swift */; };
+		48A8FC112F8CCD27000EAECA /* VersionNumberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8FC102F8CCD27000EAECA /* VersionNumberView.swift */; };
 		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -36,6 +39,9 @@
 		489A76462C4FCF1300F43B69 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		489A76472C4FD1A500F43B69 /* Moves.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Moves.entitlements; sourceTree = "<group>"; };
 		489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitedLocation.swift; sourceTree = "<group>"; };
+		48A8FACE2F85166D000EAECA /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		48A8FC0E2F8CCC7E000EAECA /* CreatedByView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatedByView.swift; sourceTree = "<group>"; };
+		48A8FC102F8CCD27000EAECA /* VersionNumberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionNumberView.swift; sourceTree = "<group>"; };
 		9A1B00012F00000100000001 /* MovesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAssemblerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -79,6 +85,9 @@
 		489A76332C4FC6F300F43B69 /* Moves */ = {
 			isa = PBXGroup;
 			children = (
+				48A8FC0E2F8CCC7E000EAECA /* CreatedByView.swift */,
+				48A8FC102F8CCD27000EAECA /* VersionNumberView.swift */,
+				48A8FACE2F85166D000EAECA /* AppIcon.icon */,
 				489A76472C4FD1A500F43B69 /* Moves.entitlements */,
 				489A76462C4FCF1300F43B69 /* Info.plist */,
 				489A76342C4FC6F300F43B69 /* MovesApp.swift */,
@@ -190,6 +199,7 @@
 			files = (
 				489A763E2C4FC6F500F43B69 /* Preview Assets.xcassets in Resources */,
 				489A763B2C4FC6F500F43B69 /* Assets.xcassets in Resources */,
+				48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -210,6 +220,8 @@
 				489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */,
 				489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */,
 				489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */,
+				48A8FC0F2F8CCC7E000EAECA /* CreatedByView.swift in Sources */,
+				48A8FC112F8CCD27000EAECA /* VersionNumberView.swift in Sources */,
 				489A76352C4FC6F300F43B69 /* MovesApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -379,12 +391,16 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2026.1;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -415,12 +431,16 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2026.1;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -446,8 +466,8 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = Moves;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Moves.app/Moves";
+				TEST_TARGET_NAME = Moves;
 			};
 			name = Debug;
 		};
@@ -472,8 +492,8 @@
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = Moves;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Moves.app/Moves";
+				TEST_TARGET_NAME = Moves;
 			};
 			name = Release;
 		};

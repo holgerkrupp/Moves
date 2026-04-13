@@ -1,73 +1,98 @@
 import SwiftUI
 import SwiftData
 import MapKit
+import UniformTypeIdentifiers
+
+private enum MovesPalette {
+    static let backgroundTop = Color(uiColor: .systemGroupedBackground)
+    static let backgroundBottom = Color(uiColor: .secondarySystemGroupedBackground)
+    static let card = Color(uiColor: .secondarySystemBackground)
+    static let border = Color(uiColor: .separator).opacity(0.45)
+    static let rail = Color(uiColor: .separator).opacity(0.75)
+    static let textFieldBackground = Color(uiColor: .tertiarySystemBackground)
+    static let frostedFill = Color(uiColor: .tertiarySystemFill)
+    static let place = Color(red: 0.18, green: 0.68, blue: 0.47)
+    static let move = Color(red: 0.16, green: 0.52, blue: 0.93)
+    static let start = Color(red: 0.95, green: 0.64, blue: 0.18)
+}
 
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
-    @Environment(\.colorScheme) private var colorScheme
-    @Query(sort: \DayTimeline.dayStart, order: .reverse) private var dayTimelines: [DayTimeline]
+
+    @Query(sort: \DayTimeline.dayStart, order: .forward)
+    private var dayTimelines: [DayTimeline]
 
     @State private var selectedDayKey = ""
+    @State private var selectedPageIndex = 0
+    @State private var isShowingSettings = false
+
+    private var selectedDay: DayTimeline? {
+        guard dayTimelines.indices.contains(selectedPageIndex) else { return nil }
+        return dayTimelines[selectedPageIndex]
+    }
+
+    private var canGoOlder: Bool {
+        dayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex > 0
+    }
+
+    private var canGoNewer: Bool {
+        dayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex < dayTimelines.count - 1
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.81, green: 0.90, blue: 1.0),
-                        Color(red: 0.84, green: 0.96, blue: 0.88),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                background
 
-                Circle()
-                    .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.28))
-                    .frame(width: 260, height: 260)
-                    .blur(radius: 18)
-                    .offset(x: -130, y: -240)
-                    .allowsHitTesting(false)
-
-                Circle()
-                    .fill(Color.blue.opacity(colorScheme == .dark ? 0.08 : 0.16))
-                    .frame(width: 230, height: 230)
-                    .blur(radius: 30)
-                    .offset(x: 170, y: 280)
-                    .allowsHitTesting(false)
-
-                VStack(spacing: 14) {
-                    trackingStatusCard
+                VStack(spacing: 12) {
+                    if let trackingIssueMessage {
+                        trackingIssueBanner(message: trackingIssueMessage)
+                    }
 
                     if dayTimelines.isEmpty {
                         emptyState
                     } else {
-                        daySelector
+                        dayHeader
 
-                        TabView(selection: $selectedDayKey) {
-                            ForEach(dayTimelines) { day in
+                        TabView(selection: $selectedPageIndex) {
+                            ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
                                 DayTimelinePage(dayTimeline: day)
-                                    .tag(day.dayKey)
-                                    .padding(.top, 4)
+                                    .tag(index)
                             }
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .automatic))
+                        .tabViewStyle(.page(indexDisplayMode: .never))
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
             }
             .navigationTitle("Moves")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isShowingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("Settings")
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await captureManager.refreshHistoricalBackfill() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .help("Refresh timeline with a one-shot location sample")
+                    .help("Refresh timeline")
                 }
             }
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            MovesSettingsView(
+                dayTimelines: dayTimelines,
+                selectedDayKey: selectedDayKey
+            )
         }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
@@ -80,171 +105,603 @@ struct ContentView: View {
         .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
             syncSelectedDayIfNeeded()
         }
+        .onChange(of: selectedPageIndex) { _, newIndex in
+            guard dayTimelines.indices.contains(newIndex) else { return }
+            selectedDayKey = dayTimelines[newIndex].dayKey
+        }
     }
 
-    private var trackingStatusCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(captureManager.trackingStatusText, systemImage: statusSymbolName)
-                .font(.headline)
+    private var background: some View {
+        LinearGradient(
+            colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
 
-            if let lastCaptureAt = captureManager.lastCaptureAt {
-                Text("Last sample: \(lastCaptureAt, format: .dateTime.hour().minute())")
-                    .font(.subheadline)
-                    .foregroundStyle(secondaryTextColor)
+    private func trackingIssueBanner(message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Location Tracking Issue")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                Text(message)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
             }
 
-            if let lastErrorMessage = captureManager.lastErrorMessage {
-                Text(lastErrorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
+            Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .movesGlassCardStyle()
+        .panelSurface()
+    }
+
+    private var dayHeader: some View {
+        HStack(spacing: 10) {
+            Button {
+                selectOlderDay()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .frostedCircle(enabled: canGoOlder)
+            .disabled(!canGoOlder)
+
+            VStack(spacing: 2) {
+                if let selectedDay {
+                    Text(selectedDay.dayStart, format: .dateTime.weekday(.wide).day().month(.wide))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.primary.opacity(0.92))
+
+                    Text("\(selectedDay.places.count) places   \(selectedDay.moves.count) moves")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Button {
+                selectNewerDay()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .frostedCircle(enabled: canGoNewer)
+            .disabled(!canGoNewer)
+        }
+        .padding(.horizontal, 4)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             Image(systemName: "location.slash.circle")
-                .font(.system(size: 44, weight: .regular))
-                .foregroundStyle(secondaryTextColor)
+                .font(.system(size: 36, weight: .medium))
+                .foregroundStyle(.secondary)
 
             Text("No timeline yet")
-                .font(.title3.weight(.semibold))
+                .font(.system(size: 18, weight: .bold, design: .rounded))
 
-            Text("Keep Moves running in the background. Visits and movement segments appear automatically as iOS records them.")
+            Text("Keep Moves running in the background. Visits and movement segments appear as iOS records them.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(secondaryTextColor)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-        .movesGlassCardStyle()
+        .padding(.vertical, 34)
+        .panelSurface()
     }
 
-    private var daySelector: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(dayTimelines) { day in
-                    let isSelected = selectedDayKey == day.dayKey
-
-                    Button {
-                        withAnimation(.snappy) {
-                            selectedDayKey = day.dayKey
-                        }
-                    } label: {
-                        Text(day.dayStart, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(primaryTextColor)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background {
-                                Capsule(style: .continuous)
-                                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-                                    .glassEffect()
-                            }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 4)
-        }
-    }
-
-    private var statusSymbolName: String {
+    private var trackingIssueMessage: String? {
         switch captureManager.authorizationStatus {
-        case .authorizedAlways:
-            return "location.fill"
-        case .authorizedWhenInUse:
-            return "location"
-        case .notDetermined:
-            return "location.circle"
-        case .restricted, .denied:
-            return "exclamationmark.triangle.fill"
+        case .denied:
+            return "Location tracking is disabled. Enable location access in Settings to record moves."
+        case .restricted:
+            return "Location tracking is restricted on this device."
+        case .authorizedAlways, .authorizedWhenInUse, .notDetermined:
+            return nil
+            
         @unknown default:
-            return "questionmark.circle"
+            return "Location tracking is unavailable right now."
         }
-    }
-
-    private var primaryTextColor: Color {
-        colorScheme == .dark ? .white : .black.opacity(0.88)
-    }
-
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? .white.opacity(0.75) : .black.opacity(0.65)
     }
 
     private func syncSelectedDayIfNeeded() {
-        guard let firstKey = dayTimelines.first?.dayKey else {
+        guard !dayTimelines.isEmpty else {
+            selectedPageIndex = 0
             selectedDayKey = ""
             return
         }
 
-        if !dayTimelines.contains(where: { $0.dayKey == selectedDayKey }) {
-            selectedDayKey = firstKey
+        if selectedDayKey.isEmpty {
+            selectedPageIndex = dayTimelines.count - 1
+            selectedDayKey = dayTimelines[selectedPageIndex].dayKey
+            return
         }
+
+        if let selectedIndex = dayTimelines.firstIndex(where: { $0.dayKey == selectedDayKey }) {
+            selectedPageIndex = selectedIndex
+            return
+        }
+
+        if dayTimelines.indices.contains(selectedPageIndex) {
+            selectedDayKey = dayTimelines[selectedPageIndex].dayKey
+            return
+        }
+
+        selectedPageIndex = dayTimelines.count - 1
+        selectedDayKey = dayTimelines[selectedPageIndex].dayKey
+    }
+
+    private func selectOlderDay() {
+        let nextIndex = selectedPageIndex - 1
+        guard dayTimelines.indices.contains(nextIndex) else { return }
+        selectedPageIndex = nextIndex
+    }
+
+    private func selectNewerDay() {
+        let nextIndex = selectedPageIndex + 1
+        guard dayTimelines.indices.contains(nextIndex) else { return }
+        selectedPageIndex = nextIndex
     }
 }
 
 private struct DayTimelinePage: View {
     let dayTimeline: DayTimeline
+    private static let transientStopMaximumDuration: TimeInterval = 5 * 60
 
     private var timelineEntries: [TimelineEntry] {
-        let places = dayTimeline.places.map(TimelineEntry.place)
+        let places = dayTimeline.places
+            .filter { !shouldHidePlaceFromTimeline($0) }
+            .map(TimelineEntry.place)
         let moves = dayTimeline.moves.map(TimelineEntry.move)
-        return (places + moves).sorted { $0.startDate < $1.startDate }
+        var entries = (places + moves).sorted { $0.startDate < $1.startDate }
+
+        if let firstMove = dayTimeline.moves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
+           let startPlace = firstMove.startPlace {
+            let hasDayStartPlaceAlready = dayTimeline.places.contains(where: { $0.id == startPlace.id })
+
+            if !hasDayStartPlaceAlready {
+                let startEntry = TimelineEntry.start(
+                    place: startPlace,
+                    timestamp: firstMove.timelineStartDate.addingTimeInterval(-1)
+                )
+
+                if let firstMoveIndex = entries.firstIndex(where: { entry in
+                    if case .move(let move) = entry {
+                        return move.id == firstMove.id
+                    }
+                    return false
+                }) {
+                    entries.insert(startEntry, at: firstMoveIndex)
+                } else {
+                    entries.insert(startEntry, at: 0)
+                }
+            }
+        }
+
+        return entries
+    }
+
+    private func shouldHidePlaceFromTimeline(_ place: VisitPlace) -> Bool {
+        if hasExplicitUserLabel(place) {
+            return false
+        }
+
+        let hasIncomingMove = dayTimeline.moves.contains { $0.endPlace?.id == place.id }
+        let hasOutgoingMove = dayTimeline.moves.contains { $0.startPlace?.id == place.id }
+
+        if place.departureDate == nil {
+            return hasOutgoingMove
+        }
+
+        guard let departureDate = place.departureDate else {
+            return false
+        }
+
+        let duration = departureDate.timeIntervalSince(place.arrivalDate)
+        let isShortTransitStop = duration < Self.transientStopMaximumDuration
+        return isShortTransitStop && hasIncomingMove && hasOutgoingMove
+    }
+
+    private func hasExplicitUserLabel(_ place: VisitPlace) -> Bool {
+        !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    private var transportSummaryMetrics: [DayTransportSummaryMetric] {
+        var durationByBucket: [DayTransportBucket: TimeInterval] = [:]
+        var distanceByBucket: [DayTransportBucket: CLLocationDistance] = [:]
+
+        for move in dayTimeline.moves {
+            guard let bucket = DayTransportBucket(move.transportMode) else { continue }
+
+            durationByBucket[bucket, default: 0] += move.timelineDuration
+            distanceByBucket[bucket, default: 0] += max(move.distanceMeters, 0)
+        }
+
+        return DayTransportBucket.allCases.map { bucket in
+            DayTransportSummaryMetric(
+                id: bucket.rawValue,
+                title: bucket.title,
+                symbolName: bucket.symbolName,
+                tint: bucket.tint,
+                duration: durationByBucket[bucket, default: 0],
+                distanceMeters: distanceByBucket[bucket, default: 0]
+            )
+        }
+    }
+
+    private var hasTransportSummaryData: Bool {
+        transportSummaryMetrics.contains {
+            $0.duration > 0 || $0.distanceMeters > 0
+        }
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
-                summaryCard
+            VStack(spacing: 10) {
+                DayMapStrip(dayTimeline: dayTimeline)
 
                 if timelineEntries.isEmpty {
                     Text("No segments for this day yet.")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.primary.opacity(0.75))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .movesGlassCardStyle()
+                        .panelSurface()
                 } else {
-                    ForEach(timelineEntries) { entry in
-                        switch entry {
-                        case .place(let place):
-                            NavigationLink {
-                                PlaceMapDetailView(place: place)
-                            } label: {
-                                PlaceCard(place: place)
-                            }
-                            .buttonStyle(.plain)
-
-                        case .move(let segment):
-                            NavigationLink {
-                                MoveMapDetailView(segment: segment)
-                            } label: {
-                                MoveCard(segment: segment)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                    timelineList
+                        .panelSurface()
                 }
+
+                DayTransportSummaryView(
+                    metrics: transportSummaryMetrics,
+                    hasData: hasTransportSummaryData
+                )
+                .panelSurface()
             }
             .padding(.bottom, 24)
         }
+       
+       
     }
 
-    private var summaryCard: some View {
-        HStack {
-            Label("\(dayTimeline.places.count) places", systemImage: "mappin.and.ellipse")
-            Spacer()
-            Label("\(dayTimeline.moves.count) moves", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+    private var timelineList: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { index, entry in
+                timelineRow(
+                    for: entry,
+                    isFirst: index == 0,
+                    isLast: index == timelineEntries.count - 1
+                )
+
+                if index < timelineEntries.count - 1 {
+                    Divider()
+                        .padding(.leading, 82)
+                }
+            }
         }
-        .font(.subheadline.weight(.medium))
-        .movesGlassCardStyle()
+    }
+
+    @ViewBuilder
+    private func timelineRow(for entry: TimelineEntry, isFirst: Bool, isLast: Bool) -> some View {
+        switch entry {
+        case .place(let place):
+            NavigationLink {
+                PlaceMapDetailView(place: place)
+            } label: {
+                StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+            }
+            .buttonStyle(.plain)
+
+        case .move(let segment):
+            NavigationLink {
+                MoveMapDetailView(segment: segment)
+            } label: {
+                StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+            }
+            .buttonStyle(.plain)
+
+        case .start:
+            StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+        }
+    }
+}
+
+private struct DayTransportSummaryMetric: Identifiable {
+    let id: String
+    let title: String
+    let symbolName: String
+    let tint: Color
+    let duration: TimeInterval
+    let distanceMeters: CLLocationDistance
+}
+
+private enum DayTransportBucket: String, CaseIterable {
+    case automotive
+    case cycling
+    case walking
+
+    init?(_ mode: TransportMode) {
+        switch mode {
+        case .automotive:
+            self = .automotive
+        case .cycling:
+            self = .cycling
+        case .walking, .running:
+            self = .walking
+        case .stationary, .unknown:
+            return nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .automotive:
+            return "Car"
+        case .cycling:
+            return "Bike"
+        case .walking:
+            return "Walking"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .automotive:
+            return "car.fill"
+        case .cycling:
+            return "figure.outdoor.cycle"
+        case .walking:
+            return "figure.walk"
+        }
+    }
+
+    var transportMode: TransportMode {
+        switch self {
+        case .automotive:
+            return .automotive
+        case .cycling:
+            return .cycling
+        case .walking:
+            return .walking
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .automotive:
+            return Color(red: 0.18, green: 0.47, blue: 0.92)
+        case .cycling:
+            return Color(red: 0.10, green: 0.63, blue: 0.54)
+        case .walking:
+            return Color(red: 0.95, green: 0.64, blue: 0.18)
+        }
+    }
+}
+
+private struct DayTransportSummaryView: View {
+    let metrics: [DayTransportSummaryMetric]
+    let hasData: Bool
+
+    private var totalDuration: TimeInterval {
+        metrics.reduce(0) { $0 + $1.duration }
+    }
+
+    private var totalDistance: CLLocationDistance {
+        metrics.reduce(0) { $0 + $1.distanceMeters }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Day Summary")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+
+            if !hasData {
+                Text("No movement summary available yet.")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(metrics) { metric in
+                    summaryRow(metric)
+                }
+
+                Divider()
+
+                HStack(spacing: 10) {
+                    Text("Total")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text(DurationFormatter.text(for: totalDuration))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.primary.opacity(0.85))
+
+                    Text(
+                        Measurement(value: max(totalDistance, 0), unit: UnitLength.meters)
+                            .formatted(.measurement(width: .abbreviated, usage: .road))
+                    )
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func summaryRow(_ metric: DayTransportSummaryMetric) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: metric.symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(metric.tint)
+                .frame(width: 18)
+
+            Text(metric.title)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(DurationFormatter.text(for: metric.duration))
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.primary.opacity(0.82))
+
+            Text(
+                Measurement(value: max(metric.distanceMeters, 0), unit: UnitLength.meters)
+                    .formatted(.measurement(width: .abbreviated, usage: .road))
+            )
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(Color.primary.opacity(0.82))
+        }
+        .opacity(metric.duration > 0 || metric.distanceMeters > 0 ? 1 : 0.45)
+    }
+}
+
+private struct DayMapStrip: View {
+    let dayTimeline: DayTimeline
+
+    @State private var camera: MapCameraPosition
+    @State private var routeCoordinates: [CLLocationCoordinate2D]
+
+    private var routeRefreshKey: String {
+        dayTimeline.moves
+            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+            .map { move in
+                let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
+                let end = Int(move.endDate.timeIntervalSince1970.rounded())
+                return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(move.samples.count)"
+            }
+            .joined(separator: ",")
+    }
+
+    private var placeMarkers: [PlaceMarker] {
+        dayTimeline.places
+            .sorted(by: { $0.arrivalDate < $1.arrivalDate })
+            .map { PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate) }
+    }
+
+    init(dayTimeline: DayTimeline) {
+        self.dayTimeline = dayTimeline
+
+        let moveCoordinates = dayTimeline.moves
+            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+            .flatMap { MoveRouteGeometry.rawCoordinates(for: $0) }
+        let dedupedMoveCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+            moveCoordinates,
+            minimumDistanceMeters: 6
+        )
+        let placeCoordinates = dayTimeline.places.map(\.coordinate)
+        let allCoordinates = dedupedMoveCoordinates + placeCoordinates
+        _camera = State(initialValue: .region(MapRegionFactory.region(for: allCoordinates)))
+        _routeCoordinates = State(initialValue: dedupedMoveCoordinates)
+    }
+
+    var body: some View {
+        Map(position: $camera, interactionModes: [.pan, .zoom]) {
+            if routeCoordinates.count > 1 {
+                MapPolyline(coordinates: routeCoordinates)
+                    .stroke(MovesPalette.move.opacity(0.9), lineWidth: 4)
+            }
+
+            ForEach(placeMarkers) { marker in
+                Marker(marker.title, coordinate: marker.coordinate)
+                    .tint(MovesPalette.place)
+            }
+        }
+        .mapStyle(.standard(elevation: .flat, emphasis: .muted))
+        .frame(height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
+        }
+        .task(id: routeRefreshKey) {
+            await refreshRouteCoordinates()
+        }
+    }
+
+    @MainActor
+    private func refreshRouteCoordinates() async {
+        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+        var merged: [CLLocationCoordinate2D] = []
+
+        for move in sortedMoves {
+            let matched = await RoadRouteMatcher.matchedCoordinates(for: move)
+            RouteCoordinateOps.append(matched, to: &merged)
+        }
+
+        routeCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+            merged,
+            minimumDistanceMeters: 6
+        )
+    }
+}
+
+private struct StorylineRow: View {
+    let entry: TimelineEntry
+    let isFirst: Bool
+    let isLast: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Text(entry.clockText)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .frame(width: 56, alignment: .leading)
+                .padding(.top, 10)
+
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(isFirst ? Color.clear : MovesPalette.rail)
+                    .frame(width: 2, height: 12)
+
+                ZStack {
+                    Circle()
+                        .fill(entry.iconTint.opacity(0.18))
+                        .frame(width: 24, height: 24)
+                    Image(systemName: entry.iconName)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(entry.iconTint)
+                }
+
+                Rectangle()
+                    .fill(isLast ? Color.clear : MovesPalette.rail)
+                    .frame(width: 2, height: 28)
+            }
+            .frame(width: 26)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.titleText)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.primary.opacity(0.92))
+
+                Text(entry.subtitleText)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.primary.opacity(0.72))
+
+                if let tertiary = entry.tertiaryText {
+                    Text(tertiary)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
 private enum TimelineEntry: Identifiable {
     case place(VisitPlace)
     case move(MoveSegment)
+    case start(place: VisitPlace, timestamp: Date)
 
     var id: String {
         switch self {
@@ -252,6 +709,8 @@ private enum TimelineEntry: Identifiable {
             return "place-\(place.id.uuidString)"
         case .move(let segment):
             return "move-\(segment.id.uuidString)"
+        case .start(let place, let timestamp):
+            return "start-\(place.id.uuidString)-\(timestamp.timeIntervalSince1970)"
         }
     }
 
@@ -260,93 +719,104 @@ private enum TimelineEntry: Identifiable {
         case .place(let place):
             return place.arrivalDate
         case .move(let segment):
-            return segment.startDate
+            return segment.timelineStartDate
+        case .start(_, let timestamp):
+            return timestamp
         }
     }
-}
 
-private struct PlaceCard: View {
-    let place: VisitPlace
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(place.displayTitle, systemImage: "mappin.circle.fill")
-                .font(.headline)
-
-            HStack {
-                Text("Arrive")
-                Spacer()
-                Text(place.arrivalDate, format: .dateTime.hour().minute())
-            }
-            .font(.subheadline)
-
-            HStack {
-                Text("Stay")
-                Spacer()
-                Text(stayText)
-            }
-            .font(.subheadline)
-            .foregroundStyle(Color.primary.opacity(0.75))
+    var clockText: String {
+        switch self {
+        case .place(let place):
+            return Self.timeString(from: place.arrivalDate)
+        case .move(let segment):
+            return Self.timeString(from: segment.timelineStartDate)
+        case .start(_, let timestamp):
+            return Self.timeString(from: timestamp)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .movesGlassCardStyle()
     }
 
-    private var stayText: String {
-        guard let departure = place.departureDate else { return "In progress" }
-        return DurationFormatter.text(for: departure.timeIntervalSince(place.arrivalDate))
+    var iconName: String {
+        switch self {
+        case .place:
+            return "mappin.circle.fill"
+        case .move(let segment):
+            return segment.transportMode.symbolName
+        case .start:
+            return "sunrise.fill"
+        }
     }
-}
 
-private struct MoveCard: View {
-    let segment: MoveSegment
+    var iconTint: Color {
+        switch self {
+        case .place:
+            return MovesPalette.place
+        case .move:
+            return MovesPalette.move
+        case .start:
+            return MovesPalette.start
+        }
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(segment.transportMode.title, systemImage: segment.transportMode.symbolName)
-                .font(.headline)
+    var titleText: String {
+        switch self {
+        case .start(let place, _):
+            return "Start at \(place.displayTitle)"
+        case .place(let place):
+            return place.displayTitle
+        case .move(let segment):
+            let start = segment.startPlace?.displayTitle ?? "Unknown start"
+            let end = segment.endPlace?.displayTitle ?? "Unknown destination"
+            return "\(start) to \(end)"
+        }
+    }
 
-            HStack {
-                Text("Duration")
-                Spacer()
-                Text(DurationFormatter.text(for: segment.endDate.timeIntervalSince(segment.startDate)))
+    var subtitleText: String {
+        switch self {
+        case .start:
+            return "Carried over from previous day"
+
+        case .place(let place):
+            guard let departure = place.departureDate else {
+                return "In progress"
             }
-            .font(.subheadline)
+            return "Stayed \(DurationFormatter.text(for: departure.timeIntervalSince(place.arrivalDate)))"
 
-            HStack {
-                Text("Distance")
-                Spacer()
-                Text(distanceText)
-            }
-            .font(.subheadline)
+        case .move(let segment):
+            let duration = DurationFormatter.text(for: segment.timelineDuration)
+            let distance = Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters)
+                .formatted(.measurement(width: .abbreviated, usage: .road))
+            return "\(segment.transportMode.title)   \(duration)   \(distance)"
+        }
+    }
 
+    var tertiaryText: String? {
+        switch self {
+        case .move(let segment):
             if let stepCount = segment.stepCount {
-                HStack {
-                    Text("Steps")
-                    Spacer()
-                    Text("\(stepCount)")
-                }
-                .font(.subheadline)
-                .foregroundStyle(Color.primary.opacity(0.75))
+                return "\(stepCount) steps"
             }
+            return nil
+        default:
+            return nil
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .movesGlassCardStyle()
     }
 
-    private var distanceText: String {
-        Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters)
-            .formatted(.measurement(width: .abbreviated, usage: .road))
+    private static func timeString(from date: Date) -> String {
+        date.formatted(.dateTime.hour().minute())
     }
 }
 
 private struct PlaceMapDetailView: View {
-    let place: VisitPlace
+    @Environment(\.modelContext) private var modelContext
+    @Bindable var place: VisitPlace
 
     @State private var camera: MapCameraPosition
+    @State private var draftLabel: String
 
     init(place: VisitPlace) {
         self.place = place
+        _draftLabel = State(initialValue: place.userLabel ?? place.autoLabel ?? "")
         _camera = State(initialValue: .region(
             MKCoordinateRegion(
                 center: place.coordinate,
@@ -358,70 +828,125 @@ private struct PlaceMapDetailView: View {
     var body: some View {
         Map(position: $camera) {
             Marker(place.displayTitle, coordinate: place.coordinate)
+                .tint(MovesPalette.place)
         }
+        .mapStyle(.standard(elevation: .flat, emphasis: .muted))
         .navigationTitle("Place")
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(place.displayTitle)
-                    .font(.headline)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                 Text("Arrived \(place.arrivalDate, format: .dateTime.hour().minute())")
-                    .font(.subheadline)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.primary.opacity(0.75))
+
+                if let autoLabel = place.autoLabel,
+                   (place.userLabel?.isEmpty ?? true) {
+                    Text("Auto-detected: \(autoLabel)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Label (Home, Work...)", text: $draftLabel)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(MovesPalette.textFieldBackground.opacity(0.92))
+                        )
+                        .onSubmit(saveLabel)
+
+                    Button("Save") {
+                        saveLabel()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                HStack(spacing: 8) {
+                    QuickLabelButton(label: "Home") {
+                        draftLabel = "Home"
+                        saveLabel()
+                    }
+                    QuickLabelButton(label: "Work") {
+                        draftLabel = "Work"
+                        saveLabel()
+                    }
+                    QuickLabelButton(label: "Gym") {
+                        draftLabel = "Gym"
+                        saveLabel()
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .movesGlassCardStyle()
+            .panelSurface()
             .padding(12)
+        }
+    }
+
+    private func saveLabel() {
+        let trimmed = draftLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            place.userLabel = nil
+        } else {
+            place.userLabel = trimmed
+            place.autoLabel = nil
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save place label: \(error.localizedDescription)")
         }
     }
 }
 
+private struct QuickLabelButton: View {
+    let label: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(label, action: action)
+            .buttonStyle(.bordered)
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+    }
+}
+
 private struct MoveMapDetailView: View {
-    let segment: MoveSegment
+    @Environment(\.modelContext) private var modelContext
+    @Bindable var segment: MoveSegment
 
     @State private var camera: MapCameraPosition
+    @State private var routeCoordinates: [CLLocationCoordinate2D]
 
-    private var routeCoordinates: [CLLocationCoordinate2D] {
-        let sampleCoordinates = segment.samples
-            .sorted(by: { $0.timestamp < $1.timestamp })
-            .map(\.coordinate)
-
-        var coordinates: [CLLocationCoordinate2D] = []
-        if let start = segment.startPlace?.coordinate {
-            coordinates.append(start)
-        }
-        coordinates.append(contentsOf: sampleCoordinates)
-        if let end = segment.endPlace?.coordinate {
-            coordinates.append(end)
-        }
-        return coordinates
+    private var routeRefreshKey: String {
+        let start = Int(segment.timelineStartDate.timeIntervalSince1970.rounded())
+        let end = Int(segment.endDate.timeIntervalSince1970.rounded())
+        return "\(segment.id.uuidString)|\(segment.transportMode.rawValue)|\(start)|\(end)|\(segment.samples.count)"
     }
 
     init(segment: MoveSegment) {
         self.segment = segment
-
-        let coordinates = segment.samples
-            .sorted(by: { $0.timestamp < $1.timestamp })
-            .map(\.coordinate)
-
-        var all = coordinates
-        if let start = segment.startPlace?.coordinate { all.insert(start, at: 0) }
-        if let end = segment.endPlace?.coordinate { all.append(end) }
+        let all = MoveRouteGeometry.rawCoordinates(for: segment)
 
         _camera = State(initialValue: .region(MapRegionFactory.region(for: all)))
+        _routeCoordinates = State(initialValue: all)
     }
 
     var body: some View {
         Map(position: $camera) {
             if let start = segment.startPlace?.coordinate {
                 Marker("Start", coordinate: start)
-                    .tint(.green)
+                    .tint(MovesPalette.place)
             }
 
             if routeCoordinates.count > 1 {
                 MapPolyline(coordinates: routeCoordinates)
-                    .stroke(.blue, lineWidth: 5)
+                    .stroke(MovesPalette.move, lineWidth: 5)
             }
 
             if let end = segment.endPlace?.coordinate {
@@ -429,22 +954,75 @@ private struct MoveMapDetailView: View {
                     .tint(.red)
             }
         }
+        .mapStyle(.standard(elevation: .flat, emphasis: .muted))
         .navigationTitle("Move")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Transport mode", selection: transportBucketSelection) {
+                    Image(systemName: DayTransportBucket.walking.symbolName)
+                        .tag(DayTransportBucket.walking)
+                    Image(systemName: DayTransportBucket.cycling.symbolName)
+                        .tag(DayTransportBucket.cycling)
+                    Image(systemName: DayTransportBucket.automotive.symbolName)
+                        .tag(DayTransportBucket.automotive)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 156)
+            }
+        }
+        .task(id: routeRefreshKey) {
+            routeCoordinates = await RoadRouteMatcher.matchedCoordinates(for: segment)
+        }
         .overlay(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
+                Text(moveRouteTitle)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                 Text(segment.transportMode.title)
-                    .font(.headline)
-                Text("\(DurationFormatter.text(for: segment.endDate.timeIntervalSince(segment.startDate))) • \(Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
-                    .font(.subheadline)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                Text("\(DurationFormatter.text(for: segment.timelineDuration))   \(Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.primary.opacity(0.75))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .movesGlassCardStyle()
+            .panelSurface()
             .padding(12)
         }
     }
+
+    private var moveRouteTitle: String {
+        let start = segment.startPlace?.displayTitle ?? "Unknown start"
+        let end = segment.endPlace?.displayTitle ?? "Unknown destination"
+        return "\(start) to \(end)"
+    }
+
+    private var transportBucketSelection: Binding<DayTransportBucket> {
+        Binding(
+            get: { DayTransportBucket(segment.transportMode) ?? .walking },
+            set: { newBucket in
+                let newMode = newBucket.transportMode
+                guard segment.transportMode != newMode else { return }
+
+                let previousMode = segment.transportMode
+                segment.transportMode = newMode
+
+                do {
+                    try modelContext.save()
+                } catch {
+                    segment.transportMode = previousMode
+                    print("Failed to save move transport mode: \(error.localizedDescription)")
+                }
+            }
+        )
+    }
+}
+
+private struct PlaceMarker: Identifiable {
+    let id: UUID
+    let title: String
+    let coordinate: CLLocationCoordinate2D
 }
 
 private enum DurationFormatter {
@@ -497,32 +1075,854 @@ private enum MapRegionFactory {
     }
 }
 
-private struct MovesGlassCardModifier: ViewModifier {
+private enum MoveRouteGeometry {
+    static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
+        let sampleCoordinates = move.samples
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .map(\.coordinate)
+
+        var coordinates: [CLLocationCoordinate2D] = []
+        if let start = move.startPlace?.coordinate {
+            coordinates.append(start)
+        }
+        coordinates.append(contentsOf: sampleCoordinates)
+        if let end = move.endPlace?.coordinate {
+            coordinates.append(end)
+        }
+
+        return RouteCoordinateOps.dedupeSequentialCoordinates(
+            coordinates,
+            minimumDistanceMeters: 6
+        )
+    }
+
+    static func cacheKey(for move: MoveSegment, fallback: [CLLocationCoordinate2D]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(move.id)
+        hasher.combine(move.transportMode.rawValue)
+        hasher.combine(Int(move.timelineStartDate.timeIntervalSince1970.rounded()))
+        hasher.combine(Int(move.endDate.timeIntervalSince1970.rounded()))
+        hasher.combine(fallback.count)
+
+        for coordinate in fallback {
+            hasher.combine(Int((coordinate.latitude * 10_000).rounded()))
+            hasher.combine(Int((coordinate.longitude * 10_000).rounded()))
+        }
+
+        return hasher.finalize()
+    }
+}
+
+private enum RouteCoordinateOps {
+    static func dedupeSequentialCoordinates(
+        _ coordinates: [CLLocationCoordinate2D],
+        minimumDistanceMeters: CLLocationDistance
+    ) -> [CLLocationCoordinate2D] {
+        guard let first = coordinates.first else { return [] }
+
+        var deduped: [CLLocationCoordinate2D] = [first]
+        deduped.reserveCapacity(coordinates.count)
+
+        for coordinate in coordinates.dropFirst() {
+            if distanceMeters(from: deduped[deduped.count - 1], to: coordinate) < minimumDistanceMeters {
+                continue
+            }
+            deduped.append(coordinate)
+        }
+
+        if deduped.count == 1,
+           let last = coordinates.last,
+           distanceMeters(from: first, to: last) > 0 {
+            deduped.append(last)
+        }
+
+        return deduped
+    }
+
+    static func sampleAnchors(
+        from coordinates: [CLLocationCoordinate2D],
+        maximumCount: Int
+    ) -> [CLLocationCoordinate2D] {
+        guard coordinates.count > maximumCount, maximumCount > 1 else {
+            return coordinates
+        }
+
+        let step = Double(coordinates.count - 1) / Double(maximumCount - 1)
+        var anchors: [CLLocationCoordinate2D] = []
+        anchors.reserveCapacity(maximumCount)
+
+        for index in 0..<maximumCount {
+            let rawIndex = Int((Double(index) * step).rounded(.toNearestOrAwayFromZero))
+            anchors.append(coordinates[min(rawIndex, coordinates.count - 1)])
+        }
+
+        return dedupeSequentialCoordinates(anchors, minimumDistanceMeters: 25)
+    }
+
+    static func append(_ coordinates: [CLLocationCoordinate2D], to route: inout [CLLocationCoordinate2D]) {
+        guard !coordinates.isEmpty else { return }
+
+        if route.isEmpty {
+            route.append(contentsOf: coordinates)
+            return
+        }
+
+        let first = coordinates[coordinates.startIndex]
+        if let last = route.last, distanceMeters(from: last, to: first) < 4 {
+            route.append(contentsOf: coordinates.dropFirst())
+            return
+        }
+
+        route.append(contentsOf: coordinates)
+    }
+
+    static func distanceMeters(
+        from lhs: CLLocationCoordinate2D,
+        to rhs: CLLocationCoordinate2D
+    ) -> CLLocationDistance {
+        CLLocation(latitude: lhs.latitude, longitude: lhs.longitude)
+            .distance(from: CLLocation(latitude: rhs.latitude, longitude: rhs.longitude))
+    }
+}
+
+@MainActor
+private enum RoadRouteMatcher {
+    private static var cache: [Int: [CLLocationCoordinate2D]] = [:]
+
+    static func matchedCoordinates(for move: MoveSegment) async -> [CLLocationCoordinate2D] {
+        let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+        let cacheKey = MoveRouteGeometry.cacheKey(for: move, fallback: fallback)
+
+        if let cached = cache[cacheKey] {
+            return cached
+        }
+
+        guard fallback.count > 1, let transportType = mapTransportType(for: move.transportMode) else {
+            cache[cacheKey] = fallback
+            return fallback
+        }
+
+        let anchors = RouteCoordinateOps.sampleAnchors(
+            from: fallback,
+            maximumCount: anchorLimit(for: move.transportMode)
+        )
+        guard anchors.count > 1 else {
+            cache[cacheKey] = fallback
+            return fallback
+        }
+
+        var matchedCoordinates: [CLLocationCoordinate2D] = []
+        var matchedSegmentCount = 0
+
+        for pair in zip(anchors, anchors.dropFirst()) {
+            let start = pair.0
+            let end = pair.1
+            let segmentDistance = RouteCoordinateOps.distanceMeters(from: start, to: end)
+
+            if segmentDistance < minimumMatchDistance(for: move.transportMode) {
+                RouteCoordinateOps.append([start, end], to: &matchedCoordinates)
+                continue
+            }
+
+            if let snappedSegment = await routeSegment(
+                from: start,
+                to: end,
+                transportType: transportType
+            ) {
+                matchedSegmentCount += 1
+                RouteCoordinateOps.append(snappedSegment, to: &matchedCoordinates)
+            } else {
+                RouteCoordinateOps.append([start, end], to: &matchedCoordinates)
+            }
+        }
+
+        let finalized = matchedSegmentCount > 0
+            ? RouteCoordinateOps.dedupeSequentialCoordinates(
+                matchedCoordinates,
+                minimumDistanceMeters: 6
+            )
+            : fallback
+
+        cache[cacheKey] = finalized
+        return finalized
+    }
+
+    private static func routeSegment(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        transportType: MKDirectionsTransportType
+    ) async -> [CLLocationCoordinate2D]? {
+        let request = MKDirections.Request()
+        request.source = mapItem(for: start)
+        request.destination = mapItem(for: end)
+        request.transportType = transportType
+        request.requestsAlternateRoutes = false
+
+        do {
+            let response = try await MKDirections(request: request).calculate()
+            guard let route = response.routes.first else { return nil }
+            let coordinates = route.polyline.allCoordinates
+            return coordinates.count > 1 ? coordinates : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private static func mapItem(for coordinate: CLLocationCoordinate2D) -> MKMapItem {
+        if #unavailable(iOS 26.0) {
+            return MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
+        }
+
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return MKMapItem(location: location, address: nil)
+    }
+
+    private static func mapTransportType(for mode: TransportMode) -> MKDirectionsTransportType? {
+        switch mode {
+        case .automotive:
+            return .automobile
+        case .walking, .running:
+            return .walking
+        case .cycling:
+            return .cycling
+        case .stationary, .unknown:
+            return nil
+        }
+    }
+
+    private static func minimumMatchDistance(for mode: TransportMode) -> CLLocationDistance {
+        switch mode {
+        case .walking, .running:
+            return 25
+        case .cycling:
+            return 35
+        case .automotive:
+            return 60
+        case .stationary, .unknown:
+            return 60
+        }
+    }
+
+    private static func anchorLimit(for mode: TransportMode) -> Int {
+        switch mode {
+        case .walking, .running:
+            return 14
+        case .cycling:
+            return 12
+        case .automotive:
+            return 8
+        case .stationary, .unknown:
+            return 8
+        }
+    }
+}
+
+private extension MKPolyline {
+    var allCoordinates: [CLLocationCoordinate2D] {
+        guard pointCount > 0 else { return [] }
+
+        var coordinates = Array(
+            repeating: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+            count: pointCount
+        )
+        getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
+        return coordinates
+    }
+}
+
+private struct MovesSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let dayTimelines: [DayTimeline]
+    let selectedDayKey: String
+
+    @State private var isExporting = false
+    @State private var exportDocument: TimelineExportDocument?
+    @State private var exportContentType: UTType = .xml
+    @State private var exportFilename = "moves-export"
+    @State private var exportMessage = ""
+    @State private var isShowingExportMessage = false
+    
+    private var selectedDay: DayTimeline? {
+        dayTimelines.first(where: { $0.dayKey == selectedDayKey })
+    }
+
+    private var selectedDayExportLabel: String {
+        if let selectedDay {
+            return localizedExportDateString(selectedDay.dayStart)
+        }
+        return "Selected Day"
+    }
+
+    private func localizedExportDateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEE d MMM y")
+        return formatter.string(from: date)
+    }
+
+    private var dayCount: Int {
+        dayTimelines.count
+    }
+
+    private var placeCount: Int {
+        dayTimelines.reduce(0) { $0 + $1.places.count }
+    }
+
+    private var moveCount: Int {
+        dayTimelines.reduce(0) { $0 + $1.moves.count }
+    }
+
+    var body: some View {
+     
+        NavigationStack {
+            Form {
+                Section("Data Summary") {
+                    LabeledContent("Days", value: "\(dayCount)")
+                    LabeledContent("Places", value: "\(placeCount)")
+                    LabeledContent("Moves", value: "\(moveCount)")
+                }
+
+                Section("GPX Export") {
+                    Button {
+                        export(.gpx, scope: .selectedDay)
+                    } label: {
+                        Label("\(selectedDayExportLabel) (.gpx)", systemImage: "calendar")
+                    }
+                    .disabled(selectedDay == nil)
+
+                    Button {
+                        export(.gpx, scope: .allDays)
+                    } label: {
+                        Label("All Days (.gpx)", systemImage: "calendar.badge.clock")
+                    }
+                    .disabled(dayTimelines.isEmpty)
+                }
+
+                Section("Other Formats") {
+                    Button {
+                        export(.geoJSON, scope: .selectedDay)
+                    } label: {
+                        Label("\(selectedDayExportLabel) (.geojson)", systemImage: "map")
+                    }
+                    .disabled(selectedDay == nil)
+
+                    Button {
+                        export(.geoJSON, scope: .allDays)
+                    } label: {
+                        Label("All Days (.geojson)", systemImage: "map.fill")
+                    }
+                    .disabled(dayTimelines.isEmpty)
+
+                    Button {
+                        export(.csv, scope: .allDays)
+                    } label: {
+                        Label("All Days Places+Moves (.csv)", systemImage: "tablecells")
+                    }
+                    .disabled(dayTimelines.isEmpty)
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        CreatedByView()
+        .fileExporter(
+            isPresented: $isExporting,
+            document: exportDocument,
+            contentType: exportContentType,
+            defaultFilename: exportFilename
+        ) { result in
+            switch result {
+            case .success(let url):
+                exportMessage = "Exported to \(url.lastPathComponent)"
+            case .failure(let error):
+                exportMessage = "Export failed: \(error.localizedDescription)"
+            }
+            isShowingExportMessage = true
+        }
+        .alert("Export", isPresented: $isShowingExportMessage) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportMessage)
+        }
+    }
+
+    private func export(_ format: TimelineExportFormat, scope: TimelineExportScope) {
+        let days: [DayTimeline]
+        let scopeName: String
+
+        switch scope {
+        case .allDays:
+            days = dayTimelines
+            scopeName = "all-days"
+
+        case .selectedDay:
+            guard let selectedDay else {
+                exportMessage = "No day selected for export."
+                isShowingExportMessage = true
+                return
+            }
+            days = [selectedDay]
+            scopeName = selectedDay.dayKey
+        }
+
+        guard !days.isEmpty else {
+            exportMessage = "No timeline data available yet."
+            isShowingExportMessage = true
+            return
+        }
+
+        guard let payload = TimelineExporter.makePayload(
+            days: days,
+            format: format,
+            fileStem: "moves-\(scopeName)"
+        ) else {
+            exportMessage = "Could not build export file."
+            isShowingExportMessage = true
+            return
+        }
+
+        exportDocument = TimelineExportDocument(data: payload.data)
+        exportContentType = payload.contentType
+        exportFilename = payload.filename
+        isExporting = true
+    }
+}
+
+private enum TimelineExportScope {
+    case allDays
+    case selectedDay
+}
+
+private enum TimelineExportFormat {
+    case gpx
+    case geoJSON
+    case csv
+
+    var contentType: UTType {
+        switch self {
+        case .gpx:
+            return .xml
+        case .geoJSON:
+            return .json
+        case .csv:
+            return .commaSeparatedText
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .gpx:
+            return "gpx"
+        case .geoJSON:
+            return "geojson"
+        case .csv:
+            return "csv"
+        }
+    }
+}
+
+private struct TimelineExportPayload {
+    let data: Data
+    let filename: String
+    let contentType: UTType
+}
+
+private struct TimelineTrackPoint {
+    let latitude: Double
+    let longitude: Double
+    let elevation: Double?
+    let timestamp: Date
+}
+
+private struct TimelineExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] = [.xml, .json, .commaSeparatedText]
+
+    let data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        self.data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private enum TimelineExporter {
+    private static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static func makePayload(
+        days: [DayTimeline],
+        format: TimelineExportFormat,
+        fileStem: String
+    ) -> TimelineExportPayload? {
+        let orderedDays = days.sorted(by: { $0.dayStart < $1.dayStart })
+
+        let exportData: Data?
+        switch format {
+        case .gpx:
+            exportData = gpxData(for: orderedDays)
+        case .geoJSON:
+            exportData = geoJSONData(for: orderedDays)
+        case .csv:
+            exportData = csvData(for: orderedDays)
+        }
+
+        guard let exportData else { return nil }
+        return TimelineExportPayload(
+            data: exportData,
+            filename: "\(fileStem).\(format.fileExtension)",
+            contentType: format.contentType
+        )
+    }
+
+    private static func gpxData(for days: [DayTimeline]) -> Data? {
+        var xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" creator="Moves iOS Rebuild" xmlns="http://www.topografix.com/GPX/1/1">
+        """
+
+        for day in days {
+            let sortedPlaces = day.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
+            for place in sortedPlaces {
+                xml += """
+                
+                  <wpt lat="\(coordinateString(place.latitude))" lon="\(coordinateString(place.longitude))">
+                    <name>\(xmlEscaped(place.displayTitle))</name>
+                    <time>\(iso8601.string(from: place.arrivalDate))</time>
+                  </wpt>
+                """
+            }
+
+            let sortedMoves = day.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+            guard !sortedMoves.isEmpty else { continue }
+
+            xml += """
+            
+              <trk>
+                <name>\(xmlEscaped(day.dayKey))</name>
+            """
+
+            for move in sortedMoves {
+                let points = routePoints(for: move)
+                guard points.count > 1 else { continue }
+
+                xml += """
+                
+                    <trkseg>
+                """
+
+                for point in points {
+                    xml += """
+                    
+                      <trkpt lat="\(coordinateString(point.latitude))" lon="\(coordinateString(point.longitude))">
+                    """
+
+                    if let elevation = point.elevation, elevation.isFinite {
+                        xml += """
+                        
+                            <ele>\(elevationString(elevation))</ele>
+                        """
+                    }
+
+                    xml += """
+                    
+                        <time>\(iso8601.string(from: point.timestamp))</time>
+                      </trkpt>
+                    """
+                }
+
+                xml += """
+                
+                    </trkseg>
+                """
+            }
+
+            xml += """
+            
+              </trk>
+            """
+        }
+
+        xml += """
+        
+        </gpx>
+        """
+
+        return xml.data(using: .utf8)
+    }
+
+    private static func geoJSONData(for days: [DayTimeline]) -> Data? {
+        var features: [[String: Any]] = []
+
+        for day in days {
+            for place in day.places.sorted(by: { $0.arrivalDate < $1.arrivalDate }) {
+                var properties: [String: Any] = [
+                    "record_type": "place",
+                    "title": place.displayTitle,
+                    "arrival_time": iso8601.string(from: place.arrivalDate),
+                    "day_key": day.dayKey,
+                ]
+
+                if let departureDate = place.departureDate {
+                    properties["departure_time"] = iso8601.string(from: departureDate)
+                }
+                if let userLabel = place.userLabel, !userLabel.isEmpty {
+                    properties["user_label"] = userLabel
+                }
+                if let autoLabel = place.autoLabel, !autoLabel.isEmpty {
+                    properties["auto_label"] = autoLabel
+                }
+
+                let geometry: [String: Any] = [
+                    "type": "Point",
+                    "coordinates": [place.longitude, place.latitude],
+                ]
+
+                features.append([
+                    "type": "Feature",
+                    "geometry": geometry,
+                    "properties": properties,
+                ])
+            }
+
+            for move in day.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate }) {
+                let points = routePoints(for: move)
+                let coordinates = points.map { [$0.longitude, $0.latitude] }
+                guard coordinates.count > 1 else { continue }
+
+                var properties: [String: Any] = [
+                    "record_type": "move",
+                    "day_key": day.dayKey,
+                    "transport_mode": move.transportMode.rawValue,
+                    "start_time": iso8601.string(from: move.timelineStartDate),
+                    "end_time": iso8601.string(from: move.endDate),
+                    "distance_meters": move.distanceMeters,
+                    "start_place": move.startPlace?.displayTitle ?? "Unknown start",
+                    "end_place": move.endPlace?.displayTitle ?? "Unknown destination",
+                ]
+
+                if let stepCount = move.stepCount {
+                    properties["step_count"] = stepCount
+                }
+
+                let geometry: [String: Any] = [
+                    "type": "LineString",
+                    "coordinates": coordinates,
+                ]
+
+                features.append([
+                    "type": "Feature",
+                    "geometry": geometry,
+                    "properties": properties,
+                ])
+            }
+        }
+
+        let collection: [String: Any] = [
+            "type": "FeatureCollection",
+            "features": features,
+        ]
+
+        return try? JSONSerialization.data(
+            withJSONObject: collection,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+    }
+
+    private static func csvData(for days: [DayTimeline]) -> Data? {
+        var rows: [String] = []
+        rows.append("record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude")
+
+        for day in days {
+            for place in day.places.sorted(by: { $0.arrivalDate < $1.arrivalDate }) {
+                rows.append(
+                    [
+                        "place",
+                        iso8601.string(from: place.arrivalDate),
+                        place.departureDate.map(iso8601.string(from:)) ?? "",
+                        csvEscaped(place.displayTitle),
+                        day.dayKey,
+                        "",
+                        "",
+                        "",
+                        coordinateString(place.latitude),
+                        coordinateString(place.longitude),
+                    ].joined(separator: ",")
+                )
+            }
+
+            for move in day.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate }) {
+                let title = "\(move.startPlace?.displayTitle ?? "Unknown start") to \(move.endPlace?.displayTitle ?? "Unknown destination")"
+                rows.append(
+                    [
+                        "move",
+                        iso8601.string(from: move.timelineStartDate),
+                        iso8601.string(from: move.endDate),
+                        csvEscaped(title),
+                        day.dayKey,
+                        move.transportMode.rawValue,
+                        String(format: "%.2f", move.distanceMeters),
+                        move.stepCount.map(String.init) ?? "",
+                        "",
+                        "",
+                    ].joined(separator: ",")
+                )
+            }
+        }
+
+        return rows.joined(separator: "\n").data(using: .utf8)
+    }
+
+    private static func routePoints(for move: MoveSegment) -> [TimelineTrackPoint] {
+        var points: [TimelineTrackPoint] = []
+        points.reserveCapacity(move.samples.count + 2)
+
+        if let startPlace = move.startPlace {
+            points.append(
+                TimelineTrackPoint(
+                    latitude: startPlace.latitude,
+                    longitude: startPlace.longitude,
+                    elevation: nil,
+                    timestamp: move.timelineStartDate
+                )
+            )
+        }
+
+        let sortedSamples = move.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        for sample in sortedSamples {
+            points.append(
+                TimelineTrackPoint(
+                    latitude: sample.latitude,
+                    longitude: sample.longitude,
+                    elevation: sample.altitude,
+                    timestamp: sample.timestamp
+                )
+            )
+        }
+
+        if let endPlace = move.endPlace {
+            points.append(
+                TimelineTrackPoint(
+                    latitude: endPlace.latitude,
+                    longitude: endPlace.longitude,
+                    elevation: nil,
+                    timestamp: move.endDate
+                )
+            )
+        }
+
+        let sortedPoints = points.sorted(by: { $0.timestamp < $1.timestamp })
+        return dedupeSequentialPoints(in: sortedPoints)
+    }
+
+    private static func dedupeSequentialPoints(in points: [TimelineTrackPoint]) -> [TimelineTrackPoint] {
+        guard !points.isEmpty else { return [] }
+
+        var deduped: [TimelineTrackPoint] = []
+        deduped.reserveCapacity(points.count)
+
+        var previousKey: String?
+        for point in points {
+            let key = "\(Int(point.timestamp.timeIntervalSince1970.rounded()))|\(coordinateString(point.latitude))|\(coordinateString(point.longitude))"
+            if key == previousKey { continue }
+            deduped.append(point)
+            previousKey = key
+        }
+
+        return deduped
+    }
+
+    private static func xmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    private static func csvEscaped(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
+    }
+
+    private static func coordinateString(_ value: Double) -> String {
+        String(format: "%.6f", value)
+    }
+
+    private static func elevationString(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
+}
+
+private struct PanelSurfaceModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         content
-            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black.opacity(0.9))
-            .padding(14)
+            .padding(12)
             .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.40))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(MovesPalette.card.opacity(colorScheme == .dark ? 0.88 : 0.92))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(
-                                colorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.7),
-                                lineWidth: 1
-                            )
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(MovesPalette.border, lineWidth: 1)
                     }
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.12), radius: 12, y: 4)
+            }
+    }
+}
+
+private struct FrostedCircleModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(enabled ? Color.primary.opacity(0.9) : Color.secondary.opacity(0.55))
+            .background {
+                Circle()
+                    .fill(
+                        MovesPalette.frostedFill.opacity(
+                            enabled
+                                ? (colorScheme == .dark ? 0.95 : 1.0)
+                                : (colorScheme == .dark ? 0.55 : 0.75)
+                        )
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(MovesPalette.border.opacity(enabled ? 0.9 : 0.7), lineWidth: 1)
+                    }
+                    .glassEffect(.regular, in: Circle())
             }
     }
 }
 
 private extension View {
-    func movesGlassCardStyle() -> some View {
-        modifier(MovesGlassCardModifier())
+    func panelSurface() -> some View {
+        modifier(PanelSurfaceModifier())
+    }
+
+    func frostedCircle(enabled: Bool) -> some View {
+        modifier(FrostedCircleModifier(enabled: enabled))
     }
 }
 

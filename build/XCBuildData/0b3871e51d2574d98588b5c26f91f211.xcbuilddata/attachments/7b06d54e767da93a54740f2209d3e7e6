@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/MovesTests-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/MovesTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/MovesTests-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/MovesTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/MovesTests-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/MovesTests/TimelineAssemblerTests.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug-iphonesimulator/MovesTests.build/Objects-normal/arm64/TimelineAssemblerTests~partial.swiftmodule"
+  }
+}

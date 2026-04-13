@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CoreLocation
 import CoreMotion
+import MapKit
 import SwiftData
 
 @MainActor
@@ -16,6 +17,10 @@ protocol MotionClassifier {
     func stepCount(start: Date, end: Date) async -> Int?
 }
 
+protocol PlaceNameResolver {
+    func resolveName(for coordinate: CLLocationCoordinate2D) async -> String?
+}
+
 @MainActor
 protocol TimelineAssembler {
     func ingestVisit(_ visit: CLVisit) async
@@ -25,9 +30,11 @@ protocol TimelineAssembler {
 final class CoreMotionTransportClassifier: MotionClassifier {
     private let activityManager = CMMotionActivityManager()
     private let pedometer = CMPedometer()
+    private static let minimumDistanceForNonStationaryOverride: CLLocationDistance = 450
 
     func classifyTransport(start: Date, end: Date, locations: [CLLocation]) async -> TransportMode {
         guard end > start else { return .stationary }
+        let fallback = inferFromSpeed(locations)
 
         if CMMotionActivityManager.isActivityAvailable(),
            let activities = await queryActivities(from: start, to: end),
@@ -44,11 +51,11 @@ final class CoreMotionTransportClassifier: MotionClassifier {
             }
 
             if let best = scores.max(by: { $0.value < $1.value })?.key {
-                return best
+                return correctedModeIfNeeded(best, fallback: fallback, locations: locations)
             }
         }
 
-        return inferFromSpeed(locations)
+        return correctedModeIfNeeded(fallback, fallback: fallback, locations: locations)
     }
 
     func stepCount(start: Date, end: Date) async -> Int? {
@@ -122,16 +129,121 @@ final class CoreMotionTransportClassifier: MotionClassifier {
             return .automotive
         }
     }
+
+    private func correctedModeIfNeeded(
+        _ candidate: TransportMode,
+        fallback: TransportMode,
+        locations: [CLLocation]
+    ) -> TransportMode {
+        guard candidate == .stationary else { return candidate }
+
+        let traveledDistance = Self.totalDistance(for: locations)
+        guard traveledDistance >= Self.minimumDistanceForNonStationaryOverride else {
+            return candidate
+        }
+
+        if fallback != .stationary && fallback != .unknown {
+            return fallback
+        }
+
+        let maxObservedSpeed = locations
+            .map(\.speed)
+            .filter { $0 >= 0 }
+            .max() ?? -1
+
+        switch maxObservedSpeed {
+        case 9...:
+            return .automotive
+        case 4.5...:
+            return .cycling
+        case 2.0...:
+            return .running
+        case 0.8...:
+            return .walking
+        default:
+            break
+        }
+
+        let directDistance = Self.straightLineDistance(for: locations)
+        if directDistance >= 1_500 {
+            return .automotive
+        }
+        if directDistance >= 500 {
+            return .cycling
+        }
+        return .walking
+    }
+
+    private static func totalDistance(for locations: [CLLocation]) -> CLLocationDistance {
+        guard locations.count > 1 else { return 0 }
+        return zip(locations, locations.dropFirst()).reduce(0) { partialResult, pair in
+            partialResult + pair.0.distance(from: pair.1)
+        }
+    }
+
+    private static func straightLineDistance(for locations: [CLLocation]) -> CLLocationDistance {
+        guard let first = locations.first, let last = locations.last else { return 0 }
+        return first.distance(from: last)
+    }
+}
+
+actor CLGeocoderPlaceNameResolver: PlaceNameResolver {
+    private var cache: [String: String] = [:]
+
+    func resolveName(for coordinate: CLLocationCoordinate2D) async -> String? {
+        let cacheKey = Self.cacheKey(for: coordinate)
+        if let cached = cache[cacheKey] {
+            return cached.isEmpty ? nil : cached
+        }
+
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        do {
+            guard let request = MKReverseGeocodingRequest(location: location) else {
+                cache[cacheKey] = ""
+                return nil
+            }
+            let mapItems = try await request.mapItems
+            let resolvedName = mapItems.first.flatMap(Self.bestName(from:))
+            cache[cacheKey] = resolvedName ?? ""
+            return resolvedName
+        } catch {
+            cache[cacheKey] = ""
+            return nil
+        }
+    }
+
+    private static func cacheKey(for coordinate: CLLocationCoordinate2D) -> String {
+        let roundedLat = String(format: "%.4f", coordinate.latitude)
+        let roundedLon = String(format: "%.4f", coordinate.longitude)
+        return "\(roundedLat)|\(roundedLon)"
+    }
+
+    private static func bestName(from mapItem: MKMapItem) -> String? {
+        let candidates: [String?] = [
+            mapItem.name,
+            mapItem.address?.shortAddress,
+            mapItem.address?.fullAddress,
+        ]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+    }
 }
 
 @MainActor
 final class DefaultTimelineAssembler: TimelineAssembler {
     private let repository: TimelineRepository
     private let motionClassifier: MotionClassifier
+    private let placeNameResolver: PlaceNameResolver
 
-    init(repository: TimelineRepository, motionClassifier: MotionClassifier) {
+    init(
+        repository: TimelineRepository,
+        motionClassifier: MotionClassifier,
+        placeNameResolver: PlaceNameResolver
+    ) {
         self.repository = repository
         self.motionClassifier = motionClassifier
+        self.placeNameResolver = placeNameResolver
     }
 
     func ingestLocations(_ locations: [CLLocation], source: LocationSampleSource) async {
@@ -148,6 +260,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
     func ingestVisit(_ visit: CLVisit) async {
         do {
             let visitPlace = try repository.addOrUpdateVisit(from: visit)
+            await fillAutomaticPlaceLabelIfNeeded(for: visitPlace)
 
             let normalizedArrival = visitPlace.arrivalDate
             guard
@@ -160,8 +273,20 @@ final class DefaultTimelineAssembler: TimelineAssembler {
                 return
             }
 
-            let startDate = previousPlace.departureDate ?? previousPlace.arrivalDate
             let endDate = normalizedArrival
+
+            if previousPlace.departureDate == nil {
+                let candidateSamples = try repository.samples(from: previousPlace.arrivalDate, to: endDate)
+                previousPlace.departureDate = inferredDepartureDate(
+                    for: previousPlace,
+                    endDate: endDate,
+                    samples: candidateSamples
+                )
+            }
+
+            let candidateStartDate = previousPlace.departureDate ?? previousPlace.arrivalDate
+            let startDate = min(max(candidateStartDate, previousPlace.arrivalDate), endDate)
+
             guard endDate.timeIntervalSince(startDate) > 60 else {
                 try repository.saveIfNeeded()
                 return
@@ -242,6 +367,43 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             partialResult + pair.0.distance(from: pair.1)
         }
     }
+
+    private func inferredDepartureDate(
+        for place: VisitPlace,
+        endDate: Date,
+        samples: [LocationSample]
+    ) -> Date {
+        let sortedSamples = samples.sorted(by: { $0.timestamp < $1.timestamp })
+        let departureRadius = max(place.horizontalAccuracy * 1.8, 80)
+
+        if let firstAwaySample = sortedSamples.first(where: { sample in
+            guard sample.timestamp >= place.arrivalDate else { return false }
+            let sampleLocation = sample.asLocation
+            let placeLocation = CLLocation(latitude: place.latitude, longitude: place.longitude)
+            return sampleLocation.distance(from: placeLocation) >= departureRadius
+        }) {
+            return min(firstAwaySample.timestamp, endDate)
+        }
+
+        return endDate
+    }
+
+    private func fillAutomaticPlaceLabelIfNeeded(for place: VisitPlace) async {
+        let hasUserLabel = !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let hasAutoLabel = !(place.autoLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+
+        guard !hasUserLabel, !hasAutoLabel else { return }
+        guard place.horizontalAccuracy <= 180 else { return }
+
+        if let resolvedName = await placeNameResolver.resolveName(for: place.coordinate) {
+            do {
+                try repository.setAutomaticLabel(resolvedName, for: place.id)
+                try repository.saveIfNeeded()
+            } catch {
+                print("Failed to persist automatic place label: \(error.localizedDescription)")
+            }
+        }
+    }
 }
 
 @MainActor
@@ -259,7 +421,8 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
         self.assembler = DefaultTimelineAssembler(
             repository: repository,
-            motionClassifier: CoreMotionTransportClassifier()
+            motionClassifier: CoreMotionTransportClassifier(),
+            placeNameResolver: CLGeocoderPlaceNameResolver()
         )
 
         super.init()

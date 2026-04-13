@@ -103,6 +103,83 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(mode, .automotive)
     }
 
+    func testClassifierDoesNotMarkLongDistanceAsStationaryWhenSpeedIsZero() async {
+        let classifier = CoreMotionTransportClassifier()
+
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let end = start.addingTimeInterval(5_400)
+
+        let locations = [
+            makeLocation(latitude: 52.5200, longitude: 13.4050, speed: 0, timestamp: start),
+            makeLocation(latitude: 52.5550, longitude: 13.4600, speed: 0, timestamp: start.addingTimeInterval(2_700)),
+            makeLocation(latitude: 52.5900, longitude: 13.5150, speed: 0, timestamp: end),
+        ]
+
+        let mode = await classifier.classifyTransport(start: start, end: end, locations: locations)
+        XCTAssertNotEqual(mode, .stationary)
+    }
+
+    func testMoveUpsertUpdatesExistingSegmentForSamePlacePairWhenWindowChanges() throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+
+        let arrival = Date(timeIntervalSince1970: 1_710_000_000)
+        let correctedStart = arrival.addingTimeInterval(4 * 60 * 60)
+        let endDate = correctedStart.addingTimeInterval(5 * 60)
+
+        let startPlace = VisitPlace(
+            arrivalDate: arrival,
+            departureDate: correctedStart,
+            latitude: 52.5200,
+            longitude: 13.4050,
+            horizontalAccuracy: 25
+        )
+        let endPlace = VisitPlace(
+            arrivalDate: endDate,
+            departureDate: nil,
+            latitude: 52.5300,
+            longitude: 13.4100,
+            horizontalAccuracy: 25
+        )
+
+        let sample = makeLocation(
+            latitude: 52.5250,
+            longitude: 13.4075,
+            speed: 4.5,
+            timestamp: correctedStart.addingTimeInterval(150)
+        )
+        let samples = try repository.appendSamples(from: [sample], source: .significantChange)
+
+        _ = try repository.upsertMove(
+            startPlace: startPlace,
+            endPlace: endPlace,
+            startDate: arrival,
+            endDate: endDate,
+            transportMode: .cycling,
+            distanceMeters: 1_250,
+            stepCount: 700,
+            samples: samples
+        )
+
+        _ = try repository.upsertMove(
+            startPlace: startPlace,
+            endPlace: endPlace,
+            startDate: correctedStart,
+            endDate: endDate,
+            transportMode: .cycling,
+            distanceMeters: 1_250,
+            stepCount: 700,
+            samples: samples
+        )
+
+        let verificationContext = ModelContext(container)
+        let descriptor = FetchDescriptor<MoveSegment>()
+        let moves = try verificationContext.fetch(descriptor)
+
+        XCTAssertEqual(moves.count, 1)
+        XCTAssertEqual(moves.first?.startDate, correctedStart)
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = Schema([
             DayTimeline.self,
