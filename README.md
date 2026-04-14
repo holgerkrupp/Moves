@@ -2,7 +2,7 @@
 
 Moves is an iOS app that builds a private day-by-day timeline of where you were and how you moved between places.
 
-It uses on-device location + motion signals and stores timeline data locally with SwiftData.
+It uses on-device location + motion signals and stores timeline data locally with SwiftData, with private iCloud sync through CloudKit enabled for backup and device transfer.
 
 ## Features
 
@@ -46,8 +46,8 @@ It uses on-device location + motion signals and stores timeline data locally wit
 
 ## Privacy
 
-- Timeline data is stored locally on the device (SwiftData).
-- No server sync is implemented in this project.
+- Timeline data is stored locally on the device and syncs to the user's private iCloud container when available.
+- CloudKit backs up the timeline and restores it on a new device signed into the same Apple ID.
 - Export is user-initiated from the in-app Settings screen.
 
 ## Project Structure

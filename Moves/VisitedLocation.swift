@@ -43,15 +43,33 @@ enum LocationSampleSource: String, Codable, CaseIterable {
 
 @Model
 final class DayTimeline {
-    @Attribute(.unique) var dayKey: String
-    var dayStart: Date
-    var createdAt: Date
+    var dayKey: String = ""
+    var dayStart: Date = Date.now
+    var createdAt: Date = Date.now
 
-    @Relationship(deleteRule: .cascade, inverse: \VisitPlace.dayTimeline)
-    var places: [VisitPlace] = []
+    @Relationship(deleteRule: .cascade, originalName: "places", inverse: \VisitPlace.dayTimeline)
+    var placesStorage: [VisitPlace]? = nil
 
-    @Relationship(deleteRule: .cascade, inverse: \MoveSegment.dayTimeline)
-    var moves: [MoveSegment] = []
+    @Relationship(deleteRule: .cascade, originalName: "moves", inverse: \MoveSegment.dayTimeline)
+    var movesStorage: [MoveSegment]? = nil
+
+    @Relationship(deleteRule: .cascade, originalName: "samples", inverse: \LocationSample.dayTimeline)
+    var samplesStorage: [LocationSample]? = nil
+
+    var places: [VisitPlace] {
+        get { placesStorage ?? [] }
+        set { placesStorage = newValue }
+    }
+
+    var moves: [MoveSegment] {
+        get { movesStorage ?? [] }
+        set { movesStorage = newValue }
+    }
+
+    var samples: [LocationSample] {
+        get { samplesStorage ?? [] }
+        set { samplesStorage = newValue }
+    }
 
     init(dayStart: Date) {
         let start = Calendar.current.startOfDay(for: dayStart)
@@ -76,23 +94,33 @@ final class DayTimeline {
 
 @Model
 final class VisitPlace {
-    @Attribute(.unique) var id: UUID
-    var arrivalDate: Date
-    var departureDate: Date?
-    var latitude: Double
-    var longitude: Double
-    var horizontalAccuracy: Double
-    var userLabel: String?
-    var autoLabel: String?
-    var createdAt: Date
+    var id: UUID = UUID()
+    var arrivalDate: Date = Date.now
+    var departureDate: Date? = nil
+    var latitude: Double = 0
+    var longitude: Double = 0
+    var horizontalAccuracy: Double = 0
+    var userLabel: String? = nil
+    var autoLabel: String? = nil
+    var createdAt: Date = Date.now
 
     var dayTimeline: DayTimeline?
 
-    @Relationship(inverse: \MoveSegment.startPlace)
-    var outgoingMoves: [MoveSegment] = []
+    @Relationship(originalName: "outgoingMoves", inverse: \MoveSegment.startPlace)
+    var outgoingMovesStorage: [MoveSegment]? = nil
 
-    @Relationship(inverse: \MoveSegment.endPlace)
-    var incomingMoves: [MoveSegment] = []
+    @Relationship(originalName: "incomingMoves", inverse: \MoveSegment.endPlace)
+    var incomingMovesStorage: [MoveSegment]? = nil
+
+    var outgoingMoves: [MoveSegment] {
+        get { outgoingMovesStorage ?? [] }
+        set { outgoingMovesStorage = newValue }
+    }
+
+    var incomingMoves: [MoveSegment] {
+        get { incomingMovesStorage ?? [] }
+        set { incomingMovesStorage = newValue }
+    }
 
     init(
         arrivalDate: Date,
@@ -134,21 +162,26 @@ final class VisitPlace {
 
 @Model
 final class MoveSegment {
-    @Attribute(.unique) var id: UUID
-    @Attribute(.unique) var dedupeKey: String
-    var startDate: Date
-    var endDate: Date
-    var transportModeRawValue: String
-    var distanceMeters: Double
-    var stepCount: Int?
-    var createdAt: Date
+    var id: UUID = UUID()
+    var dedupeKey: String = ""
+    var startDate: Date = Date.now
+    var endDate: Date = Date.now
+    var transportModeRawValue: String = TransportMode.unknown.rawValue
+    var distanceMeters: Double = 0
+    var stepCount: Int? = nil
+    var createdAt: Date = Date.now
 
     var startPlace: VisitPlace?
     var endPlace: VisitPlace?
     var dayTimeline: DayTimeline?
 
-    @Relationship(deleteRule: .nullify, inverse: \LocationSample.moveSegment)
-    var samples: [LocationSample] = []
+    @Relationship(deleteRule: .nullify, originalName: "samples", inverse: \LocationSample.moveSegment)
+    var samplesStorage: [LocationSample]? = nil
+
+    var samples: [LocationSample] {
+        get { samplesStorage ?? [] }
+        set { samplesStorage = newValue }
+    }
 
     init(
         dedupeKey: String,
@@ -186,15 +219,15 @@ final class MoveSegment {
 
 @Model
 final class LocationSample {
-    @Attribute(.unique) var dedupeKey: String
-    var timestamp: Date
-    var latitude: Double
-    var longitude: Double
-    var altitude: Double
-    var horizontalAccuracy: Double
-    var speed: Double
-    var sourceRawValue: String
-    var createdAt: Date
+    var dedupeKey: String = ""
+    var timestamp: Date = Date.now
+    var latitude: Double = 0
+    var longitude: Double = 0
+    var altitude: Double = 0
+    var horizontalAccuracy: Double = 0
+    var speed: Double = 0
+    var sourceRawValue: String = LocationSampleSource.significantChange.rawValue
+    var createdAt: Date = Date.now
 
     var dayTimeline: DayTimeline?
     var moveSegment: MoveSegment?

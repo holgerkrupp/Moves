@@ -11,6 +11,7 @@ import SwiftData
 @main
 struct MovesApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
 
     private let sharedModelContainer: ModelContainer
     @StateObject private var captureManager: MovesLocationCaptureManager
@@ -25,7 +26,7 @@ struct MovesApp: App {
 
         let modelConfiguration = ModelConfiguration(
             schema: schema,
-            isStoredInMemoryOnly: false
+            cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
         )
 
         do {

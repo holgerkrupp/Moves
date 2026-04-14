@@ -190,7 +190,8 @@ final class TimelineAssemblerTests: XCTestCase {
 
         let configuration = ModelConfiguration(
             schema: schema,
-            isStoredInMemoryOnly: true
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
         )
 
         return try ModelContainer(

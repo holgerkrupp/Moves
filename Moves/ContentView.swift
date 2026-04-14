@@ -1933,7 +1933,10 @@ private extension ProcessInfo {
 }
 
 #Preview {
-    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+    let configuration = ModelConfiguration(
+        isStoredInMemoryOnly: true,
+        cloudKitDatabase: .none
+    )
     let container = try! ModelContainer(
         for: DayTimeline.self,
         VisitPlace.self,

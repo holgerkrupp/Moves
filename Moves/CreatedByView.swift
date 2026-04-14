@@ -17,7 +17,7 @@ struct CreatedByView: View {
                         .tint(.accent)
                 }
                 
-                if let gitURL = URL(string: "https://github.com/holgerkrupp/PodcastClient"){
+                if let gitURL = URL(string: "https://github.com/holgerkrupp/Moves"){
                     Divider()
                     Link(destination: gitURL) {
                         Label("Get the source code", image: "githublogo")

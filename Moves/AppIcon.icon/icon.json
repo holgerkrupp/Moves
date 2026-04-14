@@ -19,7 +19,14 @@
           ],
           "glass" : true,
           "image-name" : "M 2.svg",
-          "name" : "M 2"
+          "name" : "M 2",
+          "position" : {
+            "scale" : 1.5,
+            "translation-in-points" : [
+              0.0004500000000007276,
+              44.29154999999997
+            ]
+          }
         },
         {
           "fill-specializations" : [
