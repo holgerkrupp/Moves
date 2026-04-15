@@ -39,6 +39,7 @@ enum LocationSampleSource: String, Codable, CaseIterable {
     case visit
     case significantChange
     case launchBackfill
+    case authorizationGrant
 }
 
 @Model
@@ -289,6 +290,8 @@ protocol TimelineRepository {
 @MainActor
 final class SwiftDataTimelineRepository: TimelineRepository {
     private let modelContext: ModelContext
+    private static let sampleDedupeTimeWindow: TimeInterval = 5 * 60
+    private static let sampleDedupeDistanceThreshold: CLLocationDistance = 120
 
     init(modelContainer: ModelContainer) {
         self.modelContext = ModelContext(modelContainer)
@@ -332,8 +335,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         inserted.reserveCapacity(locations.count)
 
         for location in locations {
-            let dedupeKey = Self.makeSampleDedupeKey(for: location, source: source)
-            if let existing = try findSample(byDedupeKey: dedupeKey) {
+            let dedupeKey = Self.makeSampleDedupeKey(for: location)
+            if let existing = try findSample(byDedupeKey: dedupeKey) ?? findNearbySample(matching: location) {
+                existing.source = Self.preferredSource(existing: existing.source, new: source)
                 inserted.append(existing)
                 continue
             }
@@ -511,6 +515,27 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         return try modelContext.fetch(descriptor).first
     }
 
+    private func findNearbySample(matching location: CLLocation) throws -> LocationSample? {
+        let windowStart = location.timestamp.addingTimeInterval(-Self.sampleDedupeTimeWindow)
+        let windowEnd = location.timestamp.addingTimeInterval(Self.sampleDedupeTimeWindow)
+
+        var descriptor = FetchDescriptor<LocationSample>(
+            predicate: #Predicate { sample in
+                sample.timestamp >= windowStart && sample.timestamp <= windowEnd
+            },
+            sortBy: [SortDescriptor(\LocationSample.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = 24
+
+        let candidates = try modelContext.fetch(descriptor)
+        return candidates.first {
+            Self.distanceMeters(
+                from: location.coordinate,
+                to: $0.coordinate
+            ) <= Self.sampleDedupeDistanceThreshold
+        }
+    }
+
     private func findMove(byDedupeKey dedupeKey: String) throws -> MoveSegment? {
         var descriptor = FetchDescriptor<MoveSegment>(
             predicate: #Predicate { move in
@@ -549,11 +574,11 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         return visit.departureDate
     }
 
-    private static func makeSampleDedupeKey(for location: CLLocation, source: LocationSampleSource) -> String {
+    private static func makeSampleDedupeKey(for location: CLLocation) -> String {
         let roundedSecond = Int(location.timestamp.timeIntervalSince1970.rounded())
         let roundedLat = roundedCoordinate(location.coordinate.latitude)
         let roundedLon = roundedCoordinate(location.coordinate.longitude)
-        return "\(roundedSecond)|\(roundedLat)|\(roundedLon)|\(source.rawValue)"
+        return "\(roundedSecond)|\(roundedLat)|\(roundedLon)"
     }
 
     private static func makeMoveDedupeKey(
@@ -569,6 +594,22 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
     private static func roundedCoordinate(_ value: Double) -> String {
         String(format: "%.5f", value)
+    }
+
+    private static func preferredSource(
+        existing: LocationSampleSource,
+        new: LocationSampleSource
+    ) -> LocationSampleSource {
+        func priority(for source: LocationSampleSource) -> Int {
+            switch source {
+            case .visit: return 3
+            case .significantChange: return 2
+            case .authorizationGrant: return 1
+            case .launchBackfill: return 0
+            }
+        }
+
+        return priority(for: new) > priority(for: existing) ? new : existing
     }
 
     private func inferredUserLabel(near coordinate: CLLocationCoordinate2D) throws -> String? {

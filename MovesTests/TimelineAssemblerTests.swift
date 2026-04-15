@@ -5,7 +5,7 @@ import SwiftData
 
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
-    func testLocationSamplesAreDeduplicatedForSameRoundedSignature() throws {
+    func testLocationSamplesAreDeduplicatedAcrossSourcesForTheSameFix() throws {
         let container = try makeInMemoryContainer()
         let repository = SwiftDataTimelineRepository(modelContainer: container)
 
@@ -17,7 +17,7 @@ final class TimelineAssemblerTests: XCTestCase {
             timestamp: timestamp
         )
 
-        _ = try repository.appendSamples(from: [location], source: .significantChange)
+        _ = try repository.appendSamples(from: [location], source: .launchBackfill)
         _ = try repository.appendSamples(from: [location], source: .significantChange)
 
         let samples = try repository.samples(
@@ -26,6 +26,37 @@ final class TimelineAssemblerTests: XCTestCase {
         )
 
         XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples.first?.source, .significantChange)
+    }
+
+    func testNearbyLocationSamplesWithinTheDedupWindowCollapseToOneRecord() throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let firstLocation = makeLocation(
+            latitude: 52.520008,
+            longitude: 13.404954,
+            speed: 1.0,
+            timestamp: start
+        )
+        let secondLocation = makeLocation(
+            latitude: 52.520215,
+            longitude: 13.405115,
+            speed: 1.1,
+            timestamp: start.addingTimeInterval(45)
+        )
+
+        _ = try repository.appendSamples(from: [firstLocation], source: .authorizationGrant)
+        _ = try repository.appendSamples(from: [secondLocation], source: .significantChange)
+
+        let samples = try repository.samples(
+            from: start.addingTimeInterval(-60),
+            to: start.addingTimeInterval(120)
+        )
+
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples.first?.source, .significantChange)
     }
 
     func testMoveUpsertIsIdempotentForSameEndpointsAndTimeWindow() throws {

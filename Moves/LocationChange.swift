@@ -8,6 +8,7 @@ import SwiftData
 @MainActor
 protocol LocationCaptureService: AnyObject {
     func start() async
+    func requestTrackingAuthorization()
     func stop()
     func refreshHistoricalBackfill() async
 }
@@ -415,7 +416,8 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     private let manager = CLLocationManager()
     private let assembler: TimelineAssembler
-    private var pendingBackfillResponse = false
+    private var pendingOneShotLocationSource: LocationSampleSource?
+    private var shouldChainToAlwaysAfterWhenInUse = false
 
     init(modelContainer: ModelContainer) {
         let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
@@ -432,10 +434,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         manager.distanceFilter = 150
         manager.pausesLocationUpdatesAutomatically = true
-        manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = false
 
         authorizationStatus = manager.authorizationStatus
+        updateBackgroundLocationAllowance()
     }
 
     var trackingStatusText: String {
@@ -456,12 +458,45 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func start() async {
-        handleAuthorization(manager.authorizationStatus)
+        let status = manager.authorizationStatus
+        handleAuthorization(status)
+
+        if status == .notDetermined {
+            requestTrackingAuthorization()
+        }
+    }
+
+    func requestTrackingAuthorization() {
+        let status = manager.authorizationStatus
+        authorizationStatus = status
+        updateBackgroundLocationAllowance()
+
+        switch status {
+        case .notDetermined:
+            shouldChainToAlwaysAfterWhenInUse = true
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            shouldChainToAlwaysAfterWhenInUse = false
+            manager.requestAlwaysAuthorization()
+            startLowPowerMonitoringIfNeeded()
+            requestOneShotLocation(source: .authorizationGrant)
+        case .authorizedAlways:
+            shouldChainToAlwaysAfterWhenInUse = false
+            startLowPowerMonitoringIfNeeded()
+            requestOneShotLocation(source: .authorizationGrant)
+        case .restricted, .denied:
+            shouldChainToAlwaysAfterWhenInUse = false
+            stop()
+        @unknown default:
+            shouldChainToAlwaysAfterWhenInUse = false
+        }
     }
 
     func stop() {
         manager.stopMonitoringVisits()
         manager.stopMonitoringSignificantLocationChanges()
+        manager.allowsBackgroundLocationUpdates = false
+        pendingOneShotLocationSource = nil
         isMonitoring = false
     }
 
@@ -470,8 +505,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
         // iOS does not expose requestHistoricalLocations for third-party apps.
         // We ask for one current fix on launch/foreground to bridge short gaps.
-        pendingBackfillResponse = true
-        manager.requestLocation()
+        requestOneShotLocation(source: .launchBackfill)
     }
 
     private var isAuthorizedForTracking: Bool {
@@ -480,15 +514,28 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     private func handleAuthorization(_ status: CLAuthorizationStatus) {
         authorizationStatus = status
+        updateBackgroundLocationAllowance()
 
         switch status {
         case .notDetermined:
-            manager.requestAlwaysAuthorization()
-        case .authorizedAlways, .authorizedWhenInUse:
+            stop()
+        case .authorizedAlways:
+            shouldChainToAlwaysAfterWhenInUse = false
             startLowPowerMonitoringIfNeeded()
+            requestOneShotLocation(source: .authorizationGrant)
+        case .authorizedWhenInUse:
+            if shouldChainToAlwaysAfterWhenInUse {
+                shouldChainToAlwaysAfterWhenInUse = false
+                manager.requestAlwaysAuthorization()
+            }
+
+            startLowPowerMonitoringIfNeeded()
+            requestOneShotLocation(source: .authorizationGrant)
         case .restricted, .denied:
+            shouldChainToAlwaysAfterWhenInUse = false
             stop()
         @unknown default:
+            shouldChainToAlwaysAfterWhenInUse = false
             stop()
         }
     }
@@ -499,6 +546,17 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         manager.startMonitoringVisits()
         manager.startMonitoringSignificantLocationChanges()
         isMonitoring = true
+    }
+
+    private func requestOneShotLocation(source: LocationSampleSource) {
+        guard isAuthorizedForTracking else { return }
+
+        pendingOneShotLocationSource = source
+        manager.requestLocation()
+    }
+
+    private func updateBackgroundLocationAllowance() {
+        manager.allowsBackgroundLocationUpdates = authorizationStatus == .authorizedAlways
     }
 }
 
@@ -531,8 +589,8 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
         guard !locations.isEmpty else { return }
 
         lastCaptureAt = .now
-        let source: LocationSampleSource = pendingBackfillResponse ? .launchBackfill : .significantChange
-        pendingBackfillResponse = false
+        let source: LocationSampleSource = pendingOneShotLocationSource ?? .significantChange
+        pendingOneShotLocationSource = nil
 
         Task {
             await assembler.ingestLocations(locations, source: source)

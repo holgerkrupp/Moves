@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import MapKit
 import UniformTypeIdentifiers
+import UIKit
 
 private enum MovesPalette {
     static let backgroundTop = Color(uiColor: .systemGroupedBackground)
@@ -16,8 +17,135 @@ private enum MovesPalette {
     static let start = Color(red: 0.95, green: 0.64, blue: 0.18)
 }
 
+private enum TrackingPromptAction {
+    case requestAuthorization
+    case openSettings
+}
+
+private struct TrackingPermissionPrompt {
+    let title: String
+    let message: String
+    let buttonTitle: String?
+    let action: TrackingPromptAction?
+}
+
+private enum TrackingStatusBannerContext {
+    case timeline
+    case settings
+}
+
+private struct TrackingStatusBannerData {
+    let title: String
+    let message: String
+    let systemImage: String
+    let tint: Color
+}
+
+private struct TrackingStatusBanner: View {
+    let data: TrackingStatusBannerData
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: data.systemImage)
+                .foregroundStyle(data.tint)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(data.title)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                Text(data.message)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelSurface()
+    }
+}
+
+@MainActor
+private func trackingStatusBannerData(
+    for captureManager: MovesLocationCaptureManager,
+    context: TrackingStatusBannerContext
+) -> TrackingStatusBannerData? {
+    if let lastErrorMessage = captureManager.lastErrorMessage {
+        return TrackingStatusBannerData(
+            title: "Location tracking error",
+            message: lastErrorMessage,
+            systemImage: "exclamationmark.triangle.fill",
+            tint: .red
+        )
+    }
+
+    guard context == .settings else {
+        return nil
+    }
+
+    switch captureManager.authorizationStatus {
+    case .authorizedAlways:
+        let message: String
+        if let lastCaptureAt = captureManager.lastCaptureAt {
+            message = "Last location received at \(lastCaptureAt.formatted(date: .omitted, time: .shortened))."
+        } else {
+            message = "Background tracking is enabled and waiting for the first location fix."
+        }
+
+        return TrackingStatusBannerData(
+            title: captureManager.trackingStatusText,
+            message: message,
+            systemImage: "location.fill",
+            tint: MovesPalette.place
+        )
+    case .authorizedWhenInUse:
+        let message: String
+        if let lastCaptureAt = captureManager.lastCaptureAt {
+            message = "Last location received at \(lastCaptureAt.formatted(date: .omitted, time: .shortened))."
+        } else {
+            message = "Moves can read location while open. Grant Always to keep recording in the background."
+        }
+
+        return TrackingStatusBannerData(
+            title: captureManager.trackingStatusText,
+            message: message,
+            systemImage: "location.fill",
+            tint: MovesPalette.start
+        )
+    case .notDetermined:
+        return TrackingStatusBannerData(
+            title: captureManager.trackingStatusText,
+            message: "Open Moves to allow location access and start recording.",
+            systemImage: "location.slash",
+            tint: .secondary
+        )
+    case .denied:
+        return TrackingStatusBannerData(
+            title: captureManager.trackingStatusText,
+            message: "Enable location in Settings if you want Moves to record visits and movement.",
+            systemImage: "location.slash",
+            tint: .secondary
+        )
+    case .restricted:
+        return TrackingStatusBannerData(
+            title: captureManager.trackingStatusText,
+            message: "This device does not allow location access for Moves.",
+            systemImage: "lock.fill",
+            tint: .secondary
+        )
+    @unknown default:
+        return TrackingStatusBannerData(
+            title: "Unknown location state",
+            message: "Moves could not determine the current location permission state.",
+            systemImage: "questionmark.circle",
+            tint: .secondary
+        )
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
+    @Environment(\.openURL) private var openURL
 
     @Query(sort: \DayTimeline.dayStart, order: .forward)
     private var dayTimelines: [DayTimeline]
@@ -45,8 +173,15 @@ struct ContentView: View {
                 background
 
                 VStack(spacing: 12) {
-                    if let trackingIssueMessage {
-                        trackingIssueBanner(message: trackingIssueMessage)
+                    if let trackingPermissionPrompt {
+                        trackingPermissionBanner(trackingPermissionPrompt)
+                    }
+
+                    if let bannerData = trackingStatusBannerData(
+                        for: captureManager,
+                        context: .timeline
+                    ) {
+                        TrackingStatusBanner(data: bannerData)
                     }
 
                     if dayTimelines.isEmpty {
@@ -91,13 +226,13 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingSettings) {
             MovesSettingsView(
                 dayTimelines: dayTimelines,
-                selectedDayKey: selectedDayKey
+                selectedDayKey: selectedDayKey,
+                captureManager: captureManager
             )
         }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
             await captureManager.start()
-            await captureManager.refreshHistoricalBackfill()
         }
         .onAppear {
             syncSelectedDayIfNeeded()
@@ -120,21 +255,30 @@ struct ContentView: View {
         .ignoresSafeArea()
     }
 
-    private func trackingIssueBanner(message: String) -> some View {
+    private func trackingPermissionBanner(_ prompt: TrackingPermissionPrompt) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+            Image(systemName: "location.circle.fill")
+                .foregroundStyle(MovesPalette.start)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Location Tracking Issue")
+                Text(prompt.title)
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
 
-                Text(message)
+                Text(prompt.message)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
+
+            if let buttonTitle = prompt.buttonTitle,
+               let action = prompt.action {
+                Button(buttonTitle) {
+                    performTrackingPromptAction(action)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
         }
         .panelSurface()
     }
@@ -198,17 +342,51 @@ struct ContentView: View {
         .panelSurface()
     }
 
-    private var trackingIssueMessage: String? {
+    private var trackingPermissionPrompt: TrackingPermissionPrompt? {
         switch captureManager.authorizationStatus {
+        case .notDetermined:
+            return TrackingPermissionPrompt(
+                title: "Enable location tracking",
+                message: "Moves needs location access to record your timeline. We will ask for While Using first, then immediately request Always for background tracking.",
+                buttonTitle: "Allow Location Access",
+                action: .requestAuthorization
+            )
+        case .authorizedWhenInUse:
+            return TrackingPermissionPrompt(
+                title: "Allow Always for background tracking",
+                message: "We can already read your location while the app is open. Tap below to switch to Always so Moves can keep recording in the background.",
+                buttonTitle: "Continue to Always",
+                action: .requestAuthorization
+            )
         case .denied:
-            return "Location tracking is disabled. Enable location access in Settings to record moves."
+            return TrackingPermissionPrompt(
+                title: "Location access is off",
+                message: "Moves needs location access to record visits and movement. Open Settings to allow it.",
+                buttonTitle: "Open Settings",
+                action: .openSettings
+            )
         case .restricted:
-            return "Location tracking is restricted on this device."
-        case .authorizedAlways, .authorizedWhenInUse, .notDetermined:
+            return TrackingPermissionPrompt(
+                title: "Location access is restricted",
+                message: "This device does not allow location access for Moves.",
+                buttonTitle: nil,
+                action: nil
+            )
+        case .authorizedAlways:
             return nil
-            
         @unknown default:
-            return "Location tracking is unavailable right now."
+            return nil
+        }
+    }
+
+    private func performTrackingPromptAction(_ action: TrackingPromptAction) {
+        switch action {
+        case .requestAuthorization:
+            captureManager.requestTrackingAuthorization()
+        case .openSettings:
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                openURL(url)
+            }
         }
     }
 
@@ -349,11 +527,22 @@ private struct DayTimelinePage: View {
                 DayMapStrip(dayTimeline: dayTimeline)
 
                 if timelineEntries.isEmpty {
-                    Text("No segments for this day yet.")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .panelSurface()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No segments for this day yet.")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                        if dayTimeline.samples.count > 0 {
+                            Text("\(dayTimeline.samples.count) location sample\(dayTimeline.samples.count == 1 ? "" : "s") captured. Waiting for the next visit or move.")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Grant location access above to start recording visits and movement.")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .panelSurface()
                 } else {
                     timelineList
                         .panelSurface()
@@ -568,37 +757,56 @@ private struct DayMapStrip: View {
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
 
-    private var routeRefreshKey: String {
-        dayTimeline.moves
-            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
-            .map { move in
-                let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
-                let end = Int(move.endDate.timeIntervalSince1970.rounded())
-                return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(move.samples.count)"
-            }
-            .joined(separator: ",")
-    }
-
     private var placeMarkers: [PlaceMarker] {
         dayTimeline.places
             .sorted(by: { $0.arrivalDate < $1.arrivalDate })
             .map { PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate) }
     }
 
+    private var latestSampleCoordinate: CLLocationCoordinate2D? {
+        dayTimeline.samples
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .last?
+            .coordinate
+    }
+
+    private var routeRefreshKey: String {
+        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+        let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
+        let sortedSamples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+
+        let moveKey = sortedMoves.map { move in
+            let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
+            let end = Int(move.endDate.timeIntervalSince1970.rounded())
+            return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(move.samples.count)"
+        }
+        .joined(separator: ",")
+
+        let placeKey = sortedPlaces.map { place in
+            let arrival = Int(place.arrivalDate.timeIntervalSince1970.rounded())
+            let departure = Int((place.departureDate ?? place.arrivalDate).timeIntervalSince1970.rounded())
+            return "\(place.id.uuidString)|\(arrival)|\(departure)"
+        }
+        .joined(separator: ",")
+
+        let sampleKey = sortedSamples.map { sample in
+            let timestamp = Int(sample.timestamp.timeIntervalSince1970.rounded())
+            let latitude = Int((sample.latitude * 10_000).rounded())
+            let longitude = Int((sample.longitude * 10_000).rounded())
+            return "\(timestamp)|\(latitude)|\(longitude)"
+        }
+        .joined(separator: ",")
+
+        return [moveKey, placeKey, sampleKey].joined(separator: "|")
+    }
+
     init(dayTimeline: DayTimeline) {
         self.dayTimeline = dayTimeline
 
-        let moveCoordinates = dayTimeline.moves
-            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
-            .flatMap { MoveRouteGeometry.rawCoordinates(for: $0) }
-        let dedupedMoveCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
-            moveCoordinates,
-            minimumDistanceMeters: 6
-        )
-        let placeCoordinates = dayTimeline.places.map(\.coordinate)
-        let allCoordinates = dedupedMoveCoordinates + placeCoordinates
+        let moveCoordinates = Self.routeCoordinates(for: dayTimeline)
+        let allCoordinates = Self.allCoordinates(for: dayTimeline, routeCoordinates: moveCoordinates)
         _camera = State(initialValue: .region(MapRegionFactory.region(for: allCoordinates)))
-        _routeCoordinates = State(initialValue: dedupedMoveCoordinates)
+        _routeCoordinates = State(initialValue: moveCoordinates)
     }
 
     var body: some View {
@@ -611,6 +819,13 @@ private struct DayMapStrip: View {
             ForEach(placeMarkers) { marker in
                 Marker(marker.title, coordinate: marker.coordinate)
                     .tint(MovesPalette.place)
+            }
+
+            if placeMarkers.isEmpty,
+               routeCoordinates.isEmpty,
+               let latestSampleCoordinate {
+                Marker("Captured location", coordinate: latestSampleCoordinate)
+                    .tint(MovesPalette.start)
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
@@ -639,6 +854,36 @@ private struct DayMapStrip: View {
             merged,
             minimumDistanceMeters: 6
         )
+
+        let allCoordinates = Self.allCoordinates(for: dayTimeline, routeCoordinates: routeCoordinates)
+        if !allCoordinates.isEmpty {
+            camera = .region(MapRegionFactory.region(for: allCoordinates))
+        }
+    }
+
+    private static func routeCoordinates(for dayTimeline: DayTimeline) -> [CLLocationCoordinate2D] {
+        let moveCoordinates = dayTimeline.moves
+            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+            .flatMap { MoveRouteGeometry.rawCoordinates(for: $0) }
+        return RouteCoordinateOps.dedupeSequentialCoordinates(
+            moveCoordinates,
+            minimumDistanceMeters: 6
+        )
+    }
+
+    private static func sampleCoordinates(for dayTimeline: DayTimeline) -> [CLLocationCoordinate2D] {
+        dayTimeline.samples
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .map(\.coordinate)
+    }
+
+    private static func allCoordinates(
+        for dayTimeline: DayTimeline,
+        routeCoordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationCoordinate2D] {
+        let placeCoordinates = dayTimeline.places.map(\.coordinate)
+        let sampleCoordinates = Self.sampleCoordinates(for: dayTimeline)
+        return routeCoordinates + placeCoordinates + sampleCoordinates
     }
 }
 
@@ -1335,6 +1580,7 @@ private struct MovesSettingsView: View {
 
     let dayTimelines: [DayTimeline]
     let selectedDayKey: String
+    let captureManager: MovesLocationCaptureManager
 
     @State private var isExporting = false
     @State private var exportDocument: TimelineExportDocument?
@@ -1375,14 +1621,30 @@ private struct MovesSettingsView: View {
         dayTimelines.reduce(0) { $0 + $1.moves.count }
     }
 
+    private var sampleCount: Int {
+        dayTimelines.reduce(0) { $0 + $1.samples.count }
+    }
+
     var body: some View {
-     
         NavigationStack {
             Form {
+                if let bannerData = trackingStatusBannerData(
+                    for: captureManager,
+                    context: .settings
+                ) {
+                    Section {
+                        TrackingStatusBanner(data: bannerData)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
                 Section("Data Summary") {
                     LabeledContent("Days", value: "\(dayCount)")
                     LabeledContent("Places", value: "\(placeCount)")
                     LabeledContent("Moves", value: "\(moveCount)")
+                    LabeledContent("Samples", value: "\(sampleCount)")
                 }
 
                 Section("GPX Export") {
@@ -1449,11 +1711,11 @@ private struct MovesSettingsView: View {
             }
             isShowingExportMessage = true
         }
-        .alert("Export", isPresented: $isShowingExportMessage) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(exportMessage)
-        }
+            .alert("Export", isPresented: $isShowingExportMessage) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(exportMessage)
+            }
     }
 
     private func export(_ format: TimelineExportFormat, scope: TimelineExportScope) {
