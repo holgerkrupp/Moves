@@ -302,7 +302,7 @@ struct ContentView: View {
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.primary.opacity(0.92))
 
-                    Text("\(selectedDay.places.count) places   \(selectedDay.moves.count) moves")
+                    Text("\(selectedDay.uniqueLocationCount) places   \(selectedDay.moves.count) moves")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                 }

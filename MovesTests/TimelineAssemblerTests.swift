@@ -211,6 +211,36 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(moves.first?.startDate, correctedStart)
     }
 
+    func testDayTimelineCountsRepeatedVisitsToTheSameLocationOnce() {
+        let dayTimeline = DayTimeline(dayStart: Date(timeIntervalSince1970: 1_710_000_000))
+
+        let firstHomeVisit = VisitPlace(
+            arrivalDate: Date(timeIntervalSince1970: 1_710_000_000),
+            departureDate: Date(timeIntervalSince1970: 1_710_000_900),
+            latitude: 52.52001,
+            longitude: 13.40501,
+            horizontalAccuracy: 20
+        )
+        let cafeVisit = VisitPlace(
+            arrivalDate: Date(timeIntervalSince1970: 1_710_001_800),
+            departureDate: Date(timeIntervalSince1970: 1_710_002_100),
+            latitude: 52.53000,
+            longitude: 13.41500,
+            horizontalAccuracy: 20
+        )
+        let secondHomeVisit = VisitPlace(
+            arrivalDate: Date(timeIntervalSince1970: 1_710_002_400),
+            departureDate: nil,
+            latitude: 52.52004,
+            longitude: 13.40504,
+            horizontalAccuracy: 20
+        )
+
+        dayTimeline.places = [firstHomeVisit, cafeVisit, secondHomeVisit]
+
+        XCTAssertEqual(dayTimeline.uniqueLocationCount, 2)
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = Schema([
             DayTimeline.self,

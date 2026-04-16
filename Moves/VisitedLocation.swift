@@ -72,6 +72,10 @@ final class DayTimeline {
         set { samplesStorage = newValue }
     }
 
+    var uniqueLocationCount: Int {
+        Set(places.map(\.locationKey)).count
+    }
+
     init(dayStart: Date) {
         let start = Calendar.current.startOfDay(for: dayStart)
         self.dayStart = start
@@ -158,6 +162,15 @@ final class VisitPlace {
         let lat = String(format: "%.5f", latitude)
         let lon = String(format: "%.5f", longitude)
         return "\(lat), \(lon)"
+    }
+}
+
+fileprivate extension VisitPlace {
+    var locationKey: String {
+        // Round into ~10m buckets so repeat visits to the same spot count once.
+        let latitudeBucket = Int((latitude * 10_000).rounded())
+        let longitudeBucket = Int((longitude * 10_000).rounded())
+        return "\(latitudeBucket)|\(longitudeBucket)"
     }
 }
 
