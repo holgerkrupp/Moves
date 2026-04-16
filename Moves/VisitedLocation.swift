@@ -209,6 +209,8 @@ final class MoveSegment {
     var startPlace: VisitPlace?
     var endPlace: VisitPlace?
     var dayTimeline: DayTimeline?
+    var routeCacheSignature: String? = nil
+    var routeCacheCoordinatesData: Data? = nil
 
     @Relationship(deleteRule: .nullify, originalName: "samples", inverse: \LocationSample.moveSegment)
     var samplesStorage: [LocationSample]? = nil
@@ -253,6 +255,24 @@ final class MoveSegment {
 
     var usesHighAccuracyRouteTracking: Bool {
         samples.contains { $0.source == .routeTracking }
+    }
+
+    func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
+        guard routeCacheSignature == signature, routeCacheCoordinatesData != nil else {
+            return nil
+        }
+
+        return RouteCoordinateStorage.decode(routeCacheCoordinatesData)
+    }
+
+    func storeCachedRouteCoordinates(_ coordinates: [CLLocationCoordinate2D], signature: String) {
+        routeCacheSignature = signature
+        routeCacheCoordinatesData = RouteCoordinateStorage.encode(coordinates)
+    }
+
+    func clearCachedRouteCoordinates() {
+        routeCacheSignature = nil
+        routeCacheCoordinatesData = nil
     }
 }
 
@@ -677,6 +697,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
 #if targetEnvironment(simulator)
 enum SimulatorDemoDataSeeder {
+    private static var roadCoordinatesCache: [String: [CLLocationCoordinate2D]] = [:]
+    private static var roadCoordinatesRequestCount = 0
+    private static let roadCoordinatesRequestLimit = 20
+
     static func seedIfNeeded(in container: ModelContainer) {
         do {
             let context = ModelContext(container)
@@ -903,9 +927,20 @@ enum SimulatorDemoDataSeeder {
         to end: CLLocationCoordinate2D,
         mode: TransportMode
     ) async -> [CLLocationCoordinate2D]? {
+        let cacheKey = roadCoordinatesCacheKey(from: start, to: end, mode: mode)
+        if let cached = roadCoordinatesCache[cacheKey] {
+            return cached
+        }
+
+        guard roadCoordinatesRequestCount < roadCoordinatesRequestLimit else {
+            return nil
+        }
+
         guard let transportType = mapTransportType(for: mode) else {
             return nil
         }
+
+        roadCoordinatesRequestCount += 1
 
         let request = MKDirections.Request()
         request.source = mapItem(for: start)
@@ -920,10 +955,30 @@ enum SimulatorDemoDataSeeder {
             }
 
             let coordinates = polylineCoordinates(route.polyline)
-            return coordinates.count > 1 ? coordinates : nil
+            guard coordinates.count > 1 else {
+                return nil
+            }
+
+            roadCoordinatesCache[cacheKey] = coordinates
+            return coordinates
         } catch {
             return nil
         }
+    }
+
+    private static func roadCoordinatesCacheKey(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        mode: TransportMode
+    ) -> String {
+        [
+            mode.rawValue,
+            String(format: "%.4f", start.latitude),
+            String(format: "%.4f", start.longitude),
+            String(format: "%.4f", end.latitude),
+            String(format: "%.4f", end.longitude)
+        ]
+        .joined(separator: "|")
     }
 
     private static func curvedPoints(

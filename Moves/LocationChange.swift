@@ -388,7 +388,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
             let totalDistance = Self.totalDistance(for: movementLocations)
 
-            _ = try repository.upsertMove(
+            let move = try repository.upsertMove(
                 startPlace: previousPlace,
                 endPlace: visitPlace,
                 startDate: startDate,
@@ -398,6 +398,8 @@ final class DefaultTimelineAssembler: TimelineAssembler {
                 stepCount: steps,
                 samples: betweenSamples
             )
+
+            _ = await RoadRouteMatcher.matchedCoordinates(for: move)
 
             try repository.saveIfNeeded()
         } catch {

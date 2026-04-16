@@ -149,6 +149,64 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertFalse(segment.usesHighAccuracyRouteTracking)
     }
 
+    func testMoveSegmentRouteCacheRoundTripsAndHonorsSignatureChanges() {
+        let segment = MoveSegment(
+            dedupeKey: "move-cache",
+            startDate: Date(timeIntervalSince1970: 1_710_000_000),
+            endDate: Date(timeIntervalSince1970: 1_710_000_900),
+            transportMode: .walking,
+            distanceMeters: 1200,
+            stepCount: 1400
+        )
+        let signature = "signature-1"
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.520008, longitude: 13.404954),
+            CLLocationCoordinate2D(latitude: 52.521008, longitude: 13.405954),
+        ]
+
+        XCTAssertNil(segment.cachedRouteCoordinates(for: signature))
+
+        segment.storeCachedRouteCoordinates(coordinates, signature: signature)
+
+        let cached = segment.cachedRouteCoordinates(for: signature)
+        XCTAssertEqual(cached?.count, 2)
+        XCTAssertEqual(cached?.first?.latitude, coordinates.first?.latitude)
+        XCTAssertEqual(cached?.first?.longitude, coordinates.first?.longitude)
+        XCTAssertEqual(cached?.last?.latitude, coordinates.last?.latitude)
+        XCTAssertEqual(cached?.last?.longitude, coordinates.last?.longitude)
+        XCTAssertNil(segment.cachedRouteCoordinates(for: "signature-2"))
+
+        segment.clearCachedRouteCoordinates()
+        XCTAssertNil(segment.cachedRouteCoordinates(for: signature))
+    }
+
+    func testMoveRouteCacheSignatureIsStableForTheSameCoordinates() {
+        let segment = MoveSegment(
+            dedupeKey: "move-signature",
+            startDate: Date(timeIntervalSince1970: 1_710_000_000),
+            endDate: Date(timeIntervalSince1970: 1_710_000_900),
+            transportMode: .walking,
+            distanceMeters: 1200,
+            stepCount: 1400
+        )
+        let fallback = [
+            CLLocationCoordinate2D(latitude: 52.520008, longitude: 13.404954),
+            CLLocationCoordinate2D(latitude: 52.521008, longitude: 13.405954),
+        ]
+
+        let first = MoveRouteGeometry.cacheSignature(for: segment, fallback: fallback)
+        let second = MoveRouteGeometry.cacheSignature(for: segment, fallback: fallback)
+
+        XCTAssertEqual(first, second)
+
+        let changedFallback = [
+            CLLocationCoordinate2D(latitude: 52.520008, longitude: 13.404954),
+            CLLocationCoordinate2D(latitude: 52.522008, longitude: 13.406954),
+        ]
+
+        XCTAssertNotEqual(first, MoveRouteGeometry.cacheSignature(for: segment, fallback: changedFallback))
+    }
+
     func testTemporaryRouteTrackingEndOfDayFallsBackToTheStartOfTomorrow() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

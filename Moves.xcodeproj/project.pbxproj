@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		489A76352C4FC6F300F43B69 /* MovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76342C4FC6F300F43B69 /* MovesApp.swift */; };
 		489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76362C4FC6F300F43B69 /* ContentView.swift */; };
+		A10000012F00000100000002 /* MovesRouteSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000001 /* MovesRouteSupport.swift */; };
+		A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000003 /* MovesTimelineViews.swift */; };
+		A10000012F00000100000006 /* MovesDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000005 /* MovesDetailViews.swift */; };
+		A10000012F00000100000008 /* MovesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000007 /* MovesSettingsView.swift */; };
 		489A763B2C4FC6F500F43B69 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763A2C4FC6F500F43B69 /* Assets.xcassets */; };
 		489A763E2C4FC6F500F43B69 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763D2C4FC6F500F43B69 /* Preview Assets.xcassets */; };
 		489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76442C4FC70D00F43B69 /* LocationChange.swift */; };
@@ -33,6 +37,10 @@
 		489A76312C4FC6F300F43B69 /* Moves.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Moves.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		489A76342C4FC6F300F43B69 /* MovesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesApp.swift; sourceTree = "<group>"; };
 		489A76362C4FC6F300F43B69 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A10000012F00000100000001 /* MovesRouteSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteSupport.swift; sourceTree = "<group>"; };
+		A10000012F00000100000003 /* MovesTimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesTimelineViews.swift; sourceTree = "<group>"; };
+		A10000012F00000100000005 /* MovesDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesDetailViews.swift; sourceTree = "<group>"; };
+		A10000012F00000100000007 /* MovesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesSettingsView.swift; sourceTree = "<group>"; };
 		489A763A2C4FC6F500F43B69 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		489A763D2C4FC6F500F43B69 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		489A76442C4FC70D00F43B69 /* LocationChange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationChange.swift; sourceTree = "<group>"; };
@@ -92,6 +100,10 @@
 				489A76462C4FCF1300F43B69 /* Info.plist */,
 				489A76342C4FC6F300F43B69 /* MovesApp.swift */,
 				489A76362C4FC6F300F43B69 /* ContentView.swift */,
+				A10000012F00000100000001 /* MovesRouteSupport.swift */,
+				A10000012F00000100000003 /* MovesTimelineViews.swift */,
+				A10000012F00000100000005 /* MovesDetailViews.swift */,
+				A10000012F00000100000007 /* MovesSettingsView.swift */,
 				489A76442C4FC70D00F43B69 /* LocationChange.swift */,
 				489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */,
 				489A763A2C4FC6F500F43B69 /* Assets.xcassets */,
@@ -219,6 +231,10 @@
 			files = (
 				489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */,
 				489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */,
+				A10000012F00000100000002 /* MovesRouteSupport.swift in Sources */,
+				A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */,
+				A10000012F00000100000006 /* MovesDetailViews.swift in Sources */,
+				A10000012F00000100000008 /* MovesSettingsView.swift in Sources */,
 				489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */,
 				48A8FC0F2F8CCC7E000EAECA /* CreatedByView.swift in Sources */,
 				48A8FC112F8CCD27000EAECA /* VersionNumberView.swift in Sources */,

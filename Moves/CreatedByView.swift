@@ -47,6 +47,8 @@ struct CreatedByView: View {
     }
 }
 
-#Preview {
-    CreatedByView()
+struct CreatedByView_Previews: PreviewProvider {
+    static var previews: some View {
+        CreatedByView()
+    }
 }
