@@ -444,16 +444,20 @@ struct ContentView: View {
 
                         TabView(selection: $selectedPageIndex) {
                             ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
-                                DayTimelinePage(dayTimeline: day)
+                                DayTimelinePage(dayKey: day.dayKey)
                                     .tag(index)
+                                    
                             }
                         }
+                        .ignoresSafeArea()
                         .tabViewStyle(.page(indexDisplayMode: .never))
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
+                
             }
+            
             .navigationTitle("Moves")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -688,6 +692,59 @@ struct ContentView: View {
 }
 
 private struct DayTimelinePage: View {
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var captureManager: MovesLocationCaptureManager
+    let dayKey: String
+
+    @State private var dayTimeline: DayTimeline?
+    @State private var loadErrorMessage: String?
+
+    var body: some View {
+        Group {
+            if let dayTimeline {
+                DayTimelinePageContent(dayTimeline: dayTimeline)
+            } else {
+                loadingState
+            }
+        }
+        .task(id: dayKey) {
+            await loadDayTimeline()
+        }
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .tint(MovesPalette.routeTracking)
+
+            Text(loadErrorMessage ?? "Loading day")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 420)
+        .panelSurface()
+    }
+
+    @MainActor
+    private func loadDayTimeline() async {
+        let descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { timeline in
+                timeline.dayKey == dayKey
+            },
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
+        )
+
+        do {
+            dayTimeline = try modelContext.fetch(descriptor).first
+            loadErrorMessage = dayTimeline == nil ? "Day not found" : nil
+        } catch {
+            dayTimeline = nil
+            loadErrorMessage = "Could not load day"
+        }
+    }
+}
+
+private struct DayTimelinePageContent: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
     private static let transientStopMaximumDuration: TimeInterval = 5 * 60
