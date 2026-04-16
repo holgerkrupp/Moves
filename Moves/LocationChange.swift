@@ -4,13 +4,91 @@ import CoreLocation
 import CoreMotion
 import MapKit
 import SwiftData
+import UIKit
 
 @MainActor
 protocol LocationCaptureService: AnyObject {
     func start() async
     func requestTrackingAuthorization()
+    func enableTemporaryRouteTracking(duration: TemporaryRouteTrackingDuration)
+    func updateTemporaryRouteTrackingAutoStopRules(
+        stopsAtFiftyPercentBattery: Bool,
+        stopsInLowPowerMode: Bool
+    )
+    func disableTemporaryRouteTracking()
     func stop()
     func refreshHistoricalBackfill() async
+}
+
+enum TemporaryRouteTrackingDuration: String, CaseIterable, Identifiable {
+    case thirtyMinutes
+    case oneHour
+    case twoHours
+    case fourHours
+    case endOfDay
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .thirtyMinutes:
+            return "30 minutes"
+        case .oneHour:
+            return "1 hour"
+        case .twoHours:
+            return "2 hours"
+        case .fourHours:
+            return "4 hours"
+        case .endOfDay:
+            return "Until end of day"
+        }
+    }
+
+    var availabilityText: String {
+        switch self {
+        case .thirtyMinutes:
+            return "for 30 minutes"
+        case .oneHour:
+            return "for 1 hour"
+        case .twoHours:
+            return "for 2 hours"
+        case .fourHours:
+            return "for 4 hours"
+        case .endOfDay:
+            return "until the end of today"
+        }
+    }
+
+    var timeInterval: TimeInterval? {
+        switch self {
+        case .thirtyMinutes:
+            return 30 * 60
+        case .oneHour:
+            return 60 * 60
+        case .twoHours:
+            return 2 * 60 * 60
+        case .fourHours:
+            return 4 * 60 * 60
+        case .endOfDay:
+            return nil
+        }
+    }
+
+    func endDate(from startDate: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
+        switch self {
+        case .thirtyMinutes:
+            return startDate.addingTimeInterval(30 * 60)
+        case .oneHour:
+            return startDate.addingTimeInterval(60 * 60)
+        case .twoHours:
+            return startDate.addingTimeInterval(2 * 60 * 60)
+        case .fourHours:
+            return startDate.addingTimeInterval(4 * 60 * 60)
+        case .endOfDay:
+            let startOfDay = calendar.startOfDay(for: startDate)
+            return calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(24 * 60 * 60)
+        }
+    }
 }
 
 protocol MotionClassifier {
@@ -413,13 +491,45 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     @Published private(set) var isMonitoring = false
     @Published private(set) var lastCaptureAt: Date?
     @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var temporaryRouteTrackingDuration: TemporaryRouteTrackingDuration = .endOfDay
+    @Published private(set) var temporaryRouteTrackingStartedAt: Date?
+    @Published private(set) var temporaryRouteTrackingEndsAt: Date?
+    @Published private(set) var temporaryRouteTrackingStopsAtFiftyPercentBattery = false
+    @Published private(set) var temporaryRouteTrackingStopsInLowPowerMode = false
 
     private let manager = CLLocationManager()
+    private let userDefaults: UserDefaults
+    #if targetEnvironment(simulator)
+    let isDemoMode = true
+    #else
+    let isDemoMode = false
+    #endif
     private let assembler: TimelineAssembler
     private var pendingOneShotLocationSource: LocationSampleSource?
     private var shouldChainToAlwaysAfterWhenInUse = false
+    private var isHighAccuracyMonitoring = false
+    private var temporaryRouteTrackingExpiryTask: Task<Void, Never>?
+    private var temporaryRouteTrackingEnergyStateObserverTokens: [NSObjectProtocol] = []
 
-    init(modelContainer: ModelContainer) {
+    private enum TemporaryRouteTrackingStorageKey {
+        static let duration = "Moves.temporaryRouteTracking.duration"
+        static let startedAt = "Moves.temporaryRouteTracking.startedAt"
+        static let endsAt = "Moves.temporaryRouteTracking.endsAt"
+        static let stopAtFiftyPercentBattery = "Moves.temporaryRouteTracking.stopAtFiftyPercentBattery"
+        static let stopInLowPowerMode = "Moves.temporaryRouteTracking.stopInLowPowerMode"
+    }
+
+    private static let lowPowerDesiredAccuracy = kCLLocationAccuracyHundredMeters
+    private static let lowPowerDistanceFilter: CLLocationDistance = 150
+    private static let highAccuracyDesiredAccuracy = kCLLocationAccuracyBestForNavigation
+    private static let highAccuracyDistanceFilter: CLLocationDistance = 10
+
+    private var shouldSkipLiveTracking: Bool {
+        isDemoMode || ProcessInfo.processInfo.isRunningUnitTests
+    }
+
+    init(modelContainer: ModelContainer, userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
         let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
         self.assembler = DefaultTimelineAssembler(
             repository: repository,
@@ -431,16 +541,38 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
         manager.delegate = self
         manager.activityType = .otherNavigation
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        manager.distanceFilter = 150
+        manager.desiredAccuracy = Self.lowPowerDesiredAccuracy
+        manager.distanceFilter = Self.lowPowerDistanceFilter
         manager.pausesLocationUpdatesAutomatically = true
         manager.showsBackgroundLocationIndicator = false
 
         authorizationStatus = manager.authorizationStatus
+        if !shouldSkipLiveTracking {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            installTemporaryRouteTrackingEnergyObservers()
+        }
+        restoreTemporaryRouteTrackingState()
         updateBackgroundLocationAllowance()
     }
 
     var trackingStatusText: String {
+        if isDemoMode {
+            return "Simulator demo mode"
+        }
+
+        if isTemporaryRouteTrackingActive {
+            switch authorizationStatus {
+            case .authorizedAlways, .authorizedWhenInUse:
+                return "Real route tracking on"
+            case .notDetermined:
+                return "Real route tracking waiting for permission"
+            case .denied, .restricted:
+                return "Real route tracking paused"
+            @unknown default:
+                return "Real route tracking on"
+            }
+        }
+
         switch authorizationStatus {
         case .authorizedAlways:
             return isMonitoring ? "Tracking in background" : "Ready"
@@ -458,6 +590,8 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func start() async {
+        guard !shouldSkipLiveTracking else { return }
+
         let status = manager.authorizationStatus
         handleAuthorization(status)
 
@@ -467,6 +601,8 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func requestTrackingAuthorization() {
+        guard !shouldSkipLiveTracking else { return }
+
         let status = manager.authorizationStatus
         authorizationStatus = status
         updateBackgroundLocationAllowance()
@@ -478,11 +614,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         case .authorizedWhenInUse:
             shouldChainToAlwaysAfterWhenInUse = false
             manager.requestAlwaysAuthorization()
-            startLowPowerMonitoringIfNeeded()
+            applyTrackingConfiguration()
             requestOneShotLocation(source: .authorizationGrant)
         case .authorizedAlways:
             shouldChainToAlwaysAfterWhenInUse = false
-            startLowPowerMonitoringIfNeeded()
+            applyTrackingConfiguration()
             requestOneShotLocation(source: .authorizationGrant)
         case .restricted, .denied:
             shouldChainToAlwaysAfterWhenInUse = false
@@ -493,19 +629,68 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func stop() {
+        guard !shouldSkipLiveTracking else { return }
+
         manager.stopMonitoringVisits()
         manager.stopMonitoringSignificantLocationChanges()
+        manager.stopUpdatingLocation()
         manager.allowsBackgroundLocationUpdates = false
+        manager.showsBackgroundLocationIndicator = false
         pendingOneShotLocationSource = nil
         isMonitoring = false
+        isHighAccuracyMonitoring = false
     }
 
     func refreshHistoricalBackfill() async {
+        guard !shouldSkipLiveTracking else { return }
+
         guard isAuthorizedForTracking else { return }
 
         // iOS does not expose requestHistoricalLocations for third-party apps.
         // We ask for one current fix on launch/foreground to bridge short gaps.
         requestOneShotLocation(source: .launchBackfill)
+    }
+
+    func enableTemporaryRouteTracking(duration: TemporaryRouteTrackingDuration) {
+        guard !shouldSkipLiveTracking else { return }
+        guard isAuthorizedForTracking else { return }
+
+        temporaryRouteTrackingDuration = duration
+        temporaryRouteTrackingStartedAt = .now
+        temporaryRouteTrackingEndsAt = duration.endDate(from: .now)
+        persistTemporaryRouteTrackingState()
+
+        if shouldExpireTemporaryRouteTrackingNow {
+            expireTemporaryRouteTracking()
+            return
+        }
+
+        scheduleTemporaryRouteTrackingExpiryTask()
+        applyTrackingConfiguration()
+        requestOneShotLocation(source: .routeTracking)
+    }
+
+    func updateTemporaryRouteTrackingAutoStopRules(
+        stopsAtFiftyPercentBattery: Bool,
+        stopsInLowPowerMode: Bool
+    ) {
+        guard !shouldSkipLiveTracking else { return }
+
+        temporaryRouteTrackingStopsAtFiftyPercentBattery = stopsAtFiftyPercentBattery
+        temporaryRouteTrackingStopsInLowPowerMode = stopsInLowPowerMode
+        persistTemporaryRouteTrackingState()
+        refreshTemporaryRouteTrackingStateIfNeeded()
+    }
+
+    func disableTemporaryRouteTracking() {
+        guard !shouldSkipLiveTracking else { return }
+        guard temporaryRouteTrackingEndsAt != nil else { return }
+
+        cancelTemporaryRouteTrackingExpiryTask()
+        temporaryRouteTrackingStartedAt = nil
+        temporaryRouteTrackingEndsAt = nil
+        persistTemporaryRouteTrackingState()
+        applyTrackingConfiguration()
     }
 
     private var isAuthorizedForTracking: Bool {
@@ -515,13 +700,14 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private func handleAuthorization(_ status: CLAuthorizationStatus) {
         authorizationStatus = status
         updateBackgroundLocationAllowance()
+        refreshTemporaryRouteTrackingStateIfNeeded()
 
         switch status {
         case .notDetermined:
             stop()
         case .authorizedAlways:
             shouldChainToAlwaysAfterWhenInUse = false
-            startLowPowerMonitoringIfNeeded()
+            applyTrackingConfiguration()
             requestOneShotLocation(source: .authorizationGrant)
         case .authorizedWhenInUse:
             if shouldChainToAlwaysAfterWhenInUse {
@@ -529,7 +715,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
                 manager.requestAlwaysAuthorization()
             }
 
-            startLowPowerMonitoringIfNeeded()
+            applyTrackingConfiguration()
             requestOneShotLocation(source: .authorizationGrant)
         case .restricted, .denied:
             shouldChainToAlwaysAfterWhenInUse = false
@@ -544,8 +730,39 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         guard !isMonitoring else { return }
 
         manager.startMonitoringVisits()
-        manager.startMonitoringSignificantLocationChanges()
         isMonitoring = true
+    }
+
+    private func applyTrackingConfiguration() {
+        guard isAuthorizedForTracking else {
+            stop()
+            return
+        }
+
+        startLowPowerMonitoringIfNeeded()
+        updateBackgroundLocationAllowance()
+
+        let shouldUseHighAccuracy = isTemporaryRouteTrackingActive
+        if shouldUseHighAccuracy {
+            manager.stopMonitoringSignificantLocationChanges()
+            manager.desiredAccuracy = Self.highAccuracyDesiredAccuracy
+            manager.distanceFilter = Self.highAccuracyDistanceFilter
+            manager.pausesLocationUpdatesAutomatically = false
+            manager.showsBackgroundLocationIndicator = authorizationStatus == .authorizedAlways
+
+            if !isHighAccuracyMonitoring {
+                manager.startUpdatingLocation()
+                isHighAccuracyMonitoring = true
+            }
+        } else {
+            manager.startMonitoringSignificantLocationChanges()
+            manager.stopUpdatingLocation()
+            isHighAccuracyMonitoring = false
+            manager.desiredAccuracy = Self.lowPowerDesiredAccuracy
+            manager.distanceFilter = Self.lowPowerDistanceFilter
+            manager.pausesLocationUpdatesAutomatically = true
+            manager.showsBackgroundLocationIndicator = false
+        }
     }
 
     private func requestOneShotLocation(source: LocationSampleSource) {
@@ -558,6 +775,177 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private func updateBackgroundLocationAllowance() {
         manager.allowsBackgroundLocationUpdates = authorizationStatus == .authorizedAlways
     }
+
+    private var isTemporaryRouteTrackingActive: Bool {
+        guard let endsAt = temporaryRouteTrackingEndsAt else { return false }
+        return endsAt > .now
+    }
+
+    private func refreshTemporaryRouteTrackingStateIfNeeded() {
+        guard let endsAt = temporaryRouteTrackingEndsAt else { return }
+
+        if endsAt <= .now || shouldExpireTemporaryRouteTrackingNow {
+            expireTemporaryRouteTracking()
+        }
+    }
+
+    private func restoreTemporaryRouteTrackingState() {
+        if let durationRawValue = userDefaults.string(forKey: TemporaryRouteTrackingStorageKey.duration),
+           let duration = TemporaryRouteTrackingDuration(rawValue: durationRawValue) {
+            temporaryRouteTrackingDuration = duration
+        }
+
+        temporaryRouteTrackingStartedAt = userDefaults.object(
+            forKey: TemporaryRouteTrackingStorageKey.startedAt
+        ) as? Date
+
+        temporaryRouteTrackingStopsAtFiftyPercentBattery = userDefaults.bool(
+            forKey: TemporaryRouteTrackingStorageKey.stopAtFiftyPercentBattery
+        )
+        temporaryRouteTrackingStopsInLowPowerMode = userDefaults.bool(
+            forKey: TemporaryRouteTrackingStorageKey.stopInLowPowerMode
+        )
+
+        guard let storedEndsAt = userDefaults.object(forKey: TemporaryRouteTrackingStorageKey.endsAt) as? Date else {
+            return
+        }
+
+        if storedEndsAt > .now {
+            temporaryRouteTrackingEndsAt = storedEndsAt
+            if temporaryRouteTrackingStartedAt == nil,
+               let interval = temporaryRouteTrackingDuration.timeInterval {
+                temporaryRouteTrackingStartedAt = storedEndsAt.addingTimeInterval(-interval)
+            }
+            if shouldExpireTemporaryRouteTrackingNow {
+                expireTemporaryRouteTracking()
+                return
+            }
+            scheduleTemporaryRouteTrackingExpiryTask()
+            return
+        }
+
+        temporaryRouteTrackingEndsAt = nil
+        persistTemporaryRouteTrackingState()
+    }
+
+    private func scheduleTemporaryRouteTrackingExpiryTask() {
+        cancelTemporaryRouteTrackingExpiryTask()
+
+        guard let endsAt = temporaryRouteTrackingEndsAt else { return }
+        let secondsUntilExpiry = endsAt.timeIntervalSinceNow
+        guard secondsUntilExpiry > 0 else {
+            expireTemporaryRouteTracking()
+            return
+        }
+
+        let nanoseconds = UInt64((secondsUntilExpiry * 1_000_000_000).rounded())
+        temporaryRouteTrackingExpiryTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+
+            await MainActor.run {
+                self?.expireTemporaryRouteTrackingIfStillCurrent(expectedEndDate: endsAt)
+            }
+        }
+    }
+
+    private func cancelTemporaryRouteTrackingExpiryTask() {
+        temporaryRouteTrackingExpiryTask?.cancel()
+        temporaryRouteTrackingExpiryTask = nil
+    }
+
+    private func persistTemporaryRouteTrackingState() {
+        userDefaults.set(temporaryRouteTrackingDuration.rawValue, forKey: TemporaryRouteTrackingStorageKey.duration)
+        if let temporaryRouteTrackingStartedAt {
+            userDefaults.set(temporaryRouteTrackingStartedAt, forKey: TemporaryRouteTrackingStorageKey.startedAt)
+        } else {
+            userDefaults.removeObject(forKey: TemporaryRouteTrackingStorageKey.startedAt)
+        }
+        userDefaults.set(
+            temporaryRouteTrackingStopsAtFiftyPercentBattery,
+            forKey: TemporaryRouteTrackingStorageKey.stopAtFiftyPercentBattery
+        )
+        userDefaults.set(
+            temporaryRouteTrackingStopsInLowPowerMode,
+            forKey: TemporaryRouteTrackingStorageKey.stopInLowPowerMode
+        )
+
+        if let temporaryRouteTrackingEndsAt {
+            userDefaults.set(temporaryRouteTrackingEndsAt, forKey: TemporaryRouteTrackingStorageKey.endsAt)
+        } else {
+            userDefaults.removeObject(forKey: TemporaryRouteTrackingStorageKey.endsAt)
+        }
+    }
+
+    private func expireTemporaryRouteTracking() {
+        cancelTemporaryRouteTrackingExpiryTask()
+        temporaryRouteTrackingStartedAt = nil
+        temporaryRouteTrackingEndsAt = nil
+        persistTemporaryRouteTrackingState()
+        applyTrackingConfiguration()
+    }
+
+    private func expireTemporaryRouteTrackingIfStillCurrent(expectedEndDate: Date) {
+        guard temporaryRouteTrackingEndsAt == expectedEndDate else { return }
+        guard expectedEndDate <= .now else { return }
+        expireTemporaryRouteTracking()
+    }
+
+    private var shouldExpireTemporaryRouteTrackingNow: Bool {
+        if temporaryRouteTrackingStopsInLowPowerMode && ProcessInfo.processInfo.isLowPowerModeEnabled {
+            return true
+        }
+
+        if temporaryRouteTrackingStopsAtFiftyPercentBattery {
+            let batteryLevel = UIDevice.current.batteryLevel
+            if batteryLevel >= 0 && batteryLevel <= 0.5 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func installTemporaryRouteTrackingEnergyObservers() {
+        let center = NotificationCenter.default
+
+        temporaryRouteTrackingEnergyStateObserverTokens.append(
+            center.addObserver(
+                forName: UIDevice.batteryLevelDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.refreshTemporaryRouteTrackingStateIfNeeded()
+                }
+            }
+        )
+        temporaryRouteTrackingEnergyStateObserverTokens.append(
+            center.addObserver(
+                forName: UIDevice.batteryStateDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.refreshTemporaryRouteTrackingStateIfNeeded()
+                }
+            }
+        )
+        temporaryRouteTrackingEnergyStateObserverTokens.append(
+            center.addObserver(
+                forName: Notification.Name.NSProcessInfoPowerStateDidChange,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.refreshTemporaryRouteTrackingStateIfNeeded()
+                }
+            }
+        )
+    }
 }
 
 extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate {
@@ -566,6 +954,8 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
     }
 
     func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        refreshTemporaryRouteTrackingStateIfNeeded()
+
         let visitTimestamp = visit.arrivalDate == .distantPast ? Date.now : visit.arrivalDate
         let visitLocation = CLLocation(
             coordinate: visit.coordinate,
@@ -588,8 +978,10 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard !locations.isEmpty else { return }
 
+        refreshTemporaryRouteTrackingStateIfNeeded()
+
         lastCaptureAt = .now
-        let source: LocationSampleSource = pendingOneShotLocationSource ?? .significantChange
+        let source: LocationSampleSource = pendingOneShotLocationSource ?? (isTemporaryRouteTrackingActive ? .routeTracking : .significantChange)
         pendingOneShotLocationSource = nil
 
         Task {

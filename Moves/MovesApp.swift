@@ -17,23 +17,8 @@ struct MovesApp: App {
     @StateObject private var captureManager: MovesLocationCaptureManager
 
     init() {
-        let schema = Schema([
-            DayTimeline.self,
-            VisitPlace.self,
-            MoveSegment.self,
-            LocationSample.self,
-        ])
-
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
-        )
-
         do {
-            let container = try ModelContainer(
-                for: schema,
-                configurations: [modelConfiguration]
-            )
+            let container = try Self.makeModelContainer()
             self.sharedModelContainer = container
             _captureManager = StateObject(
                 wrappedValue: MovesLocationCaptureManager(modelContainer: container)
@@ -41,6 +26,40 @@ struct MovesApp: App {
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
+    }
+
+    private static func makeModelContainer() throws -> ModelContainer {
+        let schema = Schema([
+            DayTimeline.self,
+            VisitPlace.self,
+            MoveSegment.self,
+            LocationSample.self,
+        ])
+
+        let modelConfiguration: ModelConfiguration
+        #if targetEnvironment(simulator)
+        modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        #else
+        modelConfiguration = ModelConfiguration(
+            schema: schema,
+            cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
+        )
+        #endif
+
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [modelConfiguration]
+        )
+
+        #if targetEnvironment(simulator)
+        SimulatorDemoDataSeeder.seedIfNeeded(in: container)
+        #endif
+
+        return container
     }
 
     var body: some Scene {
@@ -57,5 +76,11 @@ struct MovesApp: App {
                 }
             }
         }
+    }
+}
+
+extension ProcessInfo {
+    var isRunningUnitTests: Bool {
+        environment["XCTestConfigurationFilePath"] != nil
     }
 }

@@ -15,6 +15,7 @@ private enum MovesPalette {
     static let place = Color(red: 0.18, green: 0.68, blue: 0.47)
     static let move = Color(red: 0.16, green: 0.52, blue: 0.93)
     static let start = Color(red: 0.95, green: 0.64, blue: 0.18)
+    static let routeTracking = Color(red: 0.02, green: 0.69, blue: 0.78)
 }
 
 private enum TrackingPromptAction {
@@ -39,10 +40,38 @@ private struct TrackingStatusBannerData {
     let message: String
     let systemImage: String
     let tint: Color
+
+    let buttonTitle: String?
+    let buttonRole: ButtonRole?
+
+    init(
+        title: String,
+        message: String,
+        systemImage: String,
+        tint: Color,
+        buttonTitle: String? = nil,
+        buttonRole: ButtonRole? = nil
+    ) {
+        self.title = title
+        self.message = message
+        self.systemImage = systemImage
+        self.tint = tint
+        self.buttonTitle = buttonTitle
+        self.buttonRole = buttonRole
+    }
 }
 
 private struct TrackingStatusBanner: View {
     let data: TrackingStatusBannerData
+    let buttonAction: (() -> Void)?
+
+    init(
+        data: TrackingStatusBannerData,
+        buttonAction: (() -> Void)? = nil
+    ) {
+        self.data = data
+        self.buttonAction = buttonAction
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -59,6 +88,15 @@ private struct TrackingStatusBanner: View {
             }
 
             Spacer()
+
+            if let buttonTitle = data.buttonTitle,
+               let buttonAction {
+                Button(buttonTitle, role: data.buttonRole) {
+                    buttonAction()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelSurface()
@@ -70,6 +108,10 @@ private func trackingStatusBannerData(
     for captureManager: MovesLocationCaptureManager,
     context: TrackingStatusBannerContext
 ) -> TrackingStatusBannerData? {
+    if captureManager.isDemoMode {
+        return nil
+    }
+
     if let lastErrorMessage = captureManager.lastErrorMessage {
         return TrackingStatusBannerData(
             title: "Location tracking error",
@@ -77,6 +119,28 @@ private func trackingStatusBannerData(
             systemImage: "exclamationmark.triangle.fill",
             tint: .red
         )
+    }
+
+    if let endsAt = captureManager.temporaryRouteTrackingEndsAt,
+       endsAt > .now {
+        switch captureManager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return TrackingStatusBannerData(
+                title: "Real route tracking on",
+                message: temporaryRouteTrackingBannerMessage(
+                    for: captureManager,
+                    context: context
+                ),
+                systemImage: "location.fill.viewfinder",
+                tint: MovesPalette.routeTracking,
+                buttonTitle: context == .timeline ? "Turn off now" : nil,
+                buttonRole: context == .timeline ? .destructive : nil
+            )
+        case .notDetermined, .denied, .restricted:
+            break
+        @unknown default:
+            break
+        }
     }
 
     guard context == .settings else {
@@ -143,6 +207,190 @@ private func trackingStatusBannerData(
     }
 }
 
+@MainActor
+private func temporaryRouteTrackingBannerMessage(
+    for captureManager: MovesLocationCaptureManager,
+    context: TrackingStatusBannerContext
+) -> String {
+    let durationText = captureManager.temporaryRouteTrackingDuration.availabilityText
+    let autoStopText = temporaryRouteTrackingAutoStopText(for: captureManager)
+
+    switch captureManager.authorizationStatus {
+    case .authorizedAlways:
+        switch context {
+        case .timeline:
+            return "Frequent GPS updates are enabled \(durationText). Battery use is higher.\(autoStopText)"
+        case .settings:
+            return "Frequent GPS updates are enabled \(durationText). Battery use is higher and Moves will switch back automatically.\(autoStopText)"
+        }
+    case .authorizedWhenInUse:
+        switch context {
+        case .timeline:
+            return "Frequent GPS updates are enabled \(durationText) while Moves is open. Battery use is higher. Always is needed for background tracking.\(autoStopText)"
+        case .settings:
+            return "Frequent GPS updates are enabled \(durationText) while Moves is open. Battery use is higher. Always is needed for background tracking.\(autoStopText)"
+        }
+    case .notDetermined, .denied, .restricted:
+        switch context {
+        case .timeline:
+            return "Frequent GPS updates are ready once location access is allowed."
+        case .settings:
+            return "Frequent GPS updates are ready once location access is allowed."
+        }
+    @unknown default:
+        return "Frequent GPS updates are enabled."
+    }
+}
+
+@MainActor
+private func temporaryRouteTrackingAutoStopText(
+    for captureManager: MovesLocationCaptureManager
+) -> String {
+    let stopAtBatteryFifty = captureManager.temporaryRouteTrackingStopsAtFiftyPercentBattery
+    let stopInLowPowerMode = captureManager.temporaryRouteTrackingStopsInLowPowerMode
+
+    switch (stopAtBatteryFifty, stopInLowPowerMode) {
+    case (true, true):
+        return " It will also stop if battery reaches 50% or Low Power Mode turns on."
+    case (true, false):
+        return " It will also stop if battery reaches 50%."
+    case (false, true):
+        return " It will also stop if Low Power Mode turns on."
+    case (false, false):
+        return ""
+    }
+}
+
+private struct LiveRouteTrackingSnapshot {
+    let startDate: Date
+    let latestDate: Date
+    let sampleCount: Int
+    let distanceMeters: CLLocationDistance
+    let coordinates: [CLLocationCoordinate2D]
+
+    var id: String {
+        [
+            Int(startDate.timeIntervalSince1970.rounded()),
+            Int(latestDate.timeIntervalSince1970.rounded()),
+            sampleCount,
+            Int(distanceMeters.rounded())
+        ]
+        .map(String.init)
+        .joined(separator: "|")
+    }
+
+    var duration: TimeInterval {
+        max(latestDate.timeIntervalSince(startDate), 0)
+    }
+}
+
+private struct RenderedRoute: Identifiable {
+    let id: String
+    let coordinates: [CLLocationCoordinate2D]
+    let usesHighAccuracyRouteTracking: Bool
+
+    var tint: Color {
+        usesHighAccuracyRouteTracking ? MovesPalette.routeTracking : MovesPalette.move
+    }
+
+    var lineWidth: CGFloat {
+        usesHighAccuracyRouteTracking ? 5 : 4
+    }
+}
+
+@MainActor
+private func liveRouteTrackingSnapshot(
+    for dayTimeline: DayTimeline,
+    captureManager: MovesLocationCaptureManager
+) -> LiveRouteTrackingSnapshot? {
+    guard let endsAt = captureManager.temporaryRouteTrackingEndsAt, endsAt > .now else {
+        return nil
+    }
+
+    let sortedSamples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+    let preferredSamples = sortedSamples.preferredRouteDisplaySamples
+
+    let liveSamples = liveRouteSessionSamples(
+        from: preferredSamples,
+        startedAt: captureManager.temporaryRouteTrackingStartedAt
+    )
+
+    let startDate = captureManager.temporaryRouteTrackingStartedAt
+        ?? liveSamples.first?.timestamp
+        ?? captureManager.lastCaptureAt
+        ?? endsAt
+    let latestDate = liveSamples.last?.timestamp ?? captureManager.lastCaptureAt ?? startDate
+    let anchorCoordinate = liveRouteAnchorCoordinate(for: dayTimeline, startDate: startDate)
+
+    var coordinates = liveSamples.map(\.coordinate)
+    if let anchorCoordinate {
+        coordinates.insert(anchorCoordinate, at: 0)
+    }
+
+    coordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+        coordinates,
+        minimumDistanceMeters: 4
+    )
+
+    return LiveRouteTrackingSnapshot(
+        startDate: startDate,
+        latestDate: latestDate,
+        sampleCount: liveSamples.count,
+        distanceMeters: routeDistance(for: coordinates),
+        coordinates: coordinates
+    )
+}
+
+private func liveRouteSessionSamples(
+    from preferredSamples: [LocationSample],
+    startedAt: Date?
+) -> [LocationSample] {
+    guard !preferredSamples.isEmpty else { return [] }
+
+    if let startedAt {
+        return preferredSamples.filter { $0.timestamp >= startedAt }
+    }
+
+    guard let lastSample = preferredSamples.last else {
+        return []
+    }
+
+    let maximumGap: TimeInterval = 90 * 60
+    var sessionSamples: [LocationSample] = [lastSample]
+    var previousSample = lastSample
+
+    for sample in preferredSamples.dropLast().reversed() {
+        let gap = previousSample.timestamp.timeIntervalSince(sample.timestamp)
+        if gap > maximumGap {
+            break
+        }
+
+        sessionSamples.insert(sample, at: 0)
+        previousSample = sample
+    }
+
+    return sessionSamples
+}
+
+private func liveRouteAnchorCoordinate(
+    for dayTimeline: DayTimeline,
+    startDate: Date
+) -> CLLocationCoordinate2D? {
+    let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
+    if let anchorPlace = sortedPlaces.last(where: { $0.arrivalDate <= startDate }) {
+        return anchorPlace.coordinate
+    }
+    return sortedPlaces.last?.coordinate
+}
+
+private func routeDistance(for coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {
+    guard coordinates.count > 1 else { return 0 }
+
+    return zip(coordinates, coordinates.dropFirst()).reduce(0) { partialResult, pair in
+        partialResult + RouteCoordinateOps.distanceMeters(from: pair.0, to: pair.1)
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @Environment(\.openURL) private var openURL
@@ -181,7 +429,12 @@ struct ContentView: View {
                         for: captureManager,
                         context: .timeline
                     ) {
-                        TrackingStatusBanner(data: bannerData)
+                        TrackingStatusBanner(
+                            data: bannerData,
+                            buttonAction: {
+                                captureManager.disableTemporaryRouteTracking()
+                            }
+                        )
                     }
 
                     if dayTimelines.isEmpty {
@@ -343,6 +596,10 @@ struct ContentView: View {
     }
 
     private var trackingPermissionPrompt: TrackingPermissionPrompt? {
+        if captureManager.isDemoMode {
+            return nil
+        }
+
         switch captureManager.authorizationStatus {
         case .notDetermined:
             return TrackingPermissionPrompt(
@@ -431,8 +688,13 @@ struct ContentView: View {
 }
 
 private struct DayTimelinePage: View {
+    @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
     private static let transientStopMaximumDuration: TimeInterval = 5 * 60
+
+    private var liveRouteSnapshot: LiveRouteTrackingSnapshot? {
+        liveRouteTrackingSnapshot(for: dayTimeline, captureManager: captureManager)
+    }
 
     private var timelineEntries: [TimelineEntry] {
         let places = dayTimeline.places
@@ -462,6 +724,10 @@ private struct DayTimelinePage: View {
                     entries.insert(startEntry, at: 0)
                 }
             }
+        }
+
+        if let liveRouteSnapshot {
+            entries.append(.liveRoute(liveRouteSnapshot))
         }
 
         return entries
@@ -595,6 +861,9 @@ private struct DayTimelinePage: View {
                 StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
             }
             .buttonStyle(.plain)
+
+        case .liveRoute:
+            StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
 
         case .start:
             StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
@@ -752,15 +1021,20 @@ private struct DayTransportSummaryView: View {
 }
 
 private struct DayMapStrip: View {
+    @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
 
     @State private var camera: MapCameraPosition
-    @State private var routeCoordinates: [CLLocationCoordinate2D]
+    @State private var historicalRoutes: [RenderedRoute]
 
     private var placeMarkers: [PlaceMarker] {
         dayTimeline.places
             .sorted(by: { $0.arrivalDate < $1.arrivalDate })
             .map { PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate) }
+    }
+
+    private var liveRouteSnapshot: LiveRouteTrackingSnapshot? {
+        liveRouteTrackingSnapshot(for: dayTimeline, captureManager: captureManager)
     }
 
     private var latestSampleCoordinate: CLLocationCoordinate2D? {
@@ -770,18 +1044,27 @@ private struct DayMapStrip: View {
             .coordinate
     }
 
-    private var routeRefreshKey: String {
-        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
-        let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
-        let sortedSamples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+    private var historicalRouteCoordinates: [CLLocationCoordinate2D] {
+        historicalRoutes.flatMap { $0.coordinates }
+    }
 
-        let moveKey = sortedMoves.map { move in
+    private var historicalRouteRefreshKey: String {
+        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+        return sortedMoves.map { move in
             let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
             let end = Int(move.endDate.timeIntervalSince1970.rounded())
-            return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(move.samples.count)"
+            let sampleKey = move.samples.map { sample in
+                "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
+            }
+            .joined(separator: ",")
+
+            return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(sampleKey)"
         }
         .joined(separator: ",")
+    }
 
+    private var cameraRefreshKey: String {
+        let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
         let placeKey = sortedPlaces.map { place in
             let arrival = Int(place.arrivalDate.timeIntervalSince1970.rounded())
             let departure = Int((place.departureDate ?? place.arrivalDate).timeIntervalSince1970.rounded())
@@ -789,31 +1072,47 @@ private struct DayMapStrip: View {
         }
         .joined(separator: ",")
 
-        let sampleKey = sortedSamples.map { sample in
-            let timestamp = Int(sample.timestamp.timeIntervalSince1970.rounded())
-            let latitude = Int((sample.latitude * 10_000).rounded())
-            let longitude = Int((sample.longitude * 10_000).rounded())
-            return "\(timestamp)|\(latitude)|\(longitude)"
-        }
-        .joined(separator: ",")
+        let latestSampleKey = dayTimeline.samples
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .last
+            .map { sample in
+                "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
+            }
+            ?? "none"
 
-        return [moveKey, placeKey, sampleKey].joined(separator: "|")
+        let liveKey = liveRouteSnapshot?.id ?? "none"
+        return [historicalRouteRefreshKey, placeKey, liveKey, latestSampleKey].joined(separator: "|")
     }
 
     init(dayTimeline: DayTimeline) {
         self.dayTimeline = dayTimeline
 
-        let moveCoordinates = Self.routeCoordinates(for: dayTimeline)
-        let allCoordinates = Self.allCoordinates(for: dayTimeline, routeCoordinates: moveCoordinates)
-        _camera = State(initialValue: .region(MapRegionFactory.region(for: allCoordinates)))
-        _routeCoordinates = State(initialValue: moveCoordinates)
+        let renderedRoutes = Self.renderedRoutes(for: dayTimeline)
+        let allCoordinates = Self.allCoordinates(
+            for: dayTimeline,
+            routeCoordinates: renderedRoutes.flatMap { $0.coordinates },
+            liveRouteCoordinates: []
+        )
+        let cameraCoordinates = allCoordinates.isEmpty
+            ? Self.latestSampleCoordinate(for: dayTimeline).map { [$0] } ?? []
+            : allCoordinates
+        _camera = State(initialValue: .region(MapRegionFactory.region(for: cameraCoordinates)))
+        _historicalRoutes = State(initialValue: renderedRoutes)
     }
 
     var body: some View {
         Map(position: $camera, interactionModes: [.pan, .zoom]) {
-            if routeCoordinates.count > 1 {
-                MapPolyline(coordinates: routeCoordinates)
-                    .stroke(MovesPalette.move.opacity(0.9), lineWidth: 4)
+            ForEach(historicalRoutes) { route in
+                if route.coordinates.count > 1 {
+                    MapPolyline(coordinates: route.coordinates)
+                        .stroke(route.tint.opacity(0.95), lineWidth: route.lineWidth)
+                }
+            }
+
+            if let liveRouteSnapshot,
+               liveRouteSnapshot.coordinates.count > 1 {
+                MapPolyline(coordinates: liveRouteSnapshot.coordinates)
+                    .stroke(MovesPalette.routeTracking.opacity(0.95), lineWidth: 5)
             }
 
             ForEach(placeMarkers) { marker in
@@ -822,10 +1121,11 @@ private struct DayMapStrip: View {
             }
 
             if placeMarkers.isEmpty,
-               routeCoordinates.isEmpty,
+               historicalRouteCoordinates.isEmpty,
+               (liveRouteSnapshot?.coordinates.isEmpty ?? true),
                let latestSampleCoordinate {
                 Marker("Captured location", coordinate: latestSampleCoordinate)
-                    .tint(MovesPalette.start)
+                    .tint(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
@@ -835,55 +1135,78 @@ private struct DayMapStrip: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
         }
-        .task(id: routeRefreshKey) {
-            await refreshRouteCoordinates()
+        .task(id: historicalRouteRefreshKey) {
+            await refreshHistoricalRouteCoordinates()
+        }
+        .task(id: cameraRefreshKey) {
+            refreshCamera()
         }
     }
 
     @MainActor
-    private func refreshRouteCoordinates() async {
+    private func refreshHistoricalRouteCoordinates() async {
         let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
-        var merged: [CLLocationCoordinate2D] = []
+        var renderedRoutes: [RenderedRoute] = []
+        renderedRoutes.reserveCapacity(sortedMoves.count)
 
         for move in sortedMoves {
             let matched = await RoadRouteMatcher.matchedCoordinates(for: move)
-            RouteCoordinateOps.append(matched, to: &merged)
+            renderedRoutes.append(
+                RenderedRoute(
+                    id: move.id.uuidString,
+                    coordinates: matched,
+                    usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking
+                )
+            )
         }
 
-        routeCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
-            merged,
-            minimumDistanceMeters: 6
-        )
+        historicalRoutes = renderedRoutes
+        refreshCamera()
+    }
 
-        let allCoordinates = Self.allCoordinates(for: dayTimeline, routeCoordinates: routeCoordinates)
-        if !allCoordinates.isEmpty {
-            camera = .region(MapRegionFactory.region(for: allCoordinates))
+    @MainActor
+    private func refreshCamera() {
+        let liveCoordinates = liveRouteSnapshot?.coordinates ?? []
+        let allCoordinates = Self.allCoordinates(
+            for: dayTimeline,
+            routeCoordinates: historicalRouteCoordinates,
+            liveRouteCoordinates: liveCoordinates
+        )
+        let cameraCoordinates = allCoordinates.isEmpty
+            ? Self.latestSampleCoordinate(for: dayTimeline).map { [$0] } ?? []
+            : allCoordinates
+
+        if !cameraCoordinates.isEmpty {
+            camera = .region(MapRegionFactory.region(for: cameraCoordinates))
         }
     }
 
-    private static func routeCoordinates(for dayTimeline: DayTimeline) -> [CLLocationCoordinate2D] {
-        let moveCoordinates = dayTimeline.moves
+    private static func renderedRoutes(for dayTimeline: DayTimeline) -> [RenderedRoute] {
+        dayTimeline.moves
             .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
-            .flatMap { MoveRouteGeometry.rawCoordinates(for: $0) }
-        return RouteCoordinateOps.dedupeSequentialCoordinates(
-            moveCoordinates,
-            minimumDistanceMeters: 6
-        )
-    }
-
-    private static func sampleCoordinates(for dayTimeline: DayTimeline) -> [CLLocationCoordinate2D] {
-        dayTimeline.samples
-            .sorted(by: { $0.timestamp < $1.timestamp })
-            .map(\.coordinate)
+            .map { move in
+                RenderedRoute(
+                    id: move.id.uuidString,
+                    coordinates: MoveRouteGeometry.rawCoordinates(for: move),
+                    usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking
+                )
+            }
     }
 
     private static func allCoordinates(
         for dayTimeline: DayTimeline,
-        routeCoordinates: [CLLocationCoordinate2D]
+        routeCoordinates: [CLLocationCoordinate2D],
+        liveRouteCoordinates: [CLLocationCoordinate2D]
     ) -> [CLLocationCoordinate2D] {
         let placeCoordinates = dayTimeline.places.map(\.coordinate)
-        let sampleCoordinates = Self.sampleCoordinates(for: dayTimeline)
-        return routeCoordinates + placeCoordinates + sampleCoordinates
+        return routeCoordinates + liveRouteCoordinates + placeCoordinates
+    }
+
+    private static func latestSampleCoordinate(for dayTimeline: DayTimeline) -> CLLocationCoordinate2D? {
+        dayTimeline.samples
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .last?
+            .coordinate
     }
 }
 
@@ -946,6 +1269,7 @@ private struct StorylineRow: View {
 private enum TimelineEntry: Identifiable {
     case place(VisitPlace)
     case move(MoveSegment)
+    case liveRoute(LiveRouteTrackingSnapshot)
     case start(place: VisitPlace, timestamp: Date)
 
     var id: String {
@@ -954,6 +1278,8 @@ private enum TimelineEntry: Identifiable {
             return "place-\(place.id.uuidString)"
         case .move(let segment):
             return "move-\(segment.id.uuidString)"
+        case .liveRoute(let snapshot):
+            return "live-\(snapshot.id)"
         case .start(let place, let timestamp):
             return "start-\(place.id.uuidString)-\(timestamp.timeIntervalSince1970)"
         }
@@ -965,6 +1291,8 @@ private enum TimelineEntry: Identifiable {
             return place.arrivalDate
         case .move(let segment):
             return segment.timelineStartDate
+        case .liveRoute(let snapshot):
+            return snapshot.latestDate
         case .start(_, let timestamp):
             return timestamp
         }
@@ -976,6 +1304,8 @@ private enum TimelineEntry: Identifiable {
             return Self.timeString(from: place.arrivalDate)
         case .move(let segment):
             return Self.timeString(from: segment.timelineStartDate)
+        case .liveRoute(let snapshot):
+            return Self.timeString(from: snapshot.latestDate)
         case .start(_, let timestamp):
             return Self.timeString(from: timestamp)
         }
@@ -987,6 +1317,8 @@ private enum TimelineEntry: Identifiable {
             return "mappin.circle.fill"
         case .move(let segment):
             return segment.transportMode.symbolName
+        case .liveRoute:
+            return "location.fill.viewfinder"
         case .start:
             return "sunrise.fill"
         }
@@ -996,8 +1328,10 @@ private enum TimelineEntry: Identifiable {
         switch self {
         case .place:
             return MovesPalette.place
-        case .move:
-            return MovesPalette.move
+        case .move(let segment):
+            return segment.routeDisplayTint
+        case .liveRoute:
+            return MovesPalette.routeTracking
         case .start:
             return MovesPalette.start
         }
@@ -1013,6 +1347,8 @@ private enum TimelineEntry: Identifiable {
             let start = segment.startPlace?.displayTitle ?? "Unknown start"
             let end = segment.endPlace?.displayTitle ?? "Unknown destination"
             return "\(start) to \(end)"
+        case .liveRoute:
+            return "Live route tracking"
         }
     }
 
@@ -1032,6 +1368,16 @@ private enum TimelineEntry: Identifiable {
             let distance = Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters)
                 .formatted(.measurement(width: .abbreviated, usage: .road))
             return "\(segment.transportMode.title)   \(duration)   \(distance)"
+        case .liveRoute(let snapshot):
+            let duration = DurationFormatter.text(for: snapshot.duration)
+            let distance = Measurement(value: max(snapshot.distanceMeters, 0), unit: UnitLength.meters)
+                .formatted(.measurement(width: .abbreviated, usage: .road))
+
+            if snapshot.sampleCount == 0 {
+                return "Waiting for the first live GPS fix"
+            }
+
+            return "\(snapshot.sampleCount) live fixes   \(duration)   \(distance)"
         }
     }
 
@@ -1042,6 +1388,11 @@ private enum TimelineEntry: Identifiable {
                 return "\(stepCount) steps"
             }
             return nil
+        case .liveRoute(let snapshot):
+            if snapshot.sampleCount == 0 {
+                return "Tracking will start as soon as GPS provides the first fix."
+            }
+            return "Last update \(snapshot.latestDate.formatted(date: .omitted, time: .shortened))"
         default:
             return nil
         }
@@ -1171,7 +1522,12 @@ private struct MoveMapDetailView: View {
     private var routeRefreshKey: String {
         let start = Int(segment.timelineStartDate.timeIntervalSince1970.rounded())
         let end = Int(segment.endDate.timeIntervalSince1970.rounded())
-        return "\(segment.id.uuidString)|\(segment.transportMode.rawValue)|\(start)|\(end)|\(segment.samples.count)"
+        let sampleKey = segment.samples.map { sample in
+            "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
+        }
+        .joined(separator: ",")
+
+        return "\(segment.id.uuidString)|\(segment.transportMode.rawValue)|\(start)|\(end)|\(sampleKey)"
     }
 
     init(segment: MoveSegment) {
@@ -1191,7 +1547,7 @@ private struct MoveMapDetailView: View {
 
             if routeCoordinates.count > 1 {
                 MapPolyline(coordinates: routeCoordinates)
-                    .stroke(MovesPalette.move, lineWidth: 5)
+                    .stroke(segment.routeDisplayTint, lineWidth: 5)
             }
 
             if let end = segment.endPlace?.coordinate {
@@ -1322,7 +1678,7 @@ private enum MapRegionFactory {
 
 private enum MoveRouteGeometry {
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
-        let sampleCoordinates = move.samples
+        let sampleCoordinates = move.samples.preferredRouteDisplaySamples
             .sorted(by: { $0.timestamp < $1.timestamp })
             .map(\.coordinate)
 
@@ -1355,6 +1711,12 @@ private enum MoveRouteGeometry {
         }
 
         return hasher.finalize()
+    }
+}
+
+private extension MoveSegment {
+    var routeDisplayTint: Color {
+        usesHighAccuracyRouteTracking ? MovesPalette.routeTracking : MovesPalette.move
     }
 }
 
@@ -1580,14 +1942,26 @@ private struct MovesSettingsView: View {
 
     let dayTimelines: [DayTimeline]
     let selectedDayKey: String
-    let captureManager: MovesLocationCaptureManager
+    @ObservedObject var captureManager: MovesLocationCaptureManager
 
+    @State private var routeTrackingDuration: TemporaryRouteTrackingDuration
     @State private var isExporting = false
     @State private var exportDocument: TimelineExportDocument?
     @State private var exportContentType: UTType = .xml
     @State private var exportFilename = "moves-export"
     @State private var exportMessage = ""
     @State private var isShowingExportMessage = false
+
+    init(
+        dayTimelines: [DayTimeline],
+        selectedDayKey: String,
+        captureManager: MovesLocationCaptureManager
+    ) {
+        self.dayTimelines = dayTimelines
+        self.selectedDayKey = selectedDayKey
+        _captureManager = ObservedObject(wrappedValue: captureManager)
+        _routeTrackingDuration = State(initialValue: captureManager.temporaryRouteTrackingDuration)
+    }
     
     private var selectedDay: DayTimeline? {
         dayTimelines.first(where: { $0.dayKey == selectedDayKey })
@@ -1625,6 +1999,30 @@ private struct MovesSettingsView: View {
         dayTimelines.reduce(0) { $0 + $1.samples.count }
     }
 
+    private var routeTrackingStopsAtBatteryFiftyBinding: Binding<Bool> {
+        Binding(
+            get: { captureManager.temporaryRouteTrackingStopsAtFiftyPercentBattery },
+            set: { newValue in
+                captureManager.updateTemporaryRouteTrackingAutoStopRules(
+                    stopsAtFiftyPercentBattery: newValue,
+                    stopsInLowPowerMode: captureManager.temporaryRouteTrackingStopsInLowPowerMode
+                )
+            }
+        )
+    }
+
+    private var routeTrackingStopsInLowPowerModeBinding: Binding<Bool> {
+        Binding(
+            get: { captureManager.temporaryRouteTrackingStopsInLowPowerMode },
+            set: { newValue in
+                captureManager.updateTemporaryRouteTrackingAutoStopRules(
+                    stopsAtFiftyPercentBattery: captureManager.temporaryRouteTrackingStopsAtFiftyPercentBattery,
+                    stopsInLowPowerMode: newValue
+                )
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1637,6 +2035,64 @@ private struct MovesSettingsView: View {
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                    }
+                }
+
+                if !captureManager.isDemoMode {
+                    Section("Real Route Tracking") {
+                        Text("Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on.")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        if captureManager.authorizationStatus == .authorizedAlways ||
+                            captureManager.authorizationStatus == .authorizedWhenInUse {
+                            Picker("Duration", selection: $routeTrackingDuration) {
+                                ForEach(TemporaryRouteTrackingDuration.allCases) { duration in
+                                    Text(duration.title)
+                                        .tag(duration)
+                                }
+                            }
+                            .pickerStyle(.menu)
+
+                            Toggle("Turn off at 50% battery", isOn: routeTrackingStopsAtBatteryFiftyBinding)
+                            Toggle("Turn off in Low Power Mode", isOn: routeTrackingStopsInLowPowerModeBinding)
+
+                            Text("These safeguards can end the session early if power gets tight.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+
+                            Button {
+                                captureManager.enableTemporaryRouteTracking(duration: routeTrackingDuration)
+                            } label: {
+                                Label(
+                                    captureManager.temporaryRouteTrackingEndsAt == nil
+                                    ? "Enable real route tracking"
+                                    : "Update route tracking",
+                                    systemImage: "location.fill.viewfinder"
+                                )
+                            }
+
+                            if let endsAt = captureManager.temporaryRouteTrackingEndsAt,
+                               endsAt > .now {
+                                Text("Auto-off \(captureManager.temporaryRouteTrackingDuration.availabilityText).")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+
+                                Button("Turn off now", role: .destructive) {
+                                    captureManager.disableTemporaryRouteTracking()
+                                }
+                            }
+
+                            if captureManager.authorizationStatus == .authorizedWhenInUse {
+                                Text("Always location access is needed to keep this running in the background.")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("Grant location access first to use this feature.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -1694,6 +2150,9 @@ private struct MovesSettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            .onChange(of: captureManager.temporaryRouteTrackingDuration) { _, newValue in
+                routeTrackingDuration = newValue
             }
         }
         CreatedByView()
@@ -2069,7 +2528,9 @@ private enum TimelineExporter {
             )
         }
 
-        let sortedSamples = move.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        let sortedSamples = move.samples
+            .preferredRouteDisplaySamples
+            .sorted(by: { $0.timestamp < $1.timestamp })
         for sample in sortedSamples {
             points.append(
                 TimelineTrackPoint(

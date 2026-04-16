@@ -59,6 +59,112 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(samples.first?.source, .significantChange)
     }
 
+    func testRouteTrackingSamplesOverrideWeakerSourcesWhenTheyDeduplicate() throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+
+        let timestamp = Date(timeIntervalSince1970: 1_710_000_000)
+        let location = makeLocation(
+            latitude: 52.520008,
+            longitude: 13.404954,
+            speed: 1.2,
+            timestamp: timestamp
+        )
+
+        _ = try repository.appendSamples(from: [location], source: .significantChange)
+        _ = try repository.appendSamples(from: [location], source: .routeTracking)
+
+        let samples = try repository.samples(
+            from: timestamp.addingTimeInterval(-30),
+            to: timestamp.addingTimeInterval(30)
+        )
+
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples.first?.source, .routeTracking)
+    }
+
+    func testRouteDisplayPrefersRouteTrackingSamplesWhenAvailable() {
+        let timestamp = Date(timeIntervalSince1970: 1_710_000_000)
+        let significantChangeLocation = makeLocation(
+            latitude: 52.520008,
+            longitude: 13.404954,
+            speed: 1.0,
+            timestamp: timestamp
+        )
+        let routeTrackingLocation = makeLocation(
+            latitude: 52.521008,
+            longitude: 13.405954,
+            speed: 1.1,
+            timestamp: timestamp.addingTimeInterval(15)
+        )
+
+        let samples = [
+            LocationSample(location: significantChangeLocation, source: .significantChange, dedupeKey: "a"),
+            LocationSample(location: routeTrackingLocation, source: .routeTracking, dedupeKey: "b"),
+        ]
+
+        XCTAssertEqual(samples.preferredRouteDisplaySamples.count, 1)
+        XCTAssertEqual(samples.preferredRouteDisplaySamples.first?.source, .routeTracking)
+    }
+
+    func testMoveSegmentFlagsHighAccuracyRoutesWhenRouteTrackingSamplesArePresent() {
+        let startDate = Date(timeIntervalSince1970: 1_710_000_000)
+        let endDate = startDate.addingTimeInterval(900)
+        let segment = MoveSegment(
+            dedupeKey: "move-1",
+            startDate: startDate,
+            endDate: endDate,
+            transportMode: .cycling,
+            distanceMeters: 1_200,
+            stepCount: 800
+        )
+
+        segment.samples = [
+            LocationSample(
+                location: makeLocation(
+                    latitude: 52.520008,
+                    longitude: 13.404954,
+                    speed: 1.0,
+                    timestamp: startDate.addingTimeInterval(120)
+                ),
+                source: .significantChange,
+                dedupeKey: "sig"
+            ),
+            LocationSample(
+                location: makeLocation(
+                    latitude: 52.521008,
+                    longitude: 13.405954,
+                    speed: 2.0,
+                    timestamp: startDate.addingTimeInterval(240)
+                ),
+                source: .routeTracking,
+                dedupeKey: "route"
+            ),
+        ]
+
+        XCTAssertTrue(segment.usesHighAccuracyRouteTracking)
+
+        segment.samples = segment.samples.filter { $0.source != .routeTracking }
+
+        XCTAssertFalse(segment.usesHighAccuracyRouteTracking)
+    }
+
+    func testTemporaryRouteTrackingEndOfDayFallsBackToTheStartOfTomorrow() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        guard let expectedEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: start)) else {
+            XCTFail("Expected a valid end-of-day boundary")
+            return
+        }
+
+        XCTAssertEqual(
+            TemporaryRouteTrackingDuration.endOfDay.endDate(from: start, calendar: calendar),
+            expectedEnd
+        )
+    }
+
     func testMoveUpsertIsIdempotentForSameEndpointsAndTimeWindow() throws {
         let container = try makeInMemoryContainer()
         let repository = SwiftDataTimelineRepository(modelContainer: container)
