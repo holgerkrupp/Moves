@@ -1239,9 +1239,11 @@ private struct StorylineRow: View {
 
                 Rectangle()
                     .fill(isLast ? Color.clear : MovesPalette.rail)
-                    .frame(width: 2, height: 28)
+                    .frame(width: 2)
+                    .frame(minHeight: 28, maxHeight: .infinity, alignment: .top)
             }
             .frame(width: 26)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.titleText)
