@@ -2200,7 +2200,9 @@ private struct MovesSettingsView: View {
                     }
                     .disabled(dayTimelines.isEmpty)
                 }
+                CreatedByView()
             }
+            
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2214,7 +2216,7 @@ private struct MovesSettingsView: View {
                 routeTrackingDuration = newValue
             }
         }
-        CreatedByView()
+        
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
