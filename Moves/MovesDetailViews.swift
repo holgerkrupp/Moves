@@ -209,10 +209,18 @@ struct MoveMapDetailView: View {
     private var routeRefreshKey: String {
         let start = Int(segment.timelineStartDate.timeIntervalSince1970.rounded())
         let end = Int(segment.endDate.timeIntervalSince1970.rounded())
-        let sampleKey = segment.samples.map { sample in
-            "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
-        }
-        .joined(separator: ",")
+        let sampleKey = segment.samples
+            .sorted(by: { lhs, rhs in
+                if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+                if lhs.dedupeKey != rhs.dedupeKey { return lhs.dedupeKey < rhs.dedupeKey }
+                if lhs.sourceRawValue != rhs.sourceRawValue { return lhs.sourceRawValue < rhs.sourceRawValue }
+                if lhs.latitude != rhs.latitude { return lhs.latitude < rhs.latitude }
+                return lhs.longitude < rhs.longitude
+            })
+            .map { sample in
+                "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
+            }
+            .joined(separator: ",")
 
         return "\(segment.id.uuidString)|\(segment.transportMode.rawValue)|\(start)|\(end)|\(sampleKey)"
     }

@@ -1756,34 +1756,47 @@ enum SimulatorDemoDataSeeder {
             return nil
         }
 
-        guard let transportType = mapTransportType(for: mode) else {
+        let transportTypes = mapTransportTypes(for: mode)
+        guard !transportTypes.isEmpty else {
             return nil
         }
 
         roadCoordinatesRequestCount += 1
 
-        let request = MKDirections.Request()
-        request.source = mapItem(for: start)
-        request.destination = mapItem(for: end)
-        request.transportType = transportType
-        request.requestsAlternateRoutes = false
-
-        do {
-            let response = try await MKDirections(request: request).calculate()
-            guard let route = response.routes.first else {
+        for transportType in transportTypes {
+            guard await DirectionsRequestLimiter.shared.reserveSlot() else {
                 return nil
             }
 
-            let coordinates = polylineCoordinates(route.polyline)
-            guard coordinates.count > 1 else {
-                return nil
-            }
+            let request = MKDirections.Request()
+            request.source = mapItem(for: start)
+            request.destination = mapItem(for: end)
+            request.transportType = transportType
+            request.requestsAlternateRoutes = false
 
-            roadCoordinatesCache[cacheKey] = coordinates
-            return coordinates
-        } catch {
-            return nil
+            do {
+                let response = try await MKDirections(request: request).calculate()
+                guard let route = response.routes.first else {
+                    continue
+                }
+
+                let coordinates = polylineCoordinates(route.polyline)
+                guard coordinates.count > 1 else {
+                    continue
+                }
+
+                roadCoordinatesCache[cacheKey] = coordinates
+                return coordinates
+            } catch {
+                let throttled = await DirectionsRequestLimiter.shared.registerFailure(error)
+                if throttled {
+                    return nil
+                }
+                continue
+            }
         }
+
+        return nil
     }
 
     private static func roadCoordinatesCacheKey(
@@ -2310,20 +2323,21 @@ enum SimulatorDemoDataSeeder {
         return MKMapItem(location: location, address: nil)
     }
 
-    private static func mapTransportType(for mode: TransportMode) -> MKDirectionsTransportType? {
+    private static func mapTransportTypes(for mode: TransportMode) -> [MKDirectionsTransportType] {
         switch mode {
         case .automotive:
-            return .automobile
+            // Some POI points are inside buildings, so walking fallback improves route seeding.
+            return [.automobile, .walking]
         case .walking, .running:
-            return .walking
+            return [.walking]
         case .cycling:
-            return .cycling
+            return [.cycling, .walking]
         case .train:
-            return .transit
+            return [.transit, .automobile]
         case .plane:
-            return nil
+            return []
         case .stationary, .unknown:
-            return nil
+            return []
         }
     }
 }

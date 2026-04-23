@@ -288,7 +288,10 @@ struct ContentView: View {
 
                         TabView(selection: $selectedPageIndex) {
                             ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
-                                DayTimelinePage(dayKey: day.dayKey)
+                                DayTimelinePage(
+                                    dayKey: day.dayKey,
+                                    isActive: index == selectedPageIndex
+                                )
                                     .tag(index)
                                     
                             }

@@ -33,6 +33,7 @@ struct DayTimelinePage: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayKey: String
+    let isActive: Bool
 
     @State private var dayTimeline: DayTimeline?
     @State private var loadErrorMessage: String?
@@ -40,7 +41,7 @@ struct DayTimelinePage: View {
     var body: some View {
         Group {
             if let dayTimeline {
-                DayTimelinePageContent(dayTimeline: dayTimeline)
+                DayTimelinePageContent(dayTimeline: dayTimeline, isActive: isActive)
             } else {
                 loadingState
             }
@@ -85,6 +86,7 @@ struct DayTimelinePage: View {
 struct DayTimelinePageContent: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
+    let isActive: Bool
     private static let transientStopMaximumDuration: TimeInterval = 5 * 60
     private static let provisionalPlaceNameResolver = CLGeocoderPlaceNameResolver()
 
@@ -200,7 +202,7 @@ struct DayTimelinePageContent: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 10) {
-                DayMapStrip(dayTimeline: dayTimeline)
+                DayMapStrip(dayTimeline: dayTimeline, isActive: isActive)
 
                 if timelineEntries.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -501,6 +503,7 @@ struct DayMapStrip: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     let dayTimeline: DayTimeline
+    let isActive: Bool
 
     @State private var camera: MapCameraPosition
     @State private var historicalRoutes: [RenderedRoute]
@@ -531,10 +534,7 @@ struct DayMapStrip: View {
         return sortedMoves.map { move in
             let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
             let end = Int(move.endDate.timeIntervalSince1970.rounded())
-            let sampleKey = move.samples.map { sample in
-                "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
-            }
-            .joined(separator: ",")
+            let sampleKey = Self.refreshSampleKey(for: move.samples)
 
             return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(sampleKey)"
         }
@@ -562,8 +562,9 @@ struct DayMapStrip: View {
         return [historicalRouteRefreshKey, placeKey, liveKey, latestSampleKey].joined(separator: "|")
     }
 
-    init(dayTimeline: DayTimeline) {
+    init(dayTimeline: DayTimeline, isActive: Bool) {
         self.dayTimeline = dayTimeline
+        self.isActive = isActive
 
         let renderedRoutes = Self.renderedRoutes(for: dayTimeline)
         let allCoordinates = Self.allCoordinates(
@@ -630,7 +631,8 @@ struct DayMapStrip: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
         }
-        .task(id: historicalRouteRefreshKey) {
+        .task(id: "\(historicalRouteRefreshKey)|\(isActive ? 1 : 0)") {
+            guard isActive else { return }
             await refreshHistoricalRouteCoordinates()
         }
         .task(id: cameraRefreshKey) {
@@ -714,6 +716,21 @@ struct DayMapStrip: View {
             .sorted(by: { $0.timestamp < $1.timestamp })
             .last?
             .coordinate
+    }
+
+    private static func refreshSampleKey(for samples: [LocationSample]) -> String {
+        samples
+            .sorted(by: { lhs, rhs in
+                if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+                if lhs.dedupeKey != rhs.dedupeKey { return lhs.dedupeKey < rhs.dedupeKey }
+                if lhs.sourceRawValue != rhs.sourceRawValue { return lhs.sourceRawValue < rhs.sourceRawValue }
+                if lhs.latitude != rhs.latitude { return lhs.latitude < rhs.latitude }
+                return lhs.longitude < rhs.longitude
+            })
+            .map { sample in
+                "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
+            }
+            .joined(separator: ",")
     }
 }
 

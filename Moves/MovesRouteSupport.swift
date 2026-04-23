@@ -283,7 +283,7 @@ enum MapRegionFactory {
 }
 
 enum MoveRouteGeometry {
-    private static let routeMatchingVersion = "route-v2"
+    private static let routeMatchingVersion = "route-v6"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         let sampleCoordinates = move.samples.preferredRouteDisplaySamples
@@ -495,6 +495,7 @@ enum PlaneRouteGeometry {
 @MainActor
 enum RoadRouteMatcher {
     private static let memo = RouteMatchMemo()
+    private static let transientFallbackMemoTTL: TimeInterval = 3 * 60
 
     static func matchedCoordinates(for move: MoveSegment) async -> [CLLocationCoordinate2D] {
         let fallback = MoveRouteGeometry.rawCoordinates(for: move)
@@ -506,25 +507,39 @@ enum RoadRouteMatcher {
                 fallback,
                 minimumDistanceMeters: 4
             )
-            await memo.store(coordinates, for: cacheKey)
+            await memo.storePersistent(coordinates, for: cacheKey)
             move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
             return coordinates
         }
 
         if let cached = move.cachedRouteCoordinates(for: cacheSignature) {
-            await memo.store(cached, for: cacheKey)
+            await memo.storePersistent(cached, for: cacheKey)
             return cached
         }
 
         if let cached = await memo.cached(for: cacheKey) {
-            move.storeCachedRouteCoordinates(cached, signature: cacheSignature)
-            return cached
+            switch cached {
+            case .persistent(let coordinates):
+                move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
+                return coordinates
+            case .transient(let coordinates):
+                return coordinates
+            }
         }
 
         if let task = await memo.inFlightTask(for: cacheKey) {
-            let coordinates = await task.value
-            move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
-            return coordinates
+            let result = await task.value
+            if result.cacheable {
+                await memo.storePersistent(result.coordinates, for: cacheKey)
+                move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+            } else {
+                await memo.storeTransient(
+                    result.coordinates,
+                    for: cacheKey,
+                    ttl: transientFallbackMemoTTL
+                )
+            }
+            return result.coordinates
         }
 
         let transportMode = move.transportMode
@@ -533,39 +548,58 @@ enum RoadRouteMatcher {
         }
         await memo.setInFlightTask(task, for: cacheKey)
 
-        let coordinates = await task.value
+        let result = await task.value
         await memo.setInFlightTask(nil, for: cacheKey)
-        await memo.store(coordinates, for: cacheKey)
-        move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
-        return coordinates
+        if result.cacheable {
+            await memo.storePersistent(result.coordinates, for: cacheKey)
+            move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+        } else {
+            await memo.storeTransient(
+                result.coordinates,
+                for: cacheKey,
+                ttl: transientFallbackMemoTTL
+            )
+        }
+        return result.coordinates
     }
 
     private static func resolveCoordinates(
         fallback: [CLLocationCoordinate2D],
         transportMode: TransportMode
-    ) async -> [CLLocationCoordinate2D] {
+    ) async -> (coordinates: [CLLocationCoordinate2D], cacheable: Bool) {
         guard fallback.count > 1 else {
-            return fallback
+            return (fallback, true)
         }
 
         if transportMode == .plane {
-            return PlaneRouteGeometry.arcCoordinates(from: fallback)
+            return (PlaneRouteGeometry.arcCoordinates(from: fallback), true)
         }
 
-        guard let transportType = mapTransportType(for: transportMode) else {
-            return fallback
+        let transportTypes = mapTransportTypes(for: transportMode)
+        guard !transportTypes.isEmpty else {
+            return (fallback, true)
         }
 
-        let anchors = RouteCoordinateOps.sampleAnchors(
-            from: fallback,
-            maximumCount: anchorLimit(for: transportMode)
-        )
+        let anchors: [CLLocationCoordinate2D]
+        if fallback.count <= 10,
+           let start = fallback.first,
+           let end = fallback.last {
+            // Sparse tracks are often synthetic or noisy; endpoint routing is more reliable.
+            anchors = [start, end]
+        } else {
+            let requestedAnchorLimit = anchorLimit(for: transportMode)
+            anchors = RouteCoordinateOps.sampleAnchors(
+                from: fallback,
+                maximumCount: requestedAnchorLimit
+            )
+        }
         guard anchors.count > 1 else {
-            return fallback
+            return (fallback, true)
         }
 
         var matchedCoordinates: [CLLocationCoordinate2D] = []
         var matchedSegmentCount = 0
+        var attemptedNetworkMatch = false
 
         for pair in zip(anchors, anchors.dropFirst()) {
             let start = pair.0
@@ -577,11 +611,19 @@ enum RoadRouteMatcher {
                 continue
             }
 
-            if let snappedSegment = await routeSegment(
+            attemptedNetworkMatch = true
+            let segmentResult = await routeSegment(
                 from: start,
                 to: end,
-                transportType: transportType
-            ) {
+                transportTypes: transportTypes
+            )
+
+            if segmentResult.throttled {
+                // Throttling is temporary; return fallback but avoid persisting it as "final".
+                return (fallback, false)
+            }
+
+            if let snappedSegment = segmentResult.coordinates {
                 matchedSegmentCount += 1
                 RouteCoordinateOps.append(snappedSegment, to: &matchedCoordinates)
             } else {
@@ -589,33 +631,77 @@ enum RoadRouteMatcher {
             }
         }
 
-        return matchedSegmentCount > 0
-            ? RouteCoordinateOps.dedupeSequentialCoordinates(
+        if matchedSegmentCount > 0 {
+            return (
+                RouteCoordinateOps.dedupeSequentialCoordinates(
                 matchedCoordinates,
                 minimumDistanceMeters: 6
+                ),
+                true
             )
-            : fallback
+        }
+
+        // If sampled anchors all failed, retry once with direct endpoints.
+        if anchors.count > 2,
+           let start = anchors.first,
+           let end = anchors.last {
+            attemptedNetworkMatch = true
+            let directResult = await routeSegment(
+                from: start,
+                to: end,
+                transportTypes: transportTypes
+            )
+            if directResult.throttled {
+                return (fallback, false)
+            }
+            if let directCoordinates = directResult.coordinates {
+                return (
+                    RouteCoordinateOps.dedupeSequentialCoordinates(
+                        directCoordinates,
+                        minimumDistanceMeters: 6
+                    ),
+                    true
+                )
+            }
+        }
+
+        // If we tried to match but got no route, don't persist this fallback permanently.
+        return (fallback, !attemptedNetworkMatch)
     }
 
     private static func routeSegment(
         from start: CLLocationCoordinate2D,
         to end: CLLocationCoordinate2D,
-        transportType: MKDirectionsTransportType
-    ) async -> [CLLocationCoordinate2D]? {
-        let request = MKDirections.Request()
-        request.source = mapItem(for: start)
-        request.destination = mapItem(for: end)
-        request.transportType = transportType
-        request.requestsAlternateRoutes = false
+        transportTypes: [MKDirectionsTransportType]
+    ) async -> (coordinates: [CLLocationCoordinate2D]?, throttled: Bool) {
+        for transportType in transportTypes {
+            guard await DirectionsRequestLimiter.shared.reserveSlot() else {
+                return (nil, true)
+            }
 
-        do {
-            let response = try await MKDirections(request: request).calculate()
-            guard let route = response.routes.first else { return nil }
-            let coordinates = route.polyline.allCoordinates
-            return coordinates.count > 1 ? coordinates : nil
-        } catch {
-            return nil
+            let request = MKDirections.Request()
+            request.source = mapItem(for: start)
+            request.destination = mapItem(for: end)
+            request.transportType = transportType
+            request.requestsAlternateRoutes = false
+
+            do {
+                let response = try await MKDirections(request: request).calculate()
+                guard let route = response.routes.first else { continue }
+                let coordinates = route.polyline.allCoordinates
+                if coordinates.count > 1 {
+                    return (coordinates, false)
+                }
+            } catch {
+                let throttled = await DirectionsRequestLimiter.shared.registerFailure(error)
+                if throttled {
+                    return (nil, true)
+                }
+                continue
+            }
         }
+
+        return (nil, false)
     }
 
     private static func mapItem(for coordinate: CLLocationCoordinate2D) -> MKMapItem {
@@ -627,20 +713,23 @@ enum RoadRouteMatcher {
         return MKMapItem(location: location, address: nil)
     }
 
-    private static func mapTransportType(for mode: TransportMode) -> MKDirectionsTransportType? {
+    private static func mapTransportTypes(for mode: TransportMode) -> [MKDirectionsTransportType] {
         switch mode {
         case .automotive:
-            return .automobile
+            // Some POI endpoints are not drivable; walking can still anchor to nearby roads/paths.
+            return [.automobile, .walking]
         case .walking, .running:
-            return .walking
+            return [.walking]
         case .cycling:
-            return .cycling
+            // Cycling is not available in every region; walking still gives path snapping.
+            return [.cycling, .walking]
         case .train:
-            return .transit
+            // Prefer transit rails, then gracefully fall back to roads when unavailable.
+            return [.transit, .automobile]
         case .plane:
-            return nil
+            return []
         case .stationary, .unknown:
-            return nil
+            return []
         }
     }
 
@@ -651,7 +740,8 @@ enum RoadRouteMatcher {
         case .cycling:
             return 35
         case .automotive:
-            return 60
+            // Keep car routes snappable for short urban hops (e.g. nearby hotels/blocks).
+            return 20
         case .train:
             return 90
         case .plane:
@@ -680,23 +770,134 @@ enum RoadRouteMatcher {
 }
 
 actor RouteMatchMemo {
+    enum CacheEntry {
+        case persistent([CLLocationCoordinate2D])
+        case transient([CLLocationCoordinate2D])
+    }
+
+    private struct TransientCacheEntry {
+        let coordinates: [CLLocationCoordinate2D]
+        let expiresAt: Date
+    }
+
     private var cache: [Int: [CLLocationCoordinate2D]] = [:]
-    private var inFlightTasks: [Int: Task<[CLLocationCoordinate2D], Never>] = [:]
+    private var transientCache: [Int: TransientCacheEntry] = [:]
+    private var inFlightTasks: [
+        Int: Task<(coordinates: [CLLocationCoordinate2D], cacheable: Bool), Never>
+    ] = [:]
 
-    func cached(for key: Int) -> [CLLocationCoordinate2D]? {
-        cache[key]
+    func cached(for key: Int, now: Date = .now) -> CacheEntry? {
+        if let persistent = cache[key] {
+            return .persistent(persistent)
+        }
+
+        guard let transient = transientCache[key] else {
+            return nil
+        }
+
+        if transient.expiresAt <= now {
+            transientCache.removeValue(forKey: key)
+            return nil
+        }
+
+        return .transient(transient.coordinates)
     }
 
-    func store(_ coordinates: [CLLocationCoordinate2D], for key: Int) {
+    func storePersistent(_ coordinates: [CLLocationCoordinate2D], for key: Int) {
         cache[key] = coordinates
+        transientCache.removeValue(forKey: key)
     }
 
-    func inFlightTask(for key: Int) -> Task<[CLLocationCoordinate2D], Never>? {
+    func storeTransient(
+        _ coordinates: [CLLocationCoordinate2D],
+        for key: Int,
+        ttl: TimeInterval,
+        now: Date = .now
+    ) {
+        guard ttl > 0 else { return }
+        transientCache[key] = TransientCacheEntry(
+            coordinates: coordinates,
+            expiresAt: now.addingTimeInterval(ttl)
+        )
+    }
+
+    func inFlightTask(
+        for key: Int
+    ) -> Task<(coordinates: [CLLocationCoordinate2D], cacheable: Bool), Never>? {
         inFlightTasks[key]
     }
 
-    func setInFlightTask(_ task: Task<[CLLocationCoordinate2D], Never>?, for key: Int) {
+    func setInFlightTask(
+        _ task: Task<(coordinates: [CLLocationCoordinate2D], cacheable: Bool), Never>?,
+        for key: Int
+    ) {
         inFlightTasks[key] = task
+    }
+}
+
+actor DirectionsRequestLimiter {
+    static let shared = DirectionsRequestLimiter()
+
+    private let windowDuration: TimeInterval = 60
+    private let maxRequestsPerWindow = 42
+    private var requestDates: [Date] = []
+    private var cooldownUntil: Date?
+
+    func reserveSlot(now: Date = .now) -> Bool {
+        prune(now)
+
+        if let cooldownUntil, now < cooldownUntil {
+            return false
+        }
+
+        guard requestDates.count < maxRequestsPerWindow else {
+            return false
+        }
+
+        requestDates.append(now)
+        return true
+    }
+
+    func registerFailure(_ error: Error, now: Date = .now) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == "GEOErrorDomain" else {
+            return false
+        }
+
+        var resetAfterSeconds: TimeInterval?
+        if let number = nsError.userInfo["timeUntilReset"] as? NSNumber {
+            resetAfterSeconds = number.doubleValue
+        } else if let value = nsError.userInfo["timeUntilReset"] as? Double {
+            resetAfterSeconds = value
+        } else if let value = nsError.userInfo["timeUntilReset"] as? Int {
+            resetAfterSeconds = Double(value)
+        } else if
+            let details = nsError.userInfo["details"] as? [[String: Any]],
+            let first = details.first,
+            let value = first["timeUntilReset"] {
+            if let number = value as? NSNumber {
+                resetAfterSeconds = number.doubleValue
+            } else if let double = value as? Double {
+                resetAfterSeconds = double
+            } else if let int = value as? Int {
+                resetAfterSeconds = Double(int)
+            }
+        }
+
+        guard nsError.code == -3 || resetAfterSeconds != nil else {
+            return false
+        }
+
+        let cooldown = max(resetAfterSeconds ?? 60, 1)
+        cooldownUntil = now.addingTimeInterval(cooldown)
+        return true
+    }
+
+    private func prune(_ now: Date) {
+        requestDates.removeAll { now.timeIntervalSince($0) >= windowDuration }
+        if let cooldownUntil, now >= cooldownUntil {
+            self.cooldownUntil = nil
+        }
     }
 }
 

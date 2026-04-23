@@ -212,9 +212,9 @@ final class CoreMotionTransportClassifier: MotionClassifier {
             return .running
         case ..<9.0:
             return .cycling
-        case ..<18:
+        case ..<32:
             return .automotive
-        case ..<55:
+        case ..<75:
             return .train
         default:
             return .plane
@@ -458,7 +458,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
             let totalDistance = Self.totalDistance(for: movementLocations)
 
-            let move = try repository.upsertMove(
+            _ = try repository.upsertMove(
                 startPlace: previousPlace,
                 endPlace: visitPlace,
                 startDate: startDate,
@@ -468,8 +468,6 @@ final class DefaultTimelineAssembler: TimelineAssembler {
                 stepCount: steps,
                 samples: betweenSamples
             )
-
-            _ = await RoadRouteMatcher.matchedCoordinates(for: move)
 
             try repository.saveIfNeeded()
         } catch {
