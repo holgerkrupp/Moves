@@ -1,0 +1,213 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@   %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@   %2$@"
+          }
+        }
+      }
+    },
+    "%lld location sample%@ captured. Waiting for the next visit or move." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld location sample%2$@ captured. Waiting for the next visit or move."
+          }
+        }
+      }
+    },
+    "%lld places   %lld moves" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld places   %2$lld moves"
+          }
+        }
+      }
+    },
+    "Always location access is needed to keep this running in the background." : {
+
+    },
+    "Arrived %@" : {
+
+    },
+    "Auto-detected: %@" : {
+
+    },
+    "Auto-off %@." : {
+
+    },
+    "Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap." : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Captured location" : {
+
+    },
+    "Could Not Delete Move" : {
+
+    },
+    "Could Not Delete Place" : {
+
+    },
+    "Created in Buxtehude by" : {
+
+    },
+    "Data Maintenance" : {
+
+    },
+    "Day Summary" : {
+
+    },
+    "Deduplicate" : {
+
+    },
+    "Deduplicate Existing Data?" : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete Move" : {
+
+    },
+    "Delete Move?" : {
+
+    },
+    "Delete Place" : {
+
+    },
+    "Delete Place?" : {
+
+    },
+    "Done" : {
+
+    },
+    "Duration" : {
+
+    },
+    "Enable real route tracking" : {
+
+    },
+    "End" : {
+
+    },
+    "Export" : {
+
+    },
+    "Grant location access above to start recording visits and movement." : {
+
+    },
+    "Grant location access first to use this feature." : {
+
+    },
+    "iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them." : {
+
+    },
+    "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
+
+    },
+    "Label (Home, Work...)" : {
+
+    },
+    "Move" : {
+
+    },
+    "Moves" : {
+
+    },
+    "Moves needs notification permission to send a stop alert. You can allow it in Settings." : {
+
+    },
+    "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo." : {
+
+    },
+    "No movement summary available yet." : {
+
+    },
+    "No segments for this day yet." : {
+
+    },
+    "No timeline yet" : {
+
+    },
+    "Not Now" : {
+
+    },
+    "Notification Access" : {
+
+    },
+    "Notify when tracking stops" : {
+
+    },
+    "OK" : {
+
+    },
+    "Open Settings" : {
+
+    },
+    "Place" : {
+
+    },
+    "Real Route Tracking" : {
+
+    },
+    "Refresh timeline" : {
+
+    },
+    "Save" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Show big map markers" : {
+
+    },
+    "Start" : {
+
+    },
+    "These safeguards can end the session early if power gets tight." : {
+
+    },
+    "This removes this move from the timeline. You can undo the deletion afterwards." : {
+
+    },
+    "This removes this place from the timeline. You can undo the deletion afterwards." : {
+
+    },
+    "Total" : {
+
+    },
+    "Transport mode" : {
+
+    },
+    "Turn off at 50% battery" : {
+
+    },
+    "Turn off in Low Power Mode" : {
+
+    },
+    "Turn off now" : {
+
+    },
+    "Update route tracking" : {
+
+    },
+    "Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on." : {
+
+    },
+    "When this is off, maps use small dots so more of the map stays visible." : {
+
+    }
+  },
+  "version" : "1.2"
+}

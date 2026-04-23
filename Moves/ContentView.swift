@@ -135,30 +135,16 @@ func trackingStatusBannerData(
 
     switch captureManager.authorizationStatus {
     case .authorizedAlways:
-        let message: String
-        if let lastCaptureAt = captureManager.lastCaptureAt {
-            message = "Last location received at \(lastCaptureAt.formatted(date: .omitted, time: .shortened))."
-        } else {
-            message = "Background tracking is enabled and waiting for the first location fix."
-        }
-
         return TrackingStatusBannerData(
             title: captureManager.trackingStatusText,
-            message: message,
+            message: "Background tracking is enabled.",
             systemImage: "location.fill",
             tint: MovesPalette.place
         )
     case .authorizedWhenInUse:
-        let message: String
-        if let lastCaptureAt = captureManager.lastCaptureAt {
-            message = "Last location received at \(lastCaptureAt.formatted(date: .omitted, time: .shortened))."
-        } else {
-            message = "Moves can read location while open. Grant Always to keep recording in the background."
-        }
-
         return TrackingStatusBannerData(
             title: captureManager.trackingStatusText,
-            message: message,
+            message: "Moves can read location while open. Grant Always to keep recording in the background.",
             systemImage: "location.fill",
             tint: MovesPalette.start
         )
@@ -249,6 +235,8 @@ private func temporaryRouteTrackingAutoStopText(
 
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
+    @EnvironmentObject private var undoController: AppUndoController
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
 
     @Query(sort: \DayTimeline.dayStart, order: .forward)
@@ -349,6 +337,7 @@ struct ContentView: View {
         }
         .onAppear {
             syncSelectedDayIfNeeded()
+            modelContext.undoManager = undoController.manager
         }
         .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
             syncSelectedDayIfNeeded()
@@ -356,6 +345,14 @@ struct ContentView: View {
         .onChange(of: selectedPageIndex) { _, newIndex in
             guard dayTimelines.indices.contains(newIndex) else { return }
             selectedDayKey = dayTimelines[newIndex].dayKey
+        }
+        .overlay {
+            ShakeToUndoDetector(undoManager: undoController.manager) {
+                handleShakeToUndo()
+            }
+            .frame(width: 1, height: 1)
+            .opacity(0.01)
+            .accessibilityHidden(true)
         }
     }
 
@@ -544,6 +541,23 @@ struct ContentView: View {
         let nextIndex = selectedPageIndex + 1
         guard dayTimelines.indices.contains(nextIndex) else { return }
         selectedPageIndex = nextIndex
+    }
+
+    @MainActor
+    private func handleShakeToUndo() {
+        let undoManager = undoController.manager
+        guard undoManager.canUndo else { return }
+        modelContext.undoManager = undoManager
+
+        undoManager.undo()
+
+        if modelContext.hasChanges {
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to save undo changes: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
@@ -977,6 +991,84 @@ extension View {
     }
 }
 
+private struct ShakeToUndoDetector: UIViewRepresentable {
+    let undoManager: UndoManager
+    let onShake: () -> Void
+
+    func makeUIView(context: Context) -> ShakeToUndoView {
+        let view = ShakeToUndoView()
+        view.managedUndoManager = undoManager
+        view.onShake = onShake
+        return view
+    }
+
+    func updateUIView(_ uiView: ShakeToUndoView, context: Context) {
+        uiView.managedUndoManager = undoManager
+        uiView.onShake = onShake
+    }
+}
+
+private final class ShakeToUndoView: UIView {
+    var managedUndoManager: UndoManager?
+    var onShake: (() -> Void)?
+    private var activeObserver: NSObjectProtocol?
+
+    override var undoManager: UndoManager? {
+        managedUndoManager
+    }
+
+    override var canBecomeFirstResponder: Bool {
+        true
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.becomeFirstResponderIfPossible()
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let activeObserver {
+            NotificationCenter.default.removeObserver(activeObserver)
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        becomeFirstResponderIfPossible()
+    }
+
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        becomeFirstResponderIfPossible()
+    }
+
+    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        guard motion == .motionShake else {
+            super.motionEnded(motion, with: event)
+            return
+        }
+
+        onShake?()
+    }
+
+    private func becomeFirstResponderIfPossible() {
+        guard window != nil else { return }
+        if !isFirstResponder {
+            becomeFirstResponder()
+        }
+    }
+}
+
 private extension ProcessInfo {
     var isRunningForPreviews: Bool {
         environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
@@ -1000,5 +1092,6 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
             .modelContainer(container)
             .environmentObject(MovesLocationCaptureManager(modelContainer: container))
+            .environmentObject(AppUndoController())
     }
 }

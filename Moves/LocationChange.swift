@@ -4,6 +4,7 @@ import CoreLocation
 import CoreMotion
 import MapKit
 import SwiftData
+import UserNotifications
 import UIKit
 
 @MainActor
@@ -91,6 +92,11 @@ enum TemporaryRouteTrackingDuration: String, CaseIterable, Identifiable {
     }
 }
 
+enum TemporaryRouteTrackingStopNotificationPermissionResult: Equatable {
+    case enabled
+    case needsSettings
+}
+
 protocol MotionClassifier {
     func classifyTransport(start: Date, end: Date, locations: [CLLocation]) async -> TransportMode
     func stepCount(start: Date, end: Date) async -> Int?
@@ -130,11 +136,13 @@ final class CoreMotionTransportClassifier: MotionClassifier {
             }
 
             if let best = scores.max(by: { $0.value < $1.value })?.key {
-                return correctedModeIfNeeded(best, fallback: fallback, locations: locations)
+                let corrected = correctedModeIfNeeded(best, fallback: fallback, locations: locations)
+                return refinedLongDistanceMode(for: corrected, fallback: fallback, locations: locations)
             }
         }
 
-        return correctedModeIfNeeded(fallback, fallback: fallback, locations: locations)
+        let corrected = correctedModeIfNeeded(fallback, fallback: fallback, locations: locations)
+        return refinedLongDistanceMode(for: corrected, fallback: fallback, locations: locations)
     }
 
     func stepCount(start: Date, end: Date) async -> Int? {
@@ -204,8 +212,12 @@ final class CoreMotionTransportClassifier: MotionClassifier {
             return .running
         case ..<9.0:
             return .cycling
-        default:
+        case ..<18:
             return .automotive
+        case ..<55:
+            return .train
+        default:
+            return .plane
         }
     }
 
@@ -253,11 +265,69 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         return .walking
     }
 
+    private func refinedLongDistanceMode(
+        for candidate: TransportMode,
+        fallback: TransportMode,
+        locations: [CLLocation]
+    ) -> TransportMode {
+        switch candidate {
+        case .walking, .running, .cycling, .train, .plane:
+            return candidate
+        case .stationary, .automotive, .unknown:
+            break
+        }
+
+        let directDistance = Self.straightLineDistance(for: locations)
+        let averageSpeed = Self.averageSpeed(for: locations)
+        let maxObservedSpeed = Self.maxObservedSpeed(for: locations)
+        let baseline = candidate == .stationary ? fallback : candidate
+
+        if maxObservedSpeed >= 80 ||
+            averageSpeed >= 55 ||
+            (directDistance >= 120_000 && averageSpeed >= 40) {
+            return .plane
+        }
+
+        if averageSpeed >= 16 &&
+            directDistance >= 18_000 &&
+            baseline != .cycling &&
+            baseline != .walking &&
+            baseline != .running {
+            return .train
+        }
+
+        return candidate
+    }
+
     private static func totalDistance(for locations: [CLLocation]) -> CLLocationDistance {
         guard locations.count > 1 else { return 0 }
         return zip(locations, locations.dropFirst()).reduce(0) { partialResult, pair in
             partialResult + pair.0.distance(from: pair.1)
         }
+    }
+
+    private static func averageSpeed(for locations: [CLLocation]) -> CLLocationSpeed {
+        let validSpeeds = locations.map(\.speed).filter { $0 >= 0 }
+        if !validSpeeds.isEmpty {
+            return validSpeeds.reduce(0, +) / Double(validSpeeds.count)
+        }
+
+        guard
+            let first = locations.first,
+            let last = locations.last,
+            last.timestamp > first.timestamp
+        else {
+            return 0
+        }
+
+        return first.distance(from: last) / last.timestamp.timeIntervalSince(first.timestamp)
+    }
+
+    private static func maxObservedSpeed(for locations: [CLLocation]) -> CLLocationSpeed {
+        locations
+            .map(\.speed)
+            .filter { $0 >= 0 }
+            .max() ?? 0
     }
 
     private static func straightLineDistance(for locations: [CLLocation]) -> CLLocationDistance {
@@ -498,6 +568,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     @Published private(set) var temporaryRouteTrackingEndsAt: Date?
     @Published private(set) var temporaryRouteTrackingStopsAtFiftyPercentBattery = false
     @Published private(set) var temporaryRouteTrackingStopsInLowPowerMode = false
+    @Published private(set) var temporaryRouteTrackingStopNotificationEnabled = false
 
     private let manager = CLLocationManager()
     private let userDefaults: UserDefaults
@@ -519,7 +590,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         static let endsAt = "Moves.temporaryRouteTracking.endsAt"
         static let stopAtFiftyPercentBattery = "Moves.temporaryRouteTracking.stopAtFiftyPercentBattery"
         static let stopInLowPowerMode = "Moves.temporaryRouteTracking.stopInLowPowerMode"
+        static let stopNotificationEnabled = "Moves.temporaryRouteTracking.stopNotificationEnabled"
     }
+
+    private static let stopNotificationIdentifier = "Moves.temporaryRouteTracking.stoppedNotification"
 
     private static let lowPowerDesiredAccuracy = kCLLocationAccuracyHundredMeters
     private static let lowPowerDistanceFilter: CLLocationDistance = 150
@@ -596,6 +670,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
         let status = manager.authorizationStatus
         handleAuthorization(status)
+        scheduleTemporaryRouteTrackingStoppedNotificationIfNeeded()
 
         if status == .notDetermined {
             requestTrackingAuthorization()
@@ -663,13 +738,50 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         persistTemporaryRouteTrackingState()
 
         if shouldExpireTemporaryRouteTrackingNow {
-            expireTemporaryRouteTracking()
+            expireTemporaryRouteTracking(notifyImmediately: true)
             return
         }
 
         scheduleTemporaryRouteTrackingExpiryTask()
+        scheduleTemporaryRouteTrackingStoppedNotificationIfNeeded()
         applyTrackingConfiguration()
         requestOneShotLocation(source: .routeTracking)
+    }
+
+    func enableTemporaryRouteTrackingStopNotifications() async -> TemporaryRouteTrackingStopNotificationPermissionResult {
+        guard !shouldSkipLiveTracking else { return .enabled }
+
+        temporaryRouteTrackingStopNotificationEnabled = true
+        persistTemporaryRouteTrackingState()
+
+        let status = await notificationAuthorizationStatus()
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            scheduleTemporaryRouteTrackingStoppedNotificationIfNeeded()
+            return .enabled
+        case .notDetermined:
+            let granted = await requestNotificationAuthorization()
+            if granted {
+                scheduleTemporaryRouteTrackingStoppedNotificationIfNeeded()
+                return .enabled
+            }
+            cancelTemporaryRouteTrackingStoppedNotification()
+            return .needsSettings
+        case .denied:
+            cancelTemporaryRouteTrackingStoppedNotification()
+            return .needsSettings
+        @unknown default:
+            cancelTemporaryRouteTrackingStoppedNotification()
+            return .needsSettings
+        }
+    }
+
+    func disableTemporaryRouteTrackingStopNotifications() {
+        guard !shouldSkipLiveTracking else { return }
+
+        temporaryRouteTrackingStopNotificationEnabled = false
+        persistTemporaryRouteTrackingState()
+        cancelTemporaryRouteTrackingStoppedNotification()
     }
 
     func updateTemporaryRouteTrackingAutoStopRules(
@@ -692,6 +804,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         temporaryRouteTrackingStartedAt = nil
         temporaryRouteTrackingEndsAt = nil
         persistTemporaryRouteTrackingState()
+        notifyTemporaryRouteTrackingStoppedImmediatelyIfNeeded()
         applyTrackingConfiguration()
     }
 
@@ -786,8 +899,13 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private func refreshTemporaryRouteTrackingStateIfNeeded() {
         guard let endsAt = temporaryRouteTrackingEndsAt else { return }
 
-        if endsAt <= .now || shouldExpireTemporaryRouteTrackingNow {
+        if endsAt <= .now {
             expireTemporaryRouteTracking()
+            return
+        }
+
+        if shouldExpireTemporaryRouteTrackingNow {
+            expireTemporaryRouteTracking(notifyImmediately: true)
         }
     }
 
@@ -807,6 +925,9 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         temporaryRouteTrackingStopsInLowPowerMode = userDefaults.bool(
             forKey: TemporaryRouteTrackingStorageKey.stopInLowPowerMode
         )
+        temporaryRouteTrackingStopNotificationEnabled = userDefaults.bool(
+            forKey: TemporaryRouteTrackingStorageKey.stopNotificationEnabled
+        )
 
         guard let storedEndsAt = userDefaults.object(forKey: TemporaryRouteTrackingStorageKey.endsAt) as? Date else {
             return
@@ -819,10 +940,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
                 temporaryRouteTrackingStartedAt = storedEndsAt.addingTimeInterval(-interval)
             }
             if shouldExpireTemporaryRouteTrackingNow {
-                expireTemporaryRouteTracking()
+                expireTemporaryRouteTracking(notifyImmediately: true)
                 return
             }
             scheduleTemporaryRouteTrackingExpiryTask()
+            scheduleTemporaryRouteTrackingStoppedNotificationIfNeeded()
             return
         }
 
@@ -874,6 +996,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
             temporaryRouteTrackingStopsInLowPowerMode,
             forKey: TemporaryRouteTrackingStorageKey.stopInLowPowerMode
         )
+        userDefaults.set(
+            temporaryRouteTrackingStopNotificationEnabled,
+            forKey: TemporaryRouteTrackingStorageKey.stopNotificationEnabled
+        )
 
         if let temporaryRouteTrackingEndsAt {
             userDefaults.set(temporaryRouteTrackingEndsAt, forKey: TemporaryRouteTrackingStorageKey.endsAt)
@@ -883,10 +1009,17 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     private func expireTemporaryRouteTracking() {
+        expireTemporaryRouteTracking(notifyImmediately: false)
+    }
+
+    private func expireTemporaryRouteTracking(notifyImmediately: Bool) {
         cancelTemporaryRouteTrackingExpiryTask()
         temporaryRouteTrackingStartedAt = nil
         temporaryRouteTrackingEndsAt = nil
         persistTemporaryRouteTrackingState()
+        if notifyImmediately {
+            notifyTemporaryRouteTrackingStoppedImmediatelyIfNeeded()
+        }
         applyTrackingConfiguration()
     }
 
@@ -947,6 +1080,97 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
                 }
             }
         )
+    }
+
+    private func notificationAuthorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
+    private func requestNotificationAuthorization() async -> Bool {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    private func scheduleTemporaryRouteTrackingStoppedNotificationIfNeeded() {
+        guard temporaryRouteTrackingStopNotificationEnabled else { return }
+        guard let endsAt = temporaryRouteTrackingEndsAt, endsAt > .now else { return }
+
+        Task { @MainActor in
+            guard temporaryRouteTrackingStopNotificationEnabled,
+                  temporaryRouteTrackingEndsAt == endsAt else {
+                return
+            }
+
+            let authorizationStatus = await notificationAuthorizationStatus()
+            guard authorizationStatus == .authorized ||
+                authorizationStatus == .provisional ||
+                authorizationStatus == .ephemeral else {
+                cancelTemporaryRouteTrackingStoppedNotification()
+                return
+            }
+
+            let center = UNUserNotificationCenter.current()
+            let content = UNMutableNotificationContent()
+            content.title = "Real route tracking stopped"
+            content.body = "Moves switched back to lower-power tracking."
+            content.sound = .default
+
+            let interval = max(endsAt.timeIntervalSinceNow, 1)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+            let request = UNNotificationRequest(
+                identifier: Self.stopNotificationIdentifier,
+                content: content,
+                trigger: trigger
+            )
+
+            center.removePendingNotificationRequests(withIdentifiers: [Self.stopNotificationIdentifier])
+            center.add(request) { _ in }
+        }
+    }
+
+    private func cancelTemporaryRouteTrackingStoppedNotification() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.stopNotificationIdentifier]
+        )
+    }
+
+    private func notifyTemporaryRouteTrackingStoppedImmediatelyIfNeeded() {
+        guard temporaryRouteTrackingStopNotificationEnabled else { return }
+
+        Task { @MainActor in
+            cancelTemporaryRouteTrackingStoppedNotification()
+
+            guard temporaryRouteTrackingStopNotificationEnabled else { return }
+
+            let authorizationStatus = await notificationAuthorizationStatus()
+            guard authorizationStatus == .authorized ||
+                authorizationStatus == .provisional ||
+                authorizationStatus == .ephemeral else {
+                return
+            }
+
+            let center = UNUserNotificationCenter.current()
+            let content = UNMutableNotificationContent()
+            content.title = "Real route tracking stopped"
+            content.body = "Moves switched back to lower-power tracking."
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: Self.stopNotificationIdentifier,
+                content: content,
+                trigger: nil
+            )
+
+            center.removePendingNotificationRequests(withIdentifiers: [Self.stopNotificationIdentifier])
+            center.add(request) { _ in }
+        }
     }
 }
 

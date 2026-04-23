@@ -10,6 +10,25 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+enum MapMarkerDisplaySettings {
+    static let showsBigMarkersKey = "showBigMapMarkers"
+}
+
+struct MapLocationDot: View {
+    let tint: Color
+
+    var body: some View {
+        Circle()
+            .fill(tint)
+            .frame(width: 8, height: 8)
+            .overlay {
+                Circle()
+                    .stroke(.white, lineWidth: 1.5)
+            }
+            .shadow(color: .black.opacity(0.18), radius: 1, x: 0, y: 1)
+    }
+}
+
 struct DayTimelinePage: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
@@ -67,6 +86,10 @@ struct DayTimelinePageContent: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
     private static let transientStopMaximumDuration: TimeInterval = 5 * 60
+    private static let provisionalPlaceNameResolver = CLGeocoderPlaceNameResolver()
+
+    @State private var provisionalSampleResolvedTitle: String?
+    @State private var provisionalSampleResolvedKey: String?
 
     private var liveRouteSnapshot: LiveRouteTrackingSnapshot? {
         liveRouteTrackingSnapshot(for: dayTimeline, captureManager: captureManager)
@@ -77,6 +100,7 @@ struct DayTimelinePageContent: View {
             .filter { !shouldHidePlaceFromTimeline($0) }
             .map(TimelineEntry.place)
         let moves = dayTimeline.moves.map(TimelineEntry.move)
+        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
         var entries = (places + moves).sorted { $0.startDate < $1.startDate }
 
         if let firstMove = dayTimeline.moves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
@@ -100,6 +124,16 @@ struct DayTimelinePageContent: View {
                     entries.insert(startEntry, at: 0)
                 }
             }
+        }
+
+        if entries.isEmpty, let latestSample = samples.last {
+            entries.append(
+                .sample(
+                    location: latestSample,
+                    sampleCount: samples.count,
+                    resolvedName: provisionalSampleTitle(for: latestSample)
+                )
+            )
         }
 
         if let liveRouteSnapshot {
@@ -198,6 +232,9 @@ struct DayTimelinePageContent: View {
             }
             .padding(.bottom, 24)
         }
+        .task(id: provisionalSampleLookupKey) {
+            await resolveProvisionalSampleTitle()
+        }
     }
 
     private var timelineList: some View {
@@ -241,7 +278,50 @@ struct DayTimelinePageContent: View {
 
         case .start:
             StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+
+        case .sample:
+            StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
         }
+    }
+
+    private var provisionalSampleLookupKey: String {
+        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        guard let latestSample = samples.last else { return "none" }
+        return Self.sampleLookupKey(for: latestSample, sampleCount: samples.count)
+    }
+
+    private func provisionalSampleTitle(for sample: LocationSample) -> String? {
+        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        let key = Self.sampleLookupKey(for: sample, sampleCount: samples.count)
+        guard provisionalSampleResolvedKey == key else { return nil }
+        return provisionalSampleResolvedTitle
+    }
+
+    @MainActor
+    private func resolveProvisionalSampleTitle() async {
+        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        guard let latestSample = samples.last else {
+            provisionalSampleResolvedKey = nil
+            provisionalSampleResolvedTitle = nil
+            return
+        }
+
+        let key = Self.sampleLookupKey(for: latestSample, sampleCount: samples.count)
+        provisionalSampleResolvedKey = key
+        provisionalSampleResolvedTitle = nil
+
+        guard latestSample.horizontalAccuracy > 0, latestSample.horizontalAccuracy <= 250 else {
+            return
+        }
+
+        let resolved = await Self.provisionalPlaceNameResolver.resolveName(for: latestSample.coordinate)
+        guard provisionalSampleResolvedKey == key else { return }
+        provisionalSampleResolvedTitle = resolved?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func sampleLookupKey(for sample: LocationSample, sampleCount: Int) -> String {
+        let timestamp = Int(sample.timestamp.timeIntervalSince1970.rounded())
+        return "\(sample.dedupeKey)|\(timestamp)|\(sampleCount)"
     }
 }
 
@@ -255,18 +335,24 @@ struct DayTransportSummaryMetric: Identifiable {
 }
 
 enum DayTransportBucket: String, CaseIterable {
-    case automotive
-    case cycling
     case walking
+    case cycling
+    case automotive
+    case train
+    case plane
 
     init?(_ mode: TransportMode) {
         switch mode {
-        case .automotive:
-            self = .automotive
-        case .cycling:
-            self = .cycling
         case .walking, .running:
             self = .walking
+        case .cycling:
+            self = .cycling
+        case .automotive:
+            self = .automotive
+        case .train:
+            self = .train
+        case .plane:
+            self = .plane
         case .stationary, .unknown:
             return nil
         }
@@ -274,45 +360,61 @@ enum DayTransportBucket: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .automotive:
-            return "Car"
-        case .cycling:
-            return "Bike"
         case .walking:
             return "Walking"
+        case .cycling:
+            return "Bike"
+        case .automotive:
+            return "Car"
+        case .train:
+            return "Train"
+        case .plane:
+            return "Plane"
         }
     }
 
     var symbolName: String {
         switch self {
-        case .automotive:
-            return "car.fill"
-        case .cycling:
-            return "figure.outdoor.cycle"
         case .walking:
             return "figure.walk"
+        case .cycling:
+            return "figure.outdoor.cycle"
+        case .automotive:
+            return "car.fill"
+        case .train:
+            return "tram.fill"
+        case .plane:
+            return "airplane"
         }
     }
 
     var transportMode: TransportMode {
         switch self {
-        case .automotive:
-            return .automotive
-        case .cycling:
-            return .cycling
         case .walking:
             return .walking
+        case .cycling:
+            return .cycling
+        case .automotive:
+            return .automotive
+        case .train:
+            return .train
+        case .plane:
+            return .plane
         }
     }
 
     var tint: Color {
         switch self {
-        case .automotive:
-            return Color(red: 0.18, green: 0.47, blue: 0.92)
-        case .cycling:
-            return Color(red: 0.10, green: 0.63, blue: 0.54)
         case .walking:
             return Color(red: 0.95, green: 0.64, blue: 0.18)
+        case .cycling:
+            return Color(red: 0.10, green: 0.63, blue: 0.54)
+        case .automotive:
+            return Color(red: 0.18, green: 0.47, blue: 0.92)
+        case .train:
+            return Color(red: 0.09, green: 0.58, blue: 0.68)
+        case .plane:
+            return Color(red: 0.26, green: 0.50, blue: 0.89)
         }
     }
 }
@@ -397,6 +499,7 @@ struct DayTransportSummaryView: View {
 struct DayMapStrip: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
+    @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     let dayTimeline: DayTimeline
 
     @State private var camera: MapCameraPosition
@@ -478,6 +581,11 @@ struct DayMapStrip: View {
     var body: some View {
         Map(position: $camera, interactionModes: [.pan, .zoom]) {
             ForEach(historicalRoutes) { route in
+                if route.shadowCoordinates.count > 1 {
+                    MapPolyline(coordinates: route.shadowCoordinates)
+                        .stroke(route.shadowTint, lineWidth: route.shadowLineWidth)
+                }
+
                 if route.coordinates.count > 1 {
                     MapPolyline(coordinates: route.coordinates)
                         .stroke(route.tint.opacity(0.95), lineWidth: route.lineWidth)
@@ -491,16 +599,28 @@ struct DayMapStrip: View {
             }
 
             ForEach(placeMarkers) { marker in
-                Marker(marker.title, coordinate: marker.coordinate)
-                    .tint(MovesPalette.place)
+                if showsBigMarkers {
+                    Marker(marker.title, coordinate: marker.coordinate)
+                        .tint(MovesPalette.place)
+                } else {
+                    Annotation(marker.title, coordinate: marker.coordinate, anchor: .center) {
+                        MapLocationDot(tint: MovesPalette.place)
+                    }
+                }
             }
 
             if placeMarkers.isEmpty,
                historicalRouteCoordinates.isEmpty,
                (liveRouteSnapshot?.coordinates.isEmpty ?? true),
                let latestSampleCoordinate {
-                Marker("Captured location", coordinate: latestSampleCoordinate)
-                    .tint(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
+                if showsBigMarkers {
+                    Marker("Captured location", coordinate: latestSampleCoordinate)
+                        .tint(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
+                } else {
+                    Annotation("Captured location", coordinate: latestSampleCoordinate, anchor: .center) {
+                        MapLocationDot(tint: liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
+                    }
+                }
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
@@ -530,7 +650,8 @@ struct DayMapStrip: View {
                 RenderedRoute(
                     id: move.id.uuidString,
                     coordinates: matched,
-                    usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking
+                    usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking,
+                    transportMode: move.transportMode
                 )
             )
         }
@@ -573,7 +694,8 @@ struct DayMapStrip: View {
                 return RenderedRoute(
                     id: move.id.uuidString,
                     coordinates: move.cachedRouteCoordinates(for: signature) ?? fallback,
-                    usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking
+                    usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking,
+                    transportMode: move.transportMode
                 )
             }
     }
@@ -658,6 +780,7 @@ enum TimelineEntry: Identifiable {
     case move(MoveSegment)
     case liveRoute(LiveRouteTrackingSnapshot)
     case start(place: VisitPlace, timestamp: Date)
+    case sample(location: LocationSample, sampleCount: Int, resolvedName: String?)
 
     var id: String {
         switch self {
@@ -669,6 +792,8 @@ enum TimelineEntry: Identifiable {
             return "live-\(snapshot.id)"
         case .start(let place, let timestamp):
             return "start-\(place.id.uuidString)-\(timestamp.timeIntervalSince1970)"
+        case .sample(let location, _, _):
+            return "sample-\(location.dedupeKey)-\(location.timestamp.timeIntervalSince1970)"
         }
     }
 
@@ -682,6 +807,8 @@ enum TimelineEntry: Identifiable {
             return snapshot.latestDate
         case .start(_, let timestamp):
             return timestamp
+        case .sample(let location, _, _):
+            return location.timestamp
         }
     }
 
@@ -695,6 +822,8 @@ enum TimelineEntry: Identifiable {
             return Self.timeString(from: snapshot.latestDate)
         case .start(_, let timestamp):
             return Self.timeString(from: timestamp)
+        case .sample(let location, _, _):
+            return Self.timeString(from: location.timestamp)
         }
     }
 
@@ -708,6 +837,8 @@ enum TimelineEntry: Identifiable {
             return "location.fill.viewfinder"
         case .start:
             return "sunrise.fill"
+        case .sample:
+            return "mappin.circle.fill"
         }
     }
 
@@ -721,6 +852,8 @@ enum TimelineEntry: Identifiable {
             return MovesPalette.routeTracking
         case .start:
             return MovesPalette.start
+        case .sample:
+            return MovesPalette.place
         }
     }
 
@@ -736,6 +869,15 @@ enum TimelineEntry: Identifiable {
             return "\(start) to \(end)"
         case .liveRoute:
             return "Live route tracking"
+        case .sample(let location, _, let resolvedName):
+            if let resolvedName,
+               !resolvedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return resolvedName
+            }
+            return Self.coordinateString(
+                latitude: location.latitude,
+                longitude: location.longitude
+            )
         }
     }
 
@@ -765,6 +907,8 @@ enum TimelineEntry: Identifiable {
             }
 
             return "\(snapshot.sampleCount) live fixes   \(duration)   \(distance)"
+        case .sample:
+            return "In progress"
         }
     }
 
@@ -780,6 +924,11 @@ enum TimelineEntry: Identifiable {
                 return "Tracking will start as soon as GPS provides the first fix."
             }
             return "Last update \(snapshot.latestDate.formatted(date: .omitted, time: .shortened))"
+        case .sample(_, let sampleCount, _):
+            if sampleCount == 1 {
+                return "1 location sample captured"
+            }
+            return "\(sampleCount) location samples captured"
         default:
             return nil
         }
@@ -787,6 +936,12 @@ enum TimelineEntry: Identifiable {
 
     private static func timeString(from date: Date) -> String {
         date.formatted(.dateTime.hour().minute())
+    }
+
+    private static func coordinateString(latitude: Double, longitude: Double) -> String {
+        let latitudeText = String(format: "%.5f", latitude)
+        let longitudeText = String(format: "%.5f", longitude)
+        return "\(latitudeText), \(longitudeText)"
     }
 }
 

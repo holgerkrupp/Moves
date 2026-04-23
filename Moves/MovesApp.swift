@@ -7,13 +7,41 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
+import UserNotifications
+
+final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        application.applicationSupportsShakeToEdit = true
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
+    }
+}
+
+@MainActor
+final class AppUndoController: ObservableObject {
+    let manager = UndoManager()
+}
 
 @main
 struct MovesApp: App {
+    @UIApplicationDelegateAdaptor(MovesAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
 
     private let sharedModelContainer: ModelContainer
+    @StateObject private var undoController = AppUndoController()
     @StateObject private var captureManager: MovesLocationCaptureManager
 
     init() {
@@ -66,6 +94,7 @@ struct MovesApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(captureManager)
+                .environmentObject(undoController)
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { _, newPhase in

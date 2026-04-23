@@ -9,6 +9,8 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
     case running
     case cycling
     case automotive
+    case train
+    case plane
     case unknown
 
     var id: String { rawValue }
@@ -20,6 +22,8 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .running: return "Running"
         case .cycling: return "Cycling"
         case .automotive: return "Automotive"
+        case .train: return "Train"
+        case .plane: return "Plane"
         case .unknown: return "Unknown"
         }
     }
@@ -31,6 +35,8 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .running: return "figure.run"
         case .cycling: return "figure.outdoor.cycle"
         case .automotive: return "car.fill"
+        case .train: return "tram.fill"
+        case .plane: return "airplane"
         case .unknown: return "questionmark.circle"
         }
     }
@@ -345,14 +351,361 @@ protocol TimelineRepository {
     func saveIfNeeded() throws
 }
 
+struct HistoricalDeduplicationReport {
+    let removedPlaceCount: Int
+    let removedMoveCount: Int
+
+    var totalRemovedCount: Int {
+        removedPlaceCount + removedMoveCount
+    }
+}
+
+struct TimelineDeduplicationUndoSnapshot: Codable {
+    let capturedAt: Date
+    let dayTimelines: [DayTimelineSnapshot]
+    let places: [VisitPlaceSnapshot]
+    let moves: [MoveSegmentSnapshot]
+    let samples: [LocationSampleSnapshot]
+}
+
+struct DayTimelineSnapshot: Codable {
+    let dayKey: String
+    let dayStart: Date
+    let createdAt: Date
+}
+
+struct VisitPlaceSnapshot: Codable {
+    let id: UUID
+    let arrivalDate: Date
+    let departureDate: Date?
+    let latitude: Double
+    let longitude: Double
+    let horizontalAccuracy: Double
+    let userLabel: String?
+    let autoLabel: String?
+    let createdAt: Date
+    let dayKey: String?
+}
+
+struct MoveSegmentSnapshot: Codable {
+    let id: UUID
+    let dedupeKey: String
+    let startDate: Date
+    let endDate: Date
+    let transportModeRawValue: String
+    let distanceMeters: Double
+    let stepCount: Int?
+    let createdAt: Date
+    let startPlaceID: UUID?
+    let endPlaceID: UUID?
+    let dayKey: String?
+    let routeCacheSignature: String?
+    let routeCacheCoordinatesData: Data?
+}
+
+struct LocationSampleSnapshot: Codable {
+    let dedupeKey: String
+    let timestamp: Date
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let horizontalAccuracy: Double
+    let speed: Double
+    let sourceRawValue: String
+    let createdAt: Date
+    let dayKey: String?
+    let moveID: UUID?
+}
+
+enum TimelineDeduplicationSnapshotStore {
+    enum SnapshotError: Error {
+        case missingSnapshot
+    }
+
+    private static let filename = "timeline-deduplication-undo-snapshot.json"
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
+    static var hasSnapshot: Bool {
+        FileManager.default.fileExists(atPath: snapshotURL.path)
+    }
+
+    static func save(_ snapshot: TimelineDeduplicationUndoSnapshot) throws {
+        let data = try encoder.encode(snapshot)
+        let directory = snapshotURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: snapshotURL, options: .atomic)
+    }
+
+    static func load() throws -> TimelineDeduplicationUndoSnapshot {
+        guard hasSnapshot else {
+            throw SnapshotError.missingSnapshot
+        }
+
+        let data = try Data(contentsOf: snapshotURL)
+        return try decoder.decode(TimelineDeduplicationUndoSnapshot.self, from: data)
+    }
+
+    static func clear() throws {
+        guard hasSnapshot else { return }
+        try FileManager.default.removeItem(at: snapshotURL)
+    }
+
+    private static var snapshotURL: URL {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        let movesDirectory = appSupport.appendingPathComponent("Moves", isDirectory: true)
+        return movesDirectory.appendingPathComponent(filename, isDirectory: false)
+    }
+}
+
 @MainActor
 final class SwiftDataTimelineRepository: TimelineRepository {
     private let modelContext: ModelContext
     private static let sampleDedupeTimeWindow: TimeInterval = 5 * 60
     private static let sampleDedupeDistanceThreshold: CLLocationDistance = 120
+    private static let placeDedupeArrivalWindow: TimeInterval = 3 * 60
+    private static let placeDedupeDepartureWindow: TimeInterval = 3 * 60
+    private static let placeDedupeDistanceThreshold: CLLocationDistance = 90
+    private static let moveDedupeTimeWindow: TimeInterval = 3 * 60
+    private static let moveDedupeDurationWindow: TimeInterval = 4 * 60
+    private static let moveDedupeDistanceAbsoluteThreshold: CLLocationDistance = 220
+    private static let moveDedupeDistanceRelativeThreshold: Double = 0.14
+    private static let moveDedupeEndpointDistanceThreshold: CLLocationDistance = 140
+    private static let placeNeighborMoveWindow: TimeInterval = 4 * 60 * 60
+    private static let placeNeighborMoveInferenceSlack: TimeInterval = 20 * 60
+    private static let placeNeighborMoveEndpointDistanceThreshold: CLLocationDistance = 180
 
     init(modelContainer: ModelContainer) {
         self.modelContext = ModelContext(modelContainer)
+    }
+
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
+
+    func createUndoSnapshot() throws -> TimelineDeduplicationUndoSnapshot {
+        let dayTimelines = try modelContext.fetch(
+            FetchDescriptor<DayTimeline>(
+                sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
+            )
+        )
+        let places = try modelContext.fetch(
+            FetchDescriptor<VisitPlace>(
+                sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .forward)]
+            )
+        )
+        let moves = try modelContext.fetch(
+            FetchDescriptor<MoveSegment>(
+                sortBy: [SortDescriptor(\MoveSegment.startDate, order: .forward)]
+            )
+        )
+        let samples = try modelContext.fetch(
+            FetchDescriptor<LocationSample>(
+                sortBy: [SortDescriptor(\LocationSample.timestamp, order: .forward)]
+            )
+        )
+
+        return TimelineDeduplicationUndoSnapshot(
+            capturedAt: .now,
+            dayTimelines: dayTimelines.map { timeline in
+                DayTimelineSnapshot(
+                    dayKey: timeline.dayKey,
+                    dayStart: timeline.dayStart,
+                    createdAt: timeline.createdAt
+                )
+            },
+            places: places.map { place in
+                VisitPlaceSnapshot(
+                    id: place.id,
+                    arrivalDate: place.arrivalDate,
+                    departureDate: place.departureDate,
+                    latitude: place.latitude,
+                    longitude: place.longitude,
+                    horizontalAccuracy: place.horizontalAccuracy,
+                    userLabel: place.userLabel,
+                    autoLabel: place.autoLabel,
+                    createdAt: place.createdAt,
+                    dayKey: place.dayTimeline?.dayKey
+                )
+            },
+            moves: moves.map { move in
+                MoveSegmentSnapshot(
+                    id: move.id,
+                    dedupeKey: move.dedupeKey,
+                    startDate: move.startDate,
+                    endDate: move.endDate,
+                    transportModeRawValue: move.transportModeRawValue,
+                    distanceMeters: move.distanceMeters,
+                    stepCount: move.stepCount,
+                    createdAt: move.createdAt,
+                    startPlaceID: move.startPlace?.id,
+                    endPlaceID: move.endPlace?.id,
+                    dayKey: move.dayTimeline?.dayKey,
+                    routeCacheSignature: move.routeCacheSignature,
+                    routeCacheCoordinatesData: move.routeCacheCoordinatesData
+                )
+            },
+            samples: samples.map { sample in
+                LocationSampleSnapshot(
+                    dedupeKey: sample.dedupeKey,
+                    timestamp: sample.timestamp,
+                    latitude: sample.latitude,
+                    longitude: sample.longitude,
+                    altitude: sample.altitude,
+                    horizontalAccuracy: sample.horizontalAccuracy,
+                    speed: sample.speed,
+                    sourceRawValue: sample.sourceRawValue,
+                    createdAt: sample.createdAt,
+                    dayKey: sample.dayTimeline?.dayKey,
+                    moveID: sample.moveSegment?.id
+                )
+            }
+        )
+    }
+
+    func restoreFromUndoSnapshot(_ snapshot: TimelineDeduplicationUndoSnapshot) throws {
+        try deleteAllTimelineData()
+
+        var timelinesByDayKey: [String: DayTimeline] = [:]
+        timelinesByDayKey.reserveCapacity(snapshot.dayTimelines.count)
+
+        for timelineSnapshot in snapshot.dayTimelines {
+            let timeline = DayTimeline(dayStart: timelineSnapshot.dayStart)
+            timeline.dayKey = timelineSnapshot.dayKey
+            timeline.dayStart = timelineSnapshot.dayStart
+            timeline.createdAt = timelineSnapshot.createdAt
+            modelContext.insert(timeline)
+
+            if timelinesByDayKey[timelineSnapshot.dayKey] == nil {
+                timelinesByDayKey[timelineSnapshot.dayKey] = timeline
+            }
+        }
+
+        var placesByID: [UUID: VisitPlace] = [:]
+        placesByID.reserveCapacity(snapshot.places.count)
+
+        for placeSnapshot in snapshot.places {
+            let place = VisitPlace(
+                arrivalDate: placeSnapshot.arrivalDate,
+                departureDate: placeSnapshot.departureDate,
+                latitude: placeSnapshot.latitude,
+                longitude: placeSnapshot.longitude,
+                horizontalAccuracy: placeSnapshot.horizontalAccuracy,
+                userLabel: placeSnapshot.userLabel,
+                autoLabel: placeSnapshot.autoLabel
+            )
+            place.id = placeSnapshot.id
+            place.createdAt = placeSnapshot.createdAt
+            if let dayKey = placeSnapshot.dayKey {
+                place.dayTimeline = timelinesByDayKey[dayKey]
+            }
+            modelContext.insert(place)
+            placesByID[place.id] = place
+        }
+
+        var movesByID: [UUID: MoveSegment] = [:]
+        movesByID.reserveCapacity(snapshot.moves.count)
+
+        for moveSnapshot in snapshot.moves {
+            let move = MoveSegment(
+                dedupeKey: moveSnapshot.dedupeKey,
+                startDate: moveSnapshot.startDate,
+                endDate: moveSnapshot.endDate,
+                transportMode: TransportMode(rawValue: moveSnapshot.transportModeRawValue) ?? .unknown,
+                distanceMeters: moveSnapshot.distanceMeters,
+                stepCount: moveSnapshot.stepCount
+            )
+            move.id = moveSnapshot.id
+            move.createdAt = moveSnapshot.createdAt
+            move.transportModeRawValue = moveSnapshot.transportModeRawValue
+            move.routeCacheSignature = moveSnapshot.routeCacheSignature
+            move.routeCacheCoordinatesData = moveSnapshot.routeCacheCoordinatesData
+            if let dayKey = moveSnapshot.dayKey {
+                move.dayTimeline = timelinesByDayKey[dayKey]
+            }
+            move.startPlace = moveSnapshot.startPlaceID.flatMap { placesByID[$0] }
+            move.endPlace = moveSnapshot.endPlaceID.flatMap { placesByID[$0] }
+            modelContext.insert(move)
+            movesByID[move.id] = move
+        }
+
+        for sampleSnapshot in snapshot.samples {
+            let location = CLLocation(
+                coordinate: CLLocationCoordinate2D(
+                    latitude: sampleSnapshot.latitude,
+                    longitude: sampleSnapshot.longitude
+                ),
+                altitude: sampleSnapshot.altitude,
+                horizontalAccuracy: sampleSnapshot.horizontalAccuracy,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: sampleSnapshot.speed,
+                timestamp: sampleSnapshot.timestamp
+            )
+            let sample = LocationSample(
+                location: location,
+                source: LocationSampleSource(rawValue: sampleSnapshot.sourceRawValue) ?? .significantChange,
+                dedupeKey: sampleSnapshot.dedupeKey
+            )
+            sample.timestamp = sampleSnapshot.timestamp
+            sample.latitude = sampleSnapshot.latitude
+            sample.longitude = sampleSnapshot.longitude
+            sample.altitude = sampleSnapshot.altitude
+            sample.horizontalAccuracy = sampleSnapshot.horizontalAccuracy
+            sample.speed = sampleSnapshot.speed
+            sample.sourceRawValue = sampleSnapshot.sourceRawValue
+            sample.createdAt = sampleSnapshot.createdAt
+            if let dayKey = sampleSnapshot.dayKey {
+                sample.dayTimeline = timelinesByDayKey[dayKey]
+            }
+            if let moveID = sampleSnapshot.moveID {
+                sample.moveSegment = movesByID[moveID]
+            }
+            modelContext.insert(sample)
+        }
+
+        try saveIfNeeded()
+    }
+
+    func runHistoricalDeduplication() throws -> HistoricalDeduplicationReport {
+        let placeCountBefore = try modelContext.fetchCount(FetchDescriptor<VisitPlace>())
+        let moveCountBefore = try modelContext.fetchCount(FetchDescriptor<MoveSegment>())
+
+        let placeIDs = try modelContext.fetch(
+            FetchDescriptor<VisitPlace>(
+                sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .forward)]
+            )
+        )
+        .map(\.id)
+
+        for placeID in placeIDs {
+            guard let place = try findPlace(byID: placeID) else { continue }
+            _ = try collapseDuplicatePlaces(around: place)
+        }
+
+        let moveIDs = try modelContext.fetch(
+            FetchDescriptor<MoveSegment>(
+                sortBy: [SortDescriptor(\MoveSegment.startDate, order: .forward)]
+            )
+        )
+        .map(\.id)
+
+        for moveID in moveIDs {
+            guard let move = try findMove(byID: moveID) else { continue }
+            _ = try collapseDuplicateMoves(around: move)
+        }
+
+        try saveIfNeeded()
+
+        let placeCountAfter = try modelContext.fetchCount(FetchDescriptor<VisitPlace>())
+        let moveCountAfter = try modelContext.fetchCount(FetchDescriptor<MoveSegment>())
+
+        return HistoricalDeduplicationReport(
+            removedPlaceCount: max(placeCountBefore - placeCountAfter, 0),
+            removedMoveCount: max(moveCountBefore - moveCountAfter, 0)
+        )
     }
 
     func addOrUpdateVisit(from visit: CLVisit) throws -> VisitPlace {
@@ -366,8 +719,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             }
             existing.horizontalAccuracy = min(existing.horizontalAccuracy, visit.horizontalAccuracy)
             existing.dayTimeline = try timeline(for: arrival)
+            let canonical = try collapseDuplicatePlaces(around: existing)
             try saveIfNeeded()
-            return existing
+            return canonical
         }
 
         let inferredUserLabel = try inferredUserLabel(near: visit.coordinate)
@@ -382,8 +736,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         )
         place.dayTimeline = try timeline(for: arrival)
         modelContext.insert(place)
+        let canonical = try collapseDuplicatePlaces(around: place)
         try saveIfNeeded()
-        return place
+        return canonical
     }
 
     func appendSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample] {
@@ -459,7 +814,15 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let move: MoveSegment
         if let existing = try findMove(byDedupeKey: dedupeKey)
-            ?? findMove(startPlaceID: startPlace.id, endPlaceID: endPlace.id) {
+            ?? findMove(startPlaceID: startPlace.id, endPlaceID: endPlace.id)
+            ?? findSimilarMove(
+                startCoordinate: startPlace.coordinate,
+                endCoordinate: endPlace.coordinate,
+                startDate: startDate,
+                endDate: endDate,
+                distanceMeters: distanceMeters,
+                transportMode: transportMode
+            ) {
             move = existing
             move.dedupeKey = dedupeKey
             move.transportMode = transportMode
@@ -487,8 +850,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             sample.moveSegment = move
         }
 
+        let canonical = try collapseDuplicateMoves(around: move)
         try saveIfNeeded()
-        return move
+        return canonical
     }
 
     func setAutomaticLabel(_ label: String, for placeID: UUID) throws {
@@ -543,8 +907,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 
     private func existingVisit(near arrivalDate: Date, coordinate: CLLocationCoordinate2D) throws -> VisitPlace? {
-        let windowStart = arrivalDate.addingTimeInterval(-120)
-        let windowEnd = arrivalDate.addingTimeInterval(120)
+        let windowStart = arrivalDate.addingTimeInterval(-Self.placeDedupeArrivalWindow)
+        let windowEnd = arrivalDate.addingTimeInterval(Self.placeDedupeArrivalWindow)
 
         var descriptor = FetchDescriptor<VisitPlace>(
             predicate: #Predicate { place in
@@ -559,7 +923,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             Self.distanceMeters(
                 from: coordinate,
                 to: CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
-            ) < 80
+            ) <= Self.placeDedupeDistanceThreshold
         }
     }
 
@@ -613,6 +977,462 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         )
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func findPlace(byID placeID: UUID) throws -> VisitPlace? {
+        var descriptor = FetchDescriptor<VisitPlace>(
+            predicate: #Predicate { place in
+                place.id == placeID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func findMove(byID moveID: UUID) throws -> MoveSegment? {
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.id == moveID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func deleteAllTimelineData() throws {
+        let allSamples = try modelContext.fetch(FetchDescriptor<LocationSample>())
+        allSamples.forEach(modelContext.delete)
+
+        let allMoves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+        allMoves.forEach(modelContext.delete)
+
+        let allPlaces = try modelContext.fetch(FetchDescriptor<VisitPlace>())
+        allPlaces.forEach(modelContext.delete)
+
+        let allTimelines = try modelContext.fetch(FetchDescriptor<DayTimeline>())
+        allTimelines.forEach(modelContext.delete)
+    }
+
+    private func findSimilarMove(
+        startCoordinate: CLLocationCoordinate2D,
+        endCoordinate: CLLocationCoordinate2D,
+        startDate: Date,
+        endDate: Date,
+        distanceMeters: CLLocationDistance,
+        transportMode: TransportMode
+    ) throws -> MoveSegment? {
+        let windowStart = startDate.addingTimeInterval(-Self.moveDedupeTimeWindow)
+        let windowEnd = startDate.addingTimeInterval(Self.moveDedupeTimeWindow)
+
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.startDate >= windowStart && move.startDate <= windowEnd
+            },
+            sortBy: [SortDescriptor(\MoveSegment.createdAt, order: .forward)]
+        )
+        descriptor.fetchLimit = 32
+
+        let candidates = try modelContext.fetch(descriptor)
+        return candidates.first { candidate in
+            isDuplicateMove(
+                candidate,
+                comparedToStartCoordinate: startCoordinate,
+                endCoordinate: endCoordinate,
+                startDate: startDate,
+                endDate: endDate,
+                distanceMeters: distanceMeters,
+                transportMode: transportMode
+            )
+        }
+    }
+
+    private func collapseDuplicatePlaces(around anchor: VisitPlace) throws -> VisitPlace {
+        let windowStart = anchor.arrivalDate.addingTimeInterval(-Self.placeDedupeArrivalWindow)
+        let windowEnd = anchor.arrivalDate.addingTimeInterval(Self.placeDedupeArrivalWindow)
+
+        var descriptor = FetchDescriptor<VisitPlace>(
+            predicate: #Predicate { place in
+                place.arrivalDate >= windowStart && place.arrivalDate <= windowEnd
+            }
+        )
+        descriptor.fetchLimit = 32
+
+        let candidates = try modelContext.fetch(descriptor)
+        let duplicateGroup = candidates.filter { candidate in
+            candidate.id == anchor.id || isDuplicatePlace(anchor, comparedTo: candidate)
+        }
+
+        guard duplicateGroup.count > 1 else {
+            return anchor
+        }
+
+        let canonical = try canonicalPlace(from: duplicateGroup)
+        for candidate in duplicateGroup where candidate.id != canonical.id {
+            mergePlace(candidate, into: canonical)
+            modelContext.delete(candidate)
+        }
+
+        return canonical
+    }
+
+    private func mergePlace(_ source: VisitPlace, into destination: VisitPlace) {
+        if destination.departureDate == nil,
+           let incoming = source.departureDate {
+            destination.departureDate = incoming
+        }
+
+        if destination.userLabel?.isEmpty ?? true,
+           let userLabel = source.userLabel,
+           !userLabel.isEmpty {
+            destination.userLabel = userLabel
+        }
+
+        if destination.autoLabel?.isEmpty ?? true,
+           let autoLabel = source.autoLabel,
+           !autoLabel.isEmpty {
+            destination.autoLabel = autoLabel
+        }
+
+        if destination.dayTimeline == nil {
+            destination.dayTimeline = source.dayTimeline
+        }
+
+        destination.horizontalAccuracy = min(destination.horizontalAccuracy, source.horizontalAccuracy)
+
+        for move in source.outgoingMoves {
+            move.startPlace = destination
+        }
+
+        for move in source.incomingMoves {
+            move.endPlace = destination
+        }
+    }
+
+    private struct PlaceDedupCandidateScore {
+        let id: UUID
+        let evidenceCount: Int
+        let linkedSideCount: Int
+        let fitError: TimeInterval
+        let duration: TimeInterval
+        let horizontalAccuracy: Double
+        let createdAt: Date
+    }
+
+    private func canonicalPlace(from duplicates: [VisitPlace]) throws -> VisitPlace {
+        guard duplicates.count > 1 else {
+            return duplicates[0]
+        }
+
+        let nearbyMoves = try nearbyMoves(for: duplicates)
+        let scoredCandidates = duplicates.map { place in
+            (place, placeDedupScore(for: place, nearbyMoves: nearbyMoves))
+        }
+
+        let best = scoredCandidates.min { lhs, rhs in
+            let left = lhs.1
+            let right = rhs.1
+
+            if left.evidenceCount != right.evidenceCount {
+                return left.evidenceCount > right.evidenceCount
+            }
+
+            if left.evidenceCount > 0 && abs(left.fitError - right.fitError) > 1 {
+                return left.fitError < right.fitError
+            }
+
+            if left.linkedSideCount != right.linkedSideCount {
+                return left.linkedSideCount > right.linkedSideCount
+            }
+
+            if abs(left.duration - right.duration) > 1 {
+                return left.duration > right.duration
+            }
+
+            if abs(left.horizontalAccuracy - right.horizontalAccuracy) > 0.1 {
+                return left.horizontalAccuracy < right.horizontalAccuracy
+            }
+
+            if left.createdAt != right.createdAt {
+                return left.createdAt < right.createdAt
+            }
+
+            return left.id.uuidString < right.id.uuidString
+        }
+
+        return best?.0 ?? duplicates[0]
+    }
+
+    private func placeDedupScore(
+        for place: VisitPlace,
+        nearbyMoves: [MoveSegment]
+    ) -> PlaceDedupCandidateScore {
+        let arrival = place.arrivalDate
+        let departure = place.departureDate ?? place.arrivalDate
+
+        let linkedIncoming = nearestDate(to: arrival, in: place.incomingMoves.map(\.endDate))
+        let linkedOutgoing = nearestDate(to: departure, in: place.outgoingMoves.map(\.startDate))
+
+        let inferredIncoming = linkedIncoming ?? nearestIncomingMoveEndDate(for: place, from: nearbyMoves)
+        let inferredOutgoing = linkedOutgoing ?? nearestOutgoingMoveStartDate(for: place, from: nearbyMoves)
+
+        var fitError: TimeInterval = 0
+        var evidenceCount = 0
+
+        if let incomingDate = inferredIncoming {
+            evidenceCount += 1
+            fitError += abs(incomingDate.timeIntervalSince(arrival))
+        }
+
+        if let outgoingDate = inferredOutgoing {
+            evidenceCount += 1
+            fitError += abs(outgoingDate.timeIntervalSince(departure))
+        }
+
+        if evidenceCount == 0 {
+            fitError = .greatestFiniteMagnitude
+        }
+
+        let linkedSideCount = (linkedIncoming == nil ? 0 : 1) + (linkedOutgoing == nil ? 0 : 1)
+        let duration = max(departure.timeIntervalSince(arrival), 0)
+
+        return PlaceDedupCandidateScore(
+            id: place.id,
+            evidenceCount: evidenceCount,
+            linkedSideCount: linkedSideCount,
+            fitError: fitError,
+            duration: duration,
+            horizontalAccuracy: place.horizontalAccuracy,
+            createdAt: place.createdAt
+        )
+    }
+
+    private func nearbyMoves(for places: [VisitPlace]) throws -> [MoveSegment] {
+        let arrivals = places.map(\.arrivalDate)
+        let departures = places.map { $0.departureDate ?? $0.arrivalDate }
+
+        guard let minArrival = arrivals.min(),
+              let maxDeparture = departures.max() else {
+            return []
+        }
+
+        let windowStart = minArrival.addingTimeInterval(-Self.placeNeighborMoveWindow)
+        let windowEnd = maxDeparture.addingTimeInterval(Self.placeNeighborMoveWindow)
+
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.endDate >= windowStart && move.startDate <= windowEnd
+            },
+            sortBy: [SortDescriptor(\MoveSegment.startDate, order: .forward)]
+        )
+        descriptor.fetchLimit = 256
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func nearestIncomingMoveEndDate(
+        for place: VisitPlace,
+        from nearbyMoves: [MoveSegment]
+    ) -> Date? {
+        let coordinate = place.coordinate
+        let arrival = place.arrivalDate
+        let departure = place.departureDate ?? arrival
+        let upperBound = departure.addingTimeInterval(Self.placeNeighborMoveInferenceSlack)
+
+        let candidates = nearbyMoves
+            .compactMap { move -> Date? in
+                guard let endPlace = move.endPlace else { return nil }
+                guard Self.distanceMeters(from: endPlace.coordinate, to: coordinate) <= Self.placeNeighborMoveEndpointDistanceThreshold else {
+                    return nil
+                }
+                guard move.endDate <= upperBound else { return nil }
+                return move.endDate
+            }
+
+        return nearestDate(to: arrival, in: candidates)
+    }
+
+    private func nearestOutgoingMoveStartDate(
+        for place: VisitPlace,
+        from nearbyMoves: [MoveSegment]
+    ) -> Date? {
+        let coordinate = place.coordinate
+        let arrival = place.arrivalDate
+        let departure = place.departureDate ?? arrival
+        let lowerBound = arrival.addingTimeInterval(-Self.placeNeighborMoveInferenceSlack)
+
+        let candidates = nearbyMoves
+            .compactMap { move -> Date? in
+                guard let startPlace = move.startPlace else { return nil }
+                guard Self.distanceMeters(from: startPlace.coordinate, to: coordinate) <= Self.placeNeighborMoveEndpointDistanceThreshold else {
+                    return nil
+                }
+                guard move.startDate >= lowerBound else { return nil }
+                return move.startDate
+            }
+
+        return nearestDate(to: departure, in: candidates)
+    }
+
+    private func nearestDate(to target: Date, in dates: [Date]) -> Date? {
+        dates.min { lhs, rhs in
+            abs(lhs.timeIntervalSince(target)) < abs(rhs.timeIntervalSince(target))
+        }
+    }
+
+    private func isDuplicatePlace(_ lhs: VisitPlace, comparedTo rhs: VisitPlace) -> Bool {
+        let coordinateDistance = Self.distanceMeters(from: lhs.coordinate, to: rhs.coordinate)
+        guard coordinateDistance <= Self.placeDedupeDistanceThreshold else {
+            return false
+        }
+
+        let arrivalDelta = abs(lhs.arrivalDate.timeIntervalSince(rhs.arrivalDate))
+        guard arrivalDelta <= Self.placeDedupeArrivalWindow else {
+            return false
+        }
+
+        switch (lhs.departureDate, rhs.departureDate) {
+        case (.none, .none):
+            return true
+        case let (.some(lhsDeparture), .some(rhsDeparture)):
+            return abs(lhsDeparture.timeIntervalSince(rhsDeparture)) <= Self.placeDedupeDepartureWindow
+        default:
+            return false
+        }
+    }
+
+    private func collapseDuplicateMoves(around anchor: MoveSegment) throws -> MoveSegment {
+        let windowStart = anchor.startDate.addingTimeInterval(-Self.moveDedupeTimeWindow)
+        let windowEnd = anchor.startDate.addingTimeInterval(Self.moveDedupeTimeWindow)
+
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.startDate >= windowStart && move.startDate <= windowEnd
+            }
+        )
+        descriptor.fetchLimit = 32
+
+        let candidates = try modelContext.fetch(descriptor)
+
+        let anchorStartCoordinate = anchor.startPlace?.coordinate
+        let anchorEndCoordinate = anchor.endPlace?.coordinate
+        guard let anchorStartCoordinate, let anchorEndCoordinate else {
+            return anchor
+        }
+
+        for candidate in candidates where candidate.id != anchor.id {
+            if !isDuplicateMove(
+                candidate,
+                comparedToStartCoordinate: anchorStartCoordinate,
+                endCoordinate: anchorEndCoordinate,
+                startDate: anchor.startDate,
+                endDate: anchor.endDate,
+                distanceMeters: anchor.distanceMeters,
+                transportMode: anchor.transportMode
+            ) {
+                continue
+            }
+
+            mergeMove(candidate, into: anchor)
+            modelContext.delete(candidate)
+        }
+
+        return anchor
+    }
+
+    private func mergeMove(_ source: MoveSegment, into destination: MoveSegment) {
+        destination.startDate = min(destination.startDate, source.startDate)
+        destination.endDate = max(destination.endDate, source.endDate)
+        destination.distanceMeters = max(destination.distanceMeters, source.distanceMeters)
+
+        if destination.stepCount == nil {
+            destination.stepCount = source.stepCount
+        } else if let sourceStepCount = source.stepCount, let destinationStepCount = destination.stepCount {
+            destination.stepCount = max(destinationStepCount, sourceStepCount)
+        }
+
+        if destination.transportMode == .unknown, source.transportMode != .unknown {
+            destination.transportMode = source.transportMode
+        }
+
+        if destination.startPlace == nil {
+            destination.startPlace = source.startPlace
+        }
+        if destination.endPlace == nil {
+            destination.endPlace = source.endPlace
+        }
+        if destination.dayTimeline == nil {
+            destination.dayTimeline = source.dayTimeline
+        }
+
+        if destination.routeCacheCoordinatesData == nil,
+           let sourceCoordinates = source.routeCacheCoordinatesData {
+            destination.routeCacheCoordinatesData = sourceCoordinates
+            destination.routeCacheSignature = source.routeCacheSignature
+        }
+
+        for sample in source.samples {
+            sample.moveSegment = destination
+        }
+    }
+
+    private func isDuplicateMove(
+        _ candidate: MoveSegment,
+        comparedToStartCoordinate startCoordinate: CLLocationCoordinate2D,
+        endCoordinate: CLLocationCoordinate2D,
+        startDate: Date,
+        endDate: Date,
+        distanceMeters: CLLocationDistance,
+        transportMode: TransportMode
+    ) -> Bool {
+        guard let candidateStart = candidate.startPlace?.coordinate,
+              let candidateEnd = candidate.endPlace?.coordinate else {
+            return false
+        }
+
+        let startDelta = abs(candidate.startDate.timeIntervalSince(startDate))
+        guard startDelta <= Self.moveDedupeTimeWindow else {
+            return false
+        }
+
+        let endDelta = abs(candidate.endDate.timeIntervalSince(endDate))
+        guard endDelta <= Self.moveDedupeTimeWindow else {
+            return false
+        }
+
+        let durationDelta = abs(candidate.timelineDuration - endDate.timeIntervalSince(startDate))
+        guard durationDelta <= Self.moveDedupeDurationWindow else {
+            return false
+        }
+
+        let startDistance = Self.distanceMeters(from: candidateStart, to: startCoordinate)
+        let endDistance = Self.distanceMeters(from: candidateEnd, to: endCoordinate)
+        guard startDistance <= Self.moveDedupeEndpointDistanceThreshold,
+              endDistance <= Self.moveDedupeEndpointDistanceThreshold else {
+            return false
+        }
+
+        let distanceDelta = abs(candidate.distanceMeters - distanceMeters)
+        let normalizedDistance = max(max(candidate.distanceMeters, distanceMeters), 1)
+        let maxDistanceDelta = max(
+            Self.moveDedupeDistanceAbsoluteThreshold,
+            normalizedDistance * Self.moveDedupeDistanceRelativeThreshold
+        )
+        guard distanceDelta <= maxDistanceDelta else {
+            return false
+        }
+
+        return areTransportModesCompatible(candidate.transportMode, transportMode)
+    }
+
+    private func areTransportModesCompatible(_ lhs: TransportMode, _ rhs: TransportMode) -> Bool {
+        if lhs == rhs { return true }
+        if lhs == .unknown || rhs == .unknown { return true }
+
+        let walkingSet: Set<TransportMode> = [.walking, .running]
+        if walkingSet.contains(lhs) && walkingSet.contains(rhs) {
+            return true
+        }
+
+        return false
     }
 
     private func normalizedArrivalDate(for visit: CLVisit) -> Date {
@@ -1071,6 +1891,12 @@ enum SimulatorDemoDataSeeder {
         case .automotive:
             metersPerMinute = 700
             minimumMinutes = 12
+        case .train:
+            metersPerMinute = 1_200
+            minimumMinutes = 14
+        case .plane:
+            metersPerMinute = 6_000
+            minimumMinutes = 25
         case .stationary, .unknown:
             metersPerMinute = 85
             minimumMinutes = 12
@@ -1089,7 +1915,7 @@ enum SimulatorDemoDataSeeder {
             return max(Int((distanceMeters / 0.76).rounded()), 0)
         case .running:
             return max(Int((distanceMeters / 1.02).rounded()), 0)
-        case .cycling, .automotive, .stationary, .unknown:
+        case .cycling, .automotive, .train, .plane, .stationary, .unknown:
             return nil
         }
     }
@@ -1104,6 +1930,10 @@ enum SimulatorDemoDataSeeder {
             return 4.6
         case .automotive:
             return 11.5
+        case .train:
+            return 28
+        case .plane:
+            return 140
         case .stationary, .unknown:
             return 1.0
         }
@@ -1117,6 +1947,10 @@ enum SimulatorDemoDataSeeder {
             return 20
         case .automotive:
             return 24
+        case .train:
+            return 28
+        case .plane:
+            return 40
         case .stationary, .unknown:
             return 18
         }
@@ -1137,6 +1971,10 @@ enum SimulatorDemoDataSeeder {
             baseMinutes = 9 * 60 + 5
         case .automotive:
             baseMinutes = 10 * 60 + 20
+        case .train:
+            baseMinutes = 7 * 60 + 50
+        case .plane:
+            baseMinutes = 11 * 60 + 10
         case .stationary, .unknown:
             baseMinutes = 8 * 60
         }
@@ -1480,6 +2318,10 @@ enum SimulatorDemoDataSeeder {
             return .walking
         case .cycling:
             return .cycling
+        case .train:
+            return .transit
+        case .plane:
+            return nil
         case .stationary, .unknown:
             return nil
         }

@@ -65,13 +65,53 @@ struct RenderedRoute: Identifiable {
     let id: String
     let coordinates: [CLLocationCoordinate2D]
     let usesHighAccuracyRouteTracking: Bool
+    let transportMode: TransportMode
+
+    var shadowCoordinates: [CLLocationCoordinate2D] {
+        guard transportMode == .plane,
+              let start = coordinates.first,
+              let end = coordinates.last else {
+            return []
+        }
+        return [start, end]
+    }
 
     var tint: Color {
-        usesHighAccuracyRouteTracking ? MovesPalette.routeTracking : MovesPalette.move
+        if usesHighAccuracyRouteTracking {
+            return MovesPalette.routeTracking
+        }
+
+        switch transportMode {
+        case .train:
+            return Color(red: 0.09, green: 0.58, blue: 0.68)
+        case .plane:
+            return Color(red: 0.26, green: 0.50, blue: 0.89)
+        default:
+            return MovesPalette.move
+        }
+    }
+
+    var shadowTint: Color {
+        tint.opacity(0.32)
     }
 
     var lineWidth: CGFloat {
-        usesHighAccuracyRouteTracking ? 5 : 4
+        if usesHighAccuracyRouteTracking {
+            return 5
+        }
+
+        switch transportMode {
+        case .plane:
+            return 4.5
+        case .train:
+            return 4.25
+        default:
+            return 4
+        }
+    }
+
+    var shadowLineWidth: CGFloat {
+        transportMode == .plane ? 2.5 : 0
     }
 }
 
@@ -243,6 +283,8 @@ enum MapRegionFactory {
 }
 
 enum MoveRouteGeometry {
+    private static let routeMatchingVersion = "route-v2"
+
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         let sampleCoordinates = move.samples.preferredRouteDisplaySamples
             .sorted(by: { $0.timestamp < $1.timestamp })
@@ -265,6 +307,7 @@ enum MoveRouteGeometry {
 
     static func cacheSignature(for move: MoveSegment, fallback: [CLLocationCoordinate2D]) -> String {
         var components: [String] = [
+            routeMatchingVersion,
             move.id.uuidString,
             move.transportMode.rawValue,
             String(Int(move.timelineStartDate.timeIntervalSince1970.rounded())),
@@ -284,6 +327,7 @@ enum MoveRouteGeometry {
 
     static func cacheKey(for move: MoveSegment, fallback: [CLLocationCoordinate2D]) -> Int {
         var hasher = Hasher()
+        hasher.combine(routeMatchingVersion)
         hasher.combine(move.id)
         hasher.combine(move.transportMode.rawValue)
         hasher.combine(Int(move.timelineStartDate.timeIntervalSince1970.rounded()))
@@ -377,6 +421,77 @@ enum RouteCoordinateOps {
     }
 }
 
+enum PlaneRouteGeometry {
+    static func arcCoordinates(from fallback: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        guard let start = fallback.first, let end = fallback.last else {
+            return fallback
+        }
+
+        guard RouteCoordinateOps.distanceMeters(from: start, to: end) > 15 else {
+            return [start, end]
+        }
+
+        return arcCoordinates(from: start, to: end)
+    }
+
+    private static func arcCoordinates(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D
+    ) -> [CLLocationCoordinate2D] {
+        let latitudeDelta = end.latitude - start.latitude
+        let longitudeDelta = end.longitude - start.longitude
+        let vectorLength = max(hypot(latitudeDelta, longitudeDelta), 0.0001)
+
+        let midpoint = CLLocationCoordinate2D(
+            latitude: (start.latitude + end.latitude) / 2,
+            longitude: (start.longitude + end.longitude) / 2
+        )
+
+        let perpendicular = CLLocationCoordinate2D(
+            latitude: -longitudeDelta / vectorLength,
+            longitude: latitudeDelta / vectorLength
+        )
+
+        let span = max(abs(latitudeDelta), abs(longitudeDelta))
+        let curvature = min(max(span * 0.35, 0.02), 5.5)
+        let preferredVerticalDirection = midpoint.latitude >= 0 ? 1.0 : -1.0
+        let bendSign = (perpendicular.latitude * preferredVerticalDirection) >= 0 ? 1.0 : -1.0
+
+        var controlLatitude = midpoint.latitude + (perpendicular.latitude * curvature * bendSign)
+        let controlLongitude = midpoint.longitude + (perpendicular.longitude * curvature * bendSign)
+
+        // Keep the arch consistently above the shadow line in the north and below in the south.
+        if (controlLatitude - midpoint.latitude) * preferredVerticalDirection <= 0 {
+            controlLatitude = midpoint.latitude + (preferredVerticalDirection * max(curvature * 0.28, 0.012))
+        }
+
+        controlLatitude = min(max(controlLatitude, -85), 85)
+
+        let control = CLLocationCoordinate2D(
+            latitude: controlLatitude,
+            longitude: controlLongitude
+        )
+
+        let pointCount = max(min(Int(span * 14), 84), 28)
+        return (0...pointCount).map { index in
+            let t = Double(index) / Double(pointCount)
+            let inverseT = 1 - t
+
+            let latitude =
+                (inverseT * inverseT * start.latitude) +
+                (2 * inverseT * t * control.latitude) +
+                (t * t * end.latitude)
+
+            let longitude =
+                (inverseT * inverseT * start.longitude) +
+                (2 * inverseT * t * control.longitude) +
+                (t * t * end.longitude)
+
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+    }
+}
+
 @MainActor
 enum RoadRouteMatcher {
     private static let memo = RouteMatchMemo()
@@ -429,7 +544,15 @@ enum RoadRouteMatcher {
         fallback: [CLLocationCoordinate2D],
         transportMode: TransportMode
     ) async -> [CLLocationCoordinate2D] {
-        guard fallback.count > 1, let transportType = mapTransportType(for: transportMode) else {
+        guard fallback.count > 1 else {
+            return fallback
+        }
+
+        if transportMode == .plane {
+            return PlaneRouteGeometry.arcCoordinates(from: fallback)
+        }
+
+        guard let transportType = mapTransportType(for: transportMode) else {
             return fallback
         }
 
@@ -512,6 +635,10 @@ enum RoadRouteMatcher {
             return .walking
         case .cycling:
             return .cycling
+        case .train:
+            return .transit
+        case .plane:
+            return nil
         case .stationary, .unknown:
             return nil
         }
@@ -525,6 +652,10 @@ enum RoadRouteMatcher {
             return 35
         case .automotive:
             return 60
+        case .train:
+            return 90
+        case .plane:
+            return 120
         case .stationary, .unknown:
             return 60
         }
@@ -538,6 +669,10 @@ enum RoadRouteMatcher {
             return 6
         case .automotive:
             return 4
+        case .train:
+            return 5
+        case .plane:
+            return 2
         case .stationary, .unknown:
             return 4
         }
