@@ -86,6 +86,8 @@ struct RenderedRoute: Identifiable {
             return Color(red: 0.09, green: 0.58, blue: 0.68)
         case .plane:
             return Color(red: 0.26, green: 0.50, blue: 0.89)
+        case .boat:
+            return Color(red: 0.56, green: 0.48, blue: 0.70)
         default:
             return MovesPalette.move
         }
@@ -571,6 +573,10 @@ enum RoadRouteMatcher {
             return (fallback, true)
         }
 
+        if transportMode == .boat {
+            return (fallback, true)
+        }
+
         if transportMode == .plane {
             return (PlaneRouteGeometry.arcCoordinates(from: fallback), true)
         }
@@ -728,7 +734,7 @@ enum RoadRouteMatcher {
             return [.transit, .automobile]
         case .plane:
             return []
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             return []
         }
     }
@@ -746,7 +752,7 @@ enum RoadRouteMatcher {
             return 90
         case .plane:
             return 120
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             return 60
         }
     }
@@ -763,7 +769,7 @@ enum RoadRouteMatcher {
             return 5
         case .plane:
             return 2
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             return 4
         }
     }

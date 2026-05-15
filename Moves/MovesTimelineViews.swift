@@ -342,6 +342,7 @@ enum DayTransportBucket: String, CaseIterable {
     case automotive
     case train
     case plane
+    case boat
 
     init?(_ mode: TransportMode) {
         switch mode {
@@ -355,6 +356,8 @@ enum DayTransportBucket: String, CaseIterable {
             self = .train
         case .plane:
             self = .plane
+        case .boat:
+            self = .boat
         case .stationary, .unknown:
             return nil
         }
@@ -372,6 +375,8 @@ enum DayTransportBucket: String, CaseIterable {
             return "Train"
         case .plane:
             return "Plane"
+        case .boat:
+            return "Boat"
         }
     }
 
@@ -387,6 +392,8 @@ enum DayTransportBucket: String, CaseIterable {
             return "tram.fill"
         case .plane:
             return "airplane"
+        case .boat:
+            return "sailboat.fill"
         }
     }
 
@@ -402,6 +409,8 @@ enum DayTransportBucket: String, CaseIterable {
             return .train
         case .plane:
             return .plane
+        case .boat:
+            return .boat
         }
     }
 
@@ -417,6 +426,8 @@ enum DayTransportBucket: String, CaseIterable {
             return Color(red: 0.09, green: 0.58, blue: 0.68)
         case .plane:
             return Color(red: 0.26, green: 0.50, blue: 0.89)
+        case .boat:
+            return Color(red: 0.56, green: 0.48, blue: 0.70)
         }
     }
 }
@@ -932,10 +943,17 @@ enum TimelineEntry: Identifiable {
     var tertiaryText: String? {
         switch self {
         case .move(let segment):
-            if let stepCount = segment.stepCount {
-                return "\(stepCount) steps"
+            var details: [String] = []
+
+            if let stepCount = segment.stepCount, stepCount > 0 {
+                details.append("\(stepCount.formatted(.number)) steps")
             }
-            return nil
+
+            if let averageSpeed = Self.averageSpeedText(for: segment) {
+                details.append(averageSpeed)
+            }
+
+            return details.isEmpty ? nil : details.joined(separator: "   ")
         case .liveRoute(let snapshot):
             if snapshot.sampleCount == 0 {
                 return "Tracking will start as soon as GPS provides the first fix."
@@ -949,6 +967,14 @@ enum TimelineEntry: Identifiable {
         default:
             return nil
         }
+    }
+
+    private static func averageSpeedText(for segment: MoveSegment) -> String? {
+        guard segment.timelineDuration > 0 else { return nil }
+
+        let kilometersPerHour = max(segment.distanceMeters, 0) / segment.timelineDuration * 3.6
+        let formattedSpeed = kilometersPerHour.formatted(.number.precision(.fractionLength(1)))
+        return "\(formattedSpeed) km/h"
     }
 
     private static func timeString(from date: Date) -> String {

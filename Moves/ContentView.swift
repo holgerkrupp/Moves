@@ -238,6 +238,7 @@ struct ContentView: View {
     @EnvironmentObject private var undoController: AppUndoController
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     @Query(sort: \DayTimeline.dayStart, order: .forward)
     private var dayTimelines: [DayTimeline]
@@ -339,11 +340,15 @@ struct ContentView: View {
             await captureManager.start()
         }
         .onAppear {
-            syncSelectedDayIfNeeded()
+            openCurrentDay()
             modelContext.undoManager = undoController.manager
         }
         .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
             syncSelectedDayIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            openCurrentDay()
         }
         .onChange(of: selectedPageIndex) { _, newIndex in
             guard dayTimelines.indices.contains(newIndex) else { return }
@@ -504,6 +509,27 @@ struct ContentView: View {
             if let url = URL(string: UIApplication.openSettingsURLString) {
                 openURL(url)
             }
+        }
+    }
+
+    private func openCurrentDay() {
+        guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
+
+        let todayKey = DayTimeline.makeDayKey(for: .now)
+        if !dayTimelines.contains(where: { $0.dayKey == todayKey }) {
+            let today = DayTimeline(dayStart: .now)
+            modelContext.insert(today)
+
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to create current day timeline: \(error.localizedDescription)")
+            }
+        }
+
+        selectedDayKey = todayKey
+        if let todayIndex = dayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
+            selectedPageIndex = todayIndex
         }
     }
 

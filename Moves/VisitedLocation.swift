@@ -11,6 +11,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
     case automotive
     case train
     case plane
+    case boat
     case unknown
 
     var id: String { rawValue }
@@ -24,6 +25,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .automotive: return "Automotive"
         case .train: return "Train"
         case .plane: return "Plane"
+        case .boat: return "Boat"
         case .unknown: return "Unknown"
         }
     }
@@ -37,6 +39,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .automotive: return "car.fill"
         case .train: return "tram.fill"
         case .plane: return "airplane"
+        case .boat: return "ferry.fill"
         case .unknown: return "questionmark.circle"
         }
     }
@@ -1910,7 +1913,7 @@ enum SimulatorDemoDataSeeder {
         case .plane:
             metersPerMinute = 6_000
             minimumMinutes = 25
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             metersPerMinute = 85
             minimumMinutes = 12
         }
@@ -1928,7 +1931,7 @@ enum SimulatorDemoDataSeeder {
             return max(Int((distanceMeters / 0.76).rounded()), 0)
         case .running:
             return max(Int((distanceMeters / 1.02).rounded()), 0)
-        case .cycling, .automotive, .train, .plane, .stationary, .unknown:
+        case .cycling, .automotive, .train, .plane, .boat, .stationary, .unknown:
             return nil
         }
     }
@@ -1947,7 +1950,7 @@ enum SimulatorDemoDataSeeder {
             return 28
         case .plane:
             return 140
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             return 1.0
         }
     }
@@ -1964,7 +1967,7 @@ enum SimulatorDemoDataSeeder {
             return 28
         case .plane:
             return 40
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             return 18
         }
     }
@@ -1988,7 +1991,7 @@ enum SimulatorDemoDataSeeder {
             baseMinutes = 7 * 60 + 50
         case .plane:
             baseMinutes = 11 * 60 + 10
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             baseMinutes = 8 * 60
         }
 
@@ -2336,7 +2339,7 @@ enum SimulatorDemoDataSeeder {
             return [.transit, .automobile]
         case .plane:
             return []
-        case .stationary, .unknown:
+        case .boat, .stationary, .unknown:
             return []
         }
     }

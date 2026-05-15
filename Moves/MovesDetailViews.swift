@@ -57,6 +57,7 @@ struct PlaceMapDetailView: View {
                     Image(systemName: "trash")
                 }
                 .disabled(isDeleting)
+                
             }
         }
         .confirmationDialog(
@@ -274,21 +275,26 @@ struct MoveMapDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Picker("Transport mode", selection: transportBucketSelection) {
-                    Image(systemName: DayTransportBucket.walking.symbolName)
-                        .tag(DayTransportBucket.walking)
-                    Image(systemName: DayTransportBucket.cycling.symbolName)
-                        .tag(DayTransportBucket.cycling)
-                    Image(systemName: DayTransportBucket.automotive.symbolName)
-                        .tag(DayTransportBucket.automotive)
-                    Image(systemName: DayTransportBucket.train.symbolName)
-                        .tag(DayTransportBucket.train)
-                    Image(systemName: DayTransportBucket.plane.symbolName)
-                        .tag(DayTransportBucket.plane)
+                Menu {
+                    ForEach(DayTransportBucket.allCases, id: \.self) { bucket in
+                        Button {
+                            updateTransportBucket(to: bucket)
+                        } label: {
+                            Label(bucket.title, systemImage: bucket.symbolName)
+                                .labelStyle(.iconOnly)
+                             
+                        }
+                      
+                    }
+                } label: {
+                    Image(systemName: segment.transportMode.symbolName)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                        .glassEffect(in: Circle())
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 248)
+                .menuOrder(.fixed)
+                .buttonStyle(.glass)
+                .help("Transport mode")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -319,14 +325,7 @@ struct MoveMapDetailView: View {
             Text(deleteErrorMessage)
         }
         .task(id: routeRefreshKey) {
-            routeCoordinates = await RoadRouteMatcher.matchedCoordinates(for: segment)
-            if modelContext.hasChanges {
-                do {
-                    try modelContext.save()
-                } catch {
-                    print("Failed to persist matched route cache: \(error.localizedDescription)")
-                }
-            }
+            await refreshRouteCoordinates()
         }
         .overlay(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
@@ -351,24 +350,40 @@ struct MoveMapDetailView: View {
         return "\(start) to \(end)"
     }
 
-    private var transportBucketSelection: Binding<DayTransportBucket> {
-        Binding(
-            get: { DayTransportBucket(segment.transportMode) ?? .walking },
-            set: { newBucket in
-                let newMode = newBucket.transportMode
-                guard segment.transportMode != newMode else { return }
+    private func updateTransportBucket(to newBucket: DayTransportBucket) {
+        let newMode = newBucket.transportMode
+        guard segment.transportMode != newMode else { return }
 
-                let previousMode = segment.transportMode
-                segment.transportMode = newMode
+        let previousMode = segment.transportMode
+        let previousRouteCacheSignature = segment.routeCacheSignature
+        let previousRouteCacheCoordinatesData = segment.routeCacheCoordinatesData
+        segment.transportMode = newMode
+        segment.clearCachedRouteCoordinates()
+        routeCoordinates = MoveRouteGeometry.rawCoordinates(for: segment)
 
-                do {
-                    try modelContext.save()
-                } catch {
-                    segment.transportMode = previousMode
-                    print("Failed to save move transport mode: \(error.localizedDescription)")
-                }
+        do {
+            try modelContext.save()
+            Task { @MainActor in
+                await refreshRouteCoordinates()
             }
-        )
+        } catch {
+            segment.transportMode = previousMode
+            segment.routeCacheSignature = previousRouteCacheSignature
+            segment.routeCacheCoordinatesData = previousRouteCacheCoordinatesData
+            print("Failed to save move transport mode: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func refreshRouteCoordinates() async {
+        routeCoordinates = await RoadRouteMatcher.matchedCoordinates(for: segment)
+        if modelContext.hasChanges {
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to persist matched route cache: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func deleteMove() {
