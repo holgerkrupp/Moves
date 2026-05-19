@@ -1,0 +1,24 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves Widgets/MovesWidgets.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Moves Today",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 18
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shows today’s move distance, transport split, and visited locations.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 19
+        }
+      }
+    ]
+  },
+  "version": 1
+}

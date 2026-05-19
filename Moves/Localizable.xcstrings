@@ -21,6 +21,12 @@
         }
       }
     },
+    "%lld moves" : {
+
+    },
+    "%lld places" : {
+
+    },
     "%lld places   %lld moves" : {
       "localizations" : {
         "en" : {
@@ -31,7 +37,13 @@
         }
       }
     },
+    "Activity filter" : {
+
+    },
     "Always location access is needed to keep this running in the background." : {
+
+    },
+    "Apple Health Routes" : {
 
     },
     "Arrived %@" : {
@@ -64,6 +76,9 @@
     "Data Maintenance" : {
 
     },
+    "Date" : {
+
+    },
     "Day Summary" : {
 
     },
@@ -94,6 +109,9 @@
     "Duration" : {
 
     },
+    "Earliest" : {
+
+    },
     "Enable real route tracking" : {
 
     },
@@ -103,19 +121,40 @@
     "Export" : {
 
     },
+    "File Route Import" : {
+
+    },
     "Grant location access above to start recording visits and movement." : {
 
     },
     "Grant location access first to use this feature." : {
 
     },
+    "Import all asks Apple Health for every supported workout route it can return." : {
+
+    },
+    "Import all workout routes" : {
+
+    },
+    "Importing all routes..." : {
+
+    },
+    "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically." : {
+
+    },
     "iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them." : {
+
+    },
+    "Jump to Date" : {
 
     },
     "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
 
     },
     "Label (Home, Work...)" : {
+
+    },
+    "Most active days" : {
 
     },
     "Move" : {
@@ -128,6 +167,9 @@
 
     },
     "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo." : {
+
+    },
+    "No matching days for this filter yet." : {
 
     },
     "No movement summary available yet." : {
@@ -157,7 +199,13 @@
     "Place" : {
 
     },
+    "Real route tracking" : {
+
+    },
     "Real Route Tracking" : {
+
+    },
+    "Real route tracking, %@ remaining" : {
 
     },
     "Refresh timeline" : {
@@ -175,6 +223,12 @@
     "Start" : {
 
     },
+    "Supports GPX, TCX, KML, and GeoJSON route files. You can select one or multiple files at once. Duplicate points are merged automatically, and imported route tracks are preferred over less accurate phone/watch samples." : {
+
+    },
+    "Tap to open settings. Touch and hold to start tracking." : {
+
+    },
     "These safeguards can end the session early if power gets tight." : {
 
     },
@@ -182,6 +236,9 @@
 
     },
     "This removes this place from the timeline. You can undo the deletion afterwards." : {
+
+    },
+    "Today" : {
 
     },
     "Total" : {
@@ -200,6 +257,9 @@
 
     },
     "Update route tracking" : {
+
+    },
+    "Use Apple Health workout routes" : {
 
     },
     "Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on." : {

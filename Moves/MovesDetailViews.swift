@@ -193,6 +193,7 @@ struct MoveMapDetailView: View {
 
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
+    @State private var isShowingTransportPicker = false
     @State private var isConfirmingDeletion = false
     @State private var isDeleting = false
     @State private var deleteErrorMessage = ""
@@ -275,25 +276,18 @@ struct MoveMapDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Menu {
-                    ForEach(DayTransportBucket.allCases, id: \.self) { bucket in
-                        Button {
-                            updateTransportBucket(to: bucket)
-                        } label: {
-                            Label(bucket.title, systemImage: bucket.symbolName)
-                                .labelStyle(.iconOnly)
-                             
-                        }
-                      
-                    }
+                Button {
+                    isShowingTransportPicker = true
                 } label: {
                     Image(systemName: segment.transportMode.symbolName)
                         .frame(width: 40, height: 40)
                         .contentShape(Circle())
                         .glassEffect(in: Circle())
                 }
-                .menuOrder(.fixed)
                 .buttonStyle(.glass)
+                .popover(isPresented: $isShowingTransportPicker, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                    transportModePickerContent
+                }
                 .help("Transport mode")
             }
 
@@ -348,6 +342,47 @@ struct MoveMapDetailView: View {
         let start = segment.startPlace?.displayTitle ?? "Unknown start"
         let end = segment.endPlace?.displayTitle ?? "Unknown destination"
         return "\(start) to \(end)"
+    }
+
+    private var transportModePickerContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Transport mode")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+
+            ForEach(DayTransportBucket.allCases, id: \.self) { bucket in
+                Button {
+                    updateTransportBucket(to: bucket)
+                    isShowingTransportPicker = false
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: bucket.symbolName)
+                            .foregroundStyle(bucket.tint)
+                            .frame(width: 20)
+
+                        Text(bucket.title)
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        if segment.transportMode == bucket.transportMode {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(bucket.tint)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 12)
+        .frame(minWidth: 220)
+        .presentationCompactAdaptation(.popover)
     }
 
     private func updateTransportBucket(to newBucket: DayTransportBucket) {

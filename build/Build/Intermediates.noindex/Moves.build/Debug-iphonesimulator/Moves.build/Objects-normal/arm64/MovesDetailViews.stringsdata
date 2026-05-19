@@ -1,0 +1,200 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/MovesDetailViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Place",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 50
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Place?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 64
+        }
+      },
+      {
+        "comment": "",
+        "key": "Could Not Delete Place",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 76
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 68
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 72
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Place",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 166
+        }
+      },
+      {
+        "comment": "",
+        "key": "This removes this place from the timeline. You can undo the deletion afterwards.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 74
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 77
+        }
+      },
+      {
+        "comment": "",
+        "key": "Arrived %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 85
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-detected: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 91
+        }
+      },
+      {
+        "comment": "",
+        "key": "Label (Home, Work...)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 97
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 108
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 274
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Move?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 310
+        }
+      },
+      {
+        "comment": "",
+        "key": "Could Not Delete Move",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 322
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 243
+        }
+      },
+      {
+        "comment": "",
+        "key": "End",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 264
+        }
+      },
+      {
+        "comment": "",
+        "key": "Transport mode",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 297
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 314
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 318
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Move",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 403
+        }
+      },
+      {
+        "comment": "",
+        "key": "This removes this move from the timeline. You can undo the deletion afterwards.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 320
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 323
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@   %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 336
+        }
+      }
+    ]
+  },
+  "version": 1
+}

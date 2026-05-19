@@ -847,6 +847,115 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(report.removedMoveCount, 1)
     }
 
+    func testHistoricalDeduplicationRepairsMissingStayBetweenIncomingAndOutgoingMove() throws {
+        let container = try makeInMemoryContainer()
+        let seedContext = ModelContext(container)
+
+        let dayStart = Date(timeIntervalSince1970: 1_710_000_000)
+        let timeline = DayTimeline(dayStart: dayStart)
+        seedContext.insert(timeline)
+
+        let incomingEnd = dayStart.addingTimeInterval(9 * 60 * 60)
+        let outgoingStart = incomingEnd.addingTimeInterval(62 * 60)
+        let outgoingEnd = outgoingStart.addingTimeInterval(20 * 60)
+
+        let previousPlace = VisitPlace(
+            arrivalDate: incomingEnd.addingTimeInterval(-40 * 60),
+            departureDate: incomingEnd.addingTimeInterval(-30 * 60),
+            latitude: 52.5000,
+            longitude: 13.3900,
+            horizontalAccuracy: 25
+        )
+        previousPlace.dayTimeline = timeline
+
+        let origin = VisitPlace(
+            arrivalDate: outgoingStart,
+            departureDate: outgoingStart,
+            latitude: 52.5200,
+            longitude: 13.4050,
+            horizontalAccuracy: 18
+        )
+        origin.dayTimeline = timeline
+
+        let home = VisitPlace(
+            arrivalDate: outgoingEnd,
+            departureDate: nil,
+            latitude: 52.5400,
+            longitude: 13.4250,
+            horizontalAccuracy: 18
+        )
+        home.dayTimeline = timeline
+
+        let nearHome = VisitPlace(
+            arrivalDate: outgoingEnd.addingTimeInterval(20),
+            departureDate: outgoingEnd.addingTimeInterval(2 * 60),
+            latitude: 52.5415,
+            longitude: 13.4270,
+            horizontalAccuracy: 20
+        )
+        nearHome.dayTimeline = timeline
+
+        seedContext.insert(previousPlace)
+        seedContext.insert(origin)
+        seedContext.insert(home)
+        seedContext.insert(nearHome)
+
+        let incomingMove = MoveSegment(
+            dedupeKey: "incoming-gap",
+            startDate: incomingEnd.addingTimeInterval(-30 * 60),
+            endDate: incomingEnd,
+            transportMode: .automotive,
+            distanceMeters: 6_200,
+            stepCount: nil
+        )
+        incomingMove.startPlace = previousPlace
+        incomingMove.endPlace = origin
+        incomingMove.dayTimeline = timeline
+
+        let moveToHome = MoveSegment(
+            dedupeKey: "out-home",
+            startDate: outgoingStart,
+            endDate: outgoingEnd,
+            transportMode: .automotive,
+            distanceMeters: 7_300,
+            stepCount: nil
+        )
+        moveToHome.startPlace = origin
+        moveToHome.endPlace = home
+        moveToHome.dayTimeline = timeline
+
+        let moveToNearHome = MoveSegment(
+            dedupeKey: "out-near-home",
+            startDate: outgoingStart.addingTimeInterval(15),
+            endDate: outgoingEnd.addingTimeInterval(15),
+            transportMode: .automotive,
+            distanceMeters: 7_340,
+            stepCount: nil
+        )
+        moveToNearHome.startPlace = origin
+        moveToNearHome.endPlace = nearHome
+        moveToNearHome.dayTimeline = timeline
+
+        seedContext.insert(incomingMove)
+        seedContext.insert(moveToHome)
+        seedContext.insert(moveToNearHome)
+        try seedContext.save()
+
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        _ = try repository.runHistoricalDeduplication()
+
+        let verificationContext = ModelContext(container)
+        let moves = try verificationContext.fetch(FetchDescriptor<MoveSegment>())
+        let allPlaces = try verificationContext.fetch(FetchDescriptor<VisitPlace>())
+        let repairedOrigin = try XCTUnwrap(allPlaces.first(where: { $0.id == origin.id }))
+
+        XCTAssertEqual(moves.count, 2)
+        XCTAssertTrue(moves.contains(where: { $0.endPlace?.id == home.id }))
+        XCTAssertFalse(moves.contains(where: { $0.endPlace?.id == nearHome.id }))
+        XCTAssertEqual(repairedOrigin.arrivalDate, incomingEnd)
+        XCTAssertEqual(repairedOrigin.departureDate, outgoingStart)
+    }
+
     func testUndoSnapshotRestoresPreviousTimelineState() throws {
         let container = try makeInMemoryContainer()
         let repository = SwiftDataTimelineRepository(modelContainer: container)

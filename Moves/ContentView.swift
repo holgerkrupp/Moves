@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -234,6 +235,71 @@ private func temporaryRouteTrackingAutoStopText(
 }
 
 struct ContentView: View {
+    private enum ActivityFilter: String, CaseIterable, Identifiable {
+        case overall
+        case placeCount
+        case onFoot
+        case swimming
+        case cycling
+        case automotive
+        case train
+        case plane
+        case boat
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .overall: return "Overall"
+            case .placeCount: return "Places"
+            case .onFoot: return "On Foot"
+            case .swimming: return "Swim"
+            case .cycling: return "Cycle"
+            case .automotive: return "Car"
+            case .train: return "Train"
+            case .plane: return "Plane"
+            case .boat: return "Boat"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .overall: return "chart.bar.fill"
+            case .placeCount: return "mappin.and.ellipse"
+            case .onFoot: return "figure.walk"
+            case .swimming: return "figure.pool.swim"
+            case .cycling: return "figure.outdoor.cycle"
+            case .automotive: return "car.fill"
+            case .train: return "tram.fill"
+            case .plane: return "airplane"
+            case .boat: return "sailboat.fill"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .overall:
+                return .secondary
+            case .placeCount:
+                return MovesPalette.place
+            case .onFoot:
+                return MovesPalette.transport(.running)
+            case .swimming:
+                return MovesPalette.transport(.swimming)
+            case .cycling:
+                return MovesPalette.transport(.cycling)
+            case .automotive:
+                return MovesPalette.transport(.automotive)
+            case .train:
+                return MovesPalette.transport(.train)
+            case .plane:
+                return MovesPalette.transport(.plane)
+            case .boat:
+                return MovesPalette.transport(.boat)
+            }
+        }
+    }
+
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @EnvironmentObject private var undoController: AppUndoController
     @Environment(\.modelContext) private var modelContext
@@ -246,6 +312,11 @@ struct ContentView: View {
     @State private var selectedDayKey = ""
     @State private var selectedPageIndex = 0
     @State private var isShowingSettings = false
+    @State private var isShowingRouteTrackingSettings = false
+    @State private var isShowingDatePicker = false
+    @State private var isShowingActivityFilterPicker = false
+    @State private var pickerDate = Date.now
+    @State private var activityFilter: ActivityFilter = .overall
 
     private var selectedDay: DayTimeline? {
         guard dayTimelines.indices.contains(selectedPageIndex) else { return nil }
@@ -258,6 +329,30 @@ struct ContentView: View {
 
     private var canGoNewer: Bool {
         dayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex < dayTimelines.count - 1
+    }
+
+    private var earliestRecordedDayStart: Date? {
+        dayTimelines.first?.dayStart
+    }
+
+    private var latestSelectableDayStart: Date {
+        Calendar.autoupdatingCurrent.startOfDay(for: .now)
+    }
+
+    private var mostActiveDays: [DayTimeline] {
+        dayTimelines
+            .sorted { lhs, rhs in
+                activityScore(for: lhs, filter: activityFilter) > activityScore(for: rhs, filter: activityFilter)
+            }
+            .filter { activityScore(for: $0, filter: activityFilter) > 0 }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    private var availableActivityFilters: [ActivityFilter] {
+        let transportFilters: [ActivityFilter] = [.onFoot, .swimming, .cycling, .automotive, .train, .plane, .boat]
+        let availableTransports = transportFilters.filter { totalDistance(for: $0) > 0 }
+        return [.overall, .placeCount] + availableTransports
     }
 
     var body: some View {
@@ -319,12 +414,27 @@ struct ContentView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await captureManager.refreshHistoricalBackfill() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 12) {
+                        RouteTrackingToolbarButton(
+                            endsAt: captureManager.temporaryRouteTrackingEndsAt,
+                            authorizationStatus: captureManager.authorizationStatus,
+                            tapAction: {
+                                isShowingRouteTrackingSettings = true
+                            },
+                            longPressAction: {
+                                captureManager.enableTemporaryRouteTracking(
+                                    duration: captureManager.temporaryRouteTrackingDuration
+                                )
+                            }
+                        )
+
+                        Button {
+                            Task { await captureManager.refreshHistoricalBackfill() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .help("Refresh timeline")
                     }
-                    .help("Refresh timeline")
                 }
             }
         }
@@ -335,6 +445,12 @@ struct ContentView: View {
                 captureManager: captureManager
             )
         }
+        .sheet(isPresented: $isShowingRouteTrackingSettings) {
+            RouteTrackingSettingsSheet(captureManager: captureManager)
+        }
+        .sheet(isPresented: $isShowingDatePicker) {
+            datePickerSheet
+        }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
             await captureManager.start()
@@ -342,17 +458,30 @@ struct ContentView: View {
         .onAppear {
             openCurrentDay()
             modelContext.undoManager = undoController.manager
+            publishWidgetSnapshot()
         }
         .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
             syncSelectedDayIfNeeded()
+            publishWidgetSnapshot()
+            ensureValidActivityFilterSelection()
+        }
+        .onChange(of: selectedDay?.moves.count ?? 0) { _, _ in
+            publishWidgetSnapshot()
+        }
+        .onChange(of: selectedDay?.places.count ?? 0) { _, _ in
+            publishWidgetSnapshot()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             openCurrentDay()
+            publishWidgetSnapshot()
         }
         .onChange(of: selectedPageIndex) { _, newIndex in
             guard dayTimelines.indices.contains(newIndex) else { return }
             selectedDayKey = dayTimelines[newIndex].dayKey
+        }
+        .onAppear {
+            ensureValidActivityFilterSelection()
         }
         .overlay {
             ShakeToUndoDetector(undoManager: undoController.manager) {
@@ -416,9 +545,15 @@ struct ContentView: View {
 
             VStack(spacing: 2) {
                 if let selectedDay {
-                    Text(selectedDay.dayStart, format: .dateTime.weekday(.wide).day().month(.wide))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary.opacity(0.92))
+                    Button {
+                        pickerDate = selectedDay.dayStart
+                        isShowingDatePicker = true
+                    } label: {
+                        Text(selectedDay.dayStart, format: .dateTime.weekday(.wide).day().month(.wide))
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.primary.opacity(0.92))
+                    }
+                    .buttonStyle(.plain)
 
                     Text("\(selectedDay.uniqueLocationCount) places   \(selectedDay.moves.count) moves")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -533,6 +668,11 @@ struct ContentView: View {
         }
     }
 
+    private func publishWidgetSnapshot() {
+        guard let dayTimeline = selectedDay ?? dayTimelines.last else { return }
+        TimelineWidgetSnapshotStore.save(.make(from: dayTimeline))
+    }
+
     private func syncSelectedDayIfNeeded() {
         guard !dayTimelines.isEmpty else {
             selectedPageIndex = 0
@@ -570,6 +710,280 @@ struct ContentView: View {
         let nextIndex = selectedPageIndex + 1
         guard dayTimelines.indices.contains(nextIndex) else { return }
         selectedPageIndex = nextIndex
+    }
+
+    private func jumpToDate(_ date: Date) {
+        guard !dayTimelines.isEmpty else { return }
+
+        let calendar = Calendar.autoupdatingCurrent
+        let targetStart = calendar.startOfDay(for: date)
+
+        let closest = dayTimelines.enumerated().min { lhs, rhs in
+            let lhsStart = calendar.startOfDay(for: lhs.element.dayStart)
+            let rhsStart = calendar.startOfDay(for: rhs.element.dayStart)
+            return abs(lhsStart.timeIntervalSince(targetStart)) < abs(rhsStart.timeIntervalSince(targetStart))
+        }
+
+        guard let closest else { return }
+        selectedPageIndex = closest.offset
+        selectedDayKey = closest.element.dayKey
+    }
+
+    private func jumpToDay(_ day: DayTimeline) {
+        guard let index = dayTimelines.firstIndex(where: { $0.dayKey == day.dayKey }) else { return }
+        selectedPageIndex = index
+        selectedDayKey = day.dayKey
+    }
+
+    private func activityScore(for day: DayTimeline, filter: ActivityFilter) -> Double {
+        let totalDistance = day.moves.reduce(0) { $0 + max($1.distanceMeters, 0) }
+        let totalMoveDuration = day.moves.reduce(0) { $0 + max($1.timelineDuration, 0) }
+        let filteredMoves: [MoveSegment]
+
+        switch filter {
+        case .overall:
+            filteredMoves = day.moves
+        case .placeCount:
+            return Double(day.uniqueLocationCount)
+        case .onFoot:
+            filteredMoves = day.moves.filter { $0.transportMode == .walking || $0.transportMode == .running }
+        case .swimming:
+            filteredMoves = day.moves.filter { $0.transportMode == .swimming }
+        case .cycling:
+            filteredMoves = day.moves.filter { $0.transportMode == .cycling }
+        case .automotive:
+            filteredMoves = day.moves.filter { $0.transportMode == .automotive }
+        case .train:
+            filteredMoves = day.moves.filter { $0.transportMode == .train }
+        case .plane:
+            filteredMoves = day.moves.filter { $0.transportMode == .plane }
+        case .boat:
+            filteredMoves = day.moves.filter { $0.transportMode == .boat }
+        }
+
+        if filter == .overall {
+            let placeComponent = Double(day.uniqueLocationCount) * 1_200
+            let moveComponent = Double(day.moves.count) * 900
+            let distanceComponent = totalDistance
+            let durationComponent = totalMoveDuration / 8
+            return placeComponent + moveComponent + distanceComponent + durationComponent
+        }
+
+        let filteredDistance = filteredMoves.reduce(0) { $0 + max($1.distanceMeters, 0) }
+        let filteredDuration = filteredMoves.reduce(0) { $0 + max($1.timelineDuration, 0) }
+        return filteredDistance + (filteredDuration / 8)
+    }
+
+    private func totalDistance(for day: DayTimeline) -> CLLocationDistance {
+        day.moves.reduce(0) { $0 + max($1.distanceMeters, 0) }
+    }
+
+    private func totalDistance(for filter: ActivityFilter) -> CLLocationDistance {
+        dayTimelines.reduce(0) { partial, day in
+            let distance: CLLocationDistance
+            switch filter {
+            case .onFoot:
+                distance = day.moves
+                    .filter { $0.transportMode == .walking || $0.transportMode == .running }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .swimming:
+                distance = day.moves
+                    .filter { $0.transportMode == .swimming }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .cycling:
+                distance = day.moves
+                    .filter { $0.transportMode == .cycling }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .automotive:
+                distance = day.moves
+                    .filter { $0.transportMode == .automotive }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .train:
+                distance = day.moves
+                    .filter { $0.transportMode == .train }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .plane:
+                distance = day.moves
+                    .filter { $0.transportMode == .plane }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .boat:
+                distance = day.moves
+                    .filter { $0.transportMode == .boat }
+                    .reduce(0) { $0 + max($1.distanceMeters, 0) }
+            case .overall, .placeCount:
+                distance = 0
+            }
+            return partial + distance
+        }
+    }
+
+    private func ensureValidActivityFilterSelection() {
+        if !availableActivityFilters.contains(activityFilter) {
+            activityFilter = .overall
+        }
+    }
+
+    private var datePickerSheet: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                if let earliestRecordedDayStart {
+                    DatePicker(
+                        "Date",
+                        selection: $pickerDate,
+                        in: earliestRecordedDayStart...latestSelectableDayStart,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                    .onChange(of: pickerDate) { _, newDate in
+                        jumpToDate(newDate)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Button("Earliest") {
+                        guard let earliestRecordedDayStart else { return }
+                        pickerDate = earliestRecordedDayStart
+                        jumpToDate(earliestRecordedDayStart)
+                        isShowingDatePicker = false
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Today") {
+                        pickerDate = latestSelectableDayStart
+                        jumpToDate(latestSelectableDayStart)
+                        isShowingDatePicker = false
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Text("Most active days")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button {
+                            isShowingActivityFilterPicker = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: activityFilter.symbolName)
+                                    .foregroundStyle(activityFilter.tint)
+                                Text(activityFilter.title)
+                                    .foregroundStyle(.primary)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(MovesPalette.card.opacity(0.8))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $isShowingActivityFilterPicker, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                            activityFilterPickerContent
+                        }
+                    }
+
+                    if mostActiveDays.isEmpty {
+                        Text("No matching days for this filter yet.")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 6)
+                    } else {
+                        ForEach(mostActiveDays, id: \.dayKey) { day in
+                            Button {
+                                jumpToDay(day)
+                                isShowingDatePicker = false
+                            } label: {
+                                HStack {
+                                    Text(day.dayStart, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.primary)
+
+                                    Spacer()
+
+                                    Text("\(day.uniqueLocationCount) places")
+                                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                                        .foregroundStyle(.secondary)
+
+                                    Text("\(day.moves.count) moves")
+                                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                                        .foregroundStyle(.secondary)
+
+                                    Text(Measurement(value: totalDistance(for: day), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
+                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Jump to Date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        isShowingDatePicker = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private var activityFilterPickerContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Activity filter")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+
+            ForEach(availableActivityFilters) { filter in
+                Button {
+                    activityFilter = filter
+                    isShowingActivityFilterPicker = false
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: filter.symbolName)
+                            .foregroundStyle(filter.tint)
+                            .frame(width: 20)
+
+                        Text(filter.title)
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        if activityFilter == filter {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(filter.tint)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 12)
+        .frame(minWidth: 220)
+        .presentationCompactAdaptation(.popover)
     }
 
     @MainActor
@@ -1007,6 +1421,74 @@ struct FrostedCircleModifier: ViewModifier {
                     }
                     .glassEffect(.regular, in: Circle())
             }
+    }
+}
+
+private struct RouteTrackingToolbarButton: View {
+    let endsAt: Date?
+    let authorizationStatus: CLAuthorizationStatus
+    let tapAction: () -> Void
+    let longPressAction: () -> Void
+
+    @State private var isPulsing = false
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remainingSeconds = endsAt.map { $0.timeIntervalSince(context.date) } ?? 0
+            let isRunning = remainingSeconds > 0 && isAuthorizedForRealTracking
+
+            HStack(spacing: 5) {
+                Image(systemName: "location.fill.viewfinder")
+                    .foregroundStyle(isRunning ? .red : Color.primary)
+                    .scaleEffect(isRunning && isPulsing ? 1.16 : 1)
+                    .opacity(isRunning && isPulsing ? 0.55 : 1)
+
+                if isRunning {
+                    Text(routeTrackingCountdownText(for: remainingSeconds))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                isRunning
+                    ? "Real route tracking, \(routeTrackingCountdownText(for: remainingSeconds)) remaining"
+                    : "Real route tracking"
+            )
+            .accessibilityHint("Tap to open settings. Touch and hold to start tracking.")
+            .accessibilityAddTraits(.isButton)
+            .onTapGesture(perform: tapAction)
+            .onLongPressGesture(minimumDuration: 0.55, perform: longPressAction)
+            .onAppear {
+                isPulsing = isRunning
+            }
+            .onChange(of: isRunning) { _, newValue in
+                isPulsing = newValue
+            }
+            .animation(
+                isRunning
+                    ? .easeInOut(duration: 1.45).repeatForever(autoreverses: true)
+                    : .default,
+                value: isPulsing
+            )
+            .help("Real route tracking")
+        }
+    }
+
+    private var isAuthorizedForRealTracking: Bool {
+        authorizationStatus == .authorizedAlways || authorizationStatus == .authorizedWhenInUse
+    }
+
+    private func routeTrackingCountdownText(for remainingSeconds: TimeInterval) -> String {
+        if remainingSeconds < 60 {
+            return "\(max(Int(ceil(remainingSeconds)), 0))s"
+        }
+
+        return DurationFormatter.text(for: remainingSeconds)
     }
 }
 

@@ -7,6 +7,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
     case stationary
     case walking
     case running
+    case swimming
     case cycling
     case automotive
     case train
@@ -21,6 +22,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .stationary: return "Stationary"
         case .walking: return "Walking"
         case .running: return "Running"
+        case .swimming: return "Swimming"
         case .cycling: return "Cycling"
         case .automotive: return "Automotive"
         case .train: return "Train"
@@ -35,6 +37,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .stationary: return "pause.circle.fill"
         case .walking: return "figure.walk"
         case .running: return "figure.run"
+        case .swimming: return "figure.pool.swim"
         case .cycling: return "figure.outdoor.cycle"
         case .automotive: return "car.fill"
         case .train: return "tram.fill"
@@ -49,6 +52,10 @@ enum LocationSampleSource: String, Codable, CaseIterable {
     case visit
     case significantChange
     case routeTracking
+    case watchRouteTracking
+    case fileRouteImport
+    case watchSignificantChange
+    case healthWorkoutRoute
     case launchBackfill
     case authorizationGrant
 }
@@ -56,18 +63,31 @@ enum LocationSampleSource: String, Codable, CaseIterable {
 extension LocationSampleSource {
     var priority: Int {
         switch self {
+        case .fileRouteImport: return 7
+        case .watchRouteTracking: return 6
+        case .healthWorkoutRoute: return 5
         case .routeTracking: return 4
         case .visit: return 3
+        case .watchSignificantChange: return 2
         case .significantChange: return 2
         case .authorizationGrant: return 1
         case .launchBackfill: return 0
+        }
+    }
+
+    var isRouteTrack: Bool {
+        switch self {
+        case .routeTracking, .watchRouteTracking, .healthWorkoutRoute, .fileRouteImport:
+            return true
+        case .visit, .significantChange, .watchSignificantChange, .launchBackfill, .authorizationGrant:
+            return false
         }
     }
 }
 
 extension Array where Element == LocationSample {
     var preferredRouteDisplaySamples: [LocationSample] {
-        let routeTrackingSamples = filter { $0.source == .routeTracking }
+        let routeTrackingSamples = filter { $0.source.isRouteTrack }
         return routeTrackingSamples.isEmpty ? self : routeTrackingSamples
     }
 }
@@ -263,7 +283,7 @@ final class MoveSegment {
     }
 
     var usesHighAccuracyRouteTracking: Bool {
-        samples.contains { $0.source == .routeTracking }
+        samples.contains { $0.source.isRouteTrack }
     }
 
     func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
@@ -476,6 +496,11 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     private static let moveDedupeDistanceAbsoluteThreshold: CLLocationDistance = 220
     private static let moveDedupeDistanceRelativeThreshold: Double = 0.14
     private static let moveDedupeEndpointDistanceThreshold: CLLocationDistance = 140
+    private static let moveParallelEndpointDistanceThreshold: CLLocationDistance = 320
+    private static let moveParallelTimeWindow: TimeInterval = 5 * 60
+    private static let moveTransientStayMaximumDuration: TimeInterval = 8 * 60
+    private static let synthesizedStayMinimumGap: TimeInterval = 10 * 60
+    private static let synthesizedStayTimeTolerance: TimeInterval = 60
     private static let placeNeighborMoveWindow: TimeInterval = 4 * 60 * 60
     private static let placeNeighborMoveInferenceSlack: TimeInterval = 20 * 60
     private static let placeNeighborMoveEndpointDistanceThreshold: CLLocationDistance = 180
@@ -700,6 +725,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             _ = try collapseDuplicateMoves(around: move)
         }
 
+        try repairMissingStaysAroundMoves()
         try saveIfNeeded()
 
         let placeCountAfter = try modelContext.fetchCount(FetchDescriptor<VisitPlace>())
@@ -766,6 +792,57 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         try saveIfNeeded()
         return inserted
+    }
+
+    @discardableResult
+    func importRouteTrack(
+        locations: [CLLocation],
+        source: LocationSampleSource,
+        transportMode: TransportMode
+    ) throws -> MoveSegment? {
+        let orderedLocations = locations
+            .filter { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= 200 }
+            .sorted(by: { $0.timestamp < $1.timestamp })
+
+        guard let firstLocation = orderedLocations.first,
+              let lastLocation = orderedLocations.last,
+              lastLocation.timestamp > firstLocation.timestamp else {
+            _ = try appendSamples(from: orderedLocations, source: source)
+            return nil
+        }
+
+        let samples = try appendSamples(from: orderedLocations, source: source)
+        let distance = Self.totalDistance(for: orderedLocations)
+
+        let startPlace = try routeEndpointPlace(
+            at: firstLocation,
+            arrivalDate: firstLocation.timestamp,
+            departureDate: firstLocation.timestamp
+        )
+        let endPlace = try routeEndpointPlace(
+            at: lastLocation,
+            arrivalDate: lastLocation.timestamp,
+            departureDate: nil
+        )
+
+        let move = try upsertMove(
+            startPlace: startPlace,
+            endPlace: endPlace,
+            startDate: firstLocation.timestamp,
+            endDate: lastLocation.timestamp,
+            transportMode: transportMode,
+            distanceMeters: distance,
+            stepCount: nil,
+            samples: samples
+        )
+
+        move.storeCachedRouteCoordinates(
+            orderedLocations.map(\.coordinate),
+            signature: "imported-\(source.rawValue)-\(samples.count)-\(Int(distance.rounded()))"
+        )
+
+        try saveIfNeeded()
+        return move
     }
 
     func latestPlace(before date: Date, excluding placeID: UUID?) throws -> VisitPlace? {
@@ -907,6 +984,33 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         let timeline = DayTimeline(dayStart: dayStart)
         modelContext.insert(timeline)
         return timeline
+    }
+
+    private func routeEndpointPlace(
+        at location: CLLocation,
+        arrivalDate: Date,
+        departureDate: Date?
+    ) throws -> VisitPlace {
+        if let existing = try existingVisit(near: arrivalDate, coordinate: location.coordinate) {
+            existing.horizontalAccuracy = min(existing.horizontalAccuracy, max(location.horizontalAccuracy, 20))
+            if existing.departureDate == nil {
+                existing.departureDate = departureDate
+            }
+            existing.dayTimeline = try timeline(for: arrivalDate)
+            return try collapseDuplicatePlaces(around: existing)
+        }
+
+        let place = VisitPlace(
+            arrivalDate: arrivalDate,
+            departureDate: departureDate,
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            horizontalAccuracy: max(location.horizontalAccuracy, 20),
+            userLabel: try inferredUserLabel(near: location.coordinate)
+        )
+        place.dayTimeline = try timeline(for: arrivalDate)
+        modelContext.insert(place)
+        return try collapseDuplicatePlaces(around: place)
     }
 
     private func existingVisit(near arrivalDate: Date, coordinate: CLLocationCoordinate2D) throws -> VisitPlace? {
@@ -1315,30 +1419,41 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let candidates = try modelContext.fetch(descriptor)
 
-        let anchorStartCoordinate = anchor.startPlace?.coordinate
-        let anchorEndCoordinate = anchor.endPlace?.coordinate
-        guard let anchorStartCoordinate, let anchorEndCoordinate else {
-            return anchor
-        }
+        var canonical = anchor
 
-        for candidate in candidates where candidate.id != anchor.id {
-            if !isDuplicateMove(
-                candidate,
-                comparedToStartCoordinate: anchorStartCoordinate,
-                endCoordinate: anchorEndCoordinate,
-                startDate: anchor.startDate,
-                endDate: anchor.endDate,
-                distanceMeters: anchor.distanceMeters,
-                transportMode: anchor.transportMode
-            ) {
+        for candidate in candidates where candidate.id != canonical.id {
+            guard let canonicalStartCoordinate = canonical.startPlace?.coordinate,
+                  let canonicalEndCoordinate = canonical.endPlace?.coordinate else {
                 continue
             }
 
-            mergeMove(candidate, into: anchor)
-            modelContext.delete(candidate)
+            let isStrictDuplicate = isDuplicateMove(
+                candidate,
+                comparedToStartCoordinate: canonicalStartCoordinate,
+                endCoordinate: canonicalEndCoordinate,
+                startDate: canonical.startDate,
+                endDate: canonical.endDate,
+                distanceMeters: canonical.distanceMeters,
+                transportMode: canonical.transportMode
+            )
+            let isParallelDuplicate = isLikelyParallelDuplicateMove(candidate, comparedTo: canonical)
+
+            guard isStrictDuplicate || isParallelDuplicate else {
+                continue
+            }
+
+            let preferred = preferredMove(between: canonical, and: candidate)
+            if preferred.id == canonical.id {
+                mergeMove(candidate, into: canonical)
+                modelContext.delete(candidate)
+            } else {
+                mergeMove(canonical, into: candidate)
+                modelContext.delete(canonical)
+                canonical = candidate
+            }
         }
 
-        return anchor
+        return canonical
     }
 
     private func mergeMove(_ source: MoveSegment, into destination: MoveSegment) {
@@ -1375,6 +1490,120 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         for sample in source.samples {
             sample.moveSegment = destination
         }
+    }
+
+    private func repairMissingStaysAroundMoves() throws {
+        let places = try modelContext.fetch(
+            FetchDescriptor<VisitPlace>(
+                sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .forward)]
+            )
+        )
+
+        for place in places {
+            guard let latestIncomingEnd = place.incomingMoves.map(\.endDate).max(),
+                  let earliestOutgoingStart = place.outgoingMoves.map(\.startDate).min() else {
+                continue
+            }
+
+            let gap = earliestOutgoingStart.timeIntervalSince(latestIncomingEnd)
+            guard gap >= Self.synthesizedStayMinimumGap else {
+                continue
+            }
+
+            let arrivalNeedsRepair = place.arrivalDate.timeIntervalSince(latestIncomingEnd) > Self.synthesizedStayTimeTolerance
+            let currentDeparture = place.departureDate ?? place.arrivalDate
+            let departureNeedsRepair = earliestOutgoingStart.timeIntervalSince(currentDeparture) > Self.synthesizedStayTimeTolerance
+
+            guard arrivalNeedsRepair || departureNeedsRepair else {
+                continue
+            }
+
+            if arrivalNeedsRepair {
+                place.arrivalDate = latestIncomingEnd
+            }
+            if departureNeedsRepair {
+                place.departureDate = earliestOutgoingStart
+            }
+
+            if place.dayTimeline == nil {
+                place.dayTimeline = try timeline(for: place.arrivalDate)
+            }
+        }
+    }
+
+    private func isLikelyParallelDuplicateMove(_ candidate: MoveSegment, comparedTo anchor: MoveSegment) -> Bool {
+        guard let anchorStart = anchor.startPlace?.coordinate,
+              let anchorEnd = anchor.endPlace?.coordinate,
+              let candidateStart = candidate.startPlace?.coordinate,
+              let candidateEnd = candidate.endPlace?.coordinate else {
+            return false
+        }
+
+        let startDelta = abs(candidate.startDate.timeIntervalSince(anchor.startDate))
+        guard startDelta <= Self.moveParallelTimeWindow else {
+            return false
+        }
+
+        let durationDelta = abs(candidate.timelineDuration - anchor.timelineDuration)
+        guard durationDelta <= Self.moveParallelTimeWindow else {
+            return false
+        }
+
+        let startDistance = Self.distanceMeters(from: candidateStart, to: anchorStart)
+        let endDistance = Self.distanceMeters(from: candidateEnd, to: anchorEnd)
+        guard startDistance <= Self.moveDedupeEndpointDistanceThreshold,
+              endDistance <= Self.moveParallelEndpointDistanceThreshold else {
+            return false
+        }
+
+        let distanceDelta = abs(candidate.distanceMeters - anchor.distanceMeters)
+        let normalizedDistance = max(max(candidate.distanceMeters, anchor.distanceMeters), 1)
+        let maxDistanceDelta = max(
+            Self.moveDedupeDistanceAbsoluteThreshold,
+            normalizedDistance * Self.moveDedupeDistanceRelativeThreshold
+        )
+        guard distanceDelta <= maxDistanceDelta else {
+            return false
+        }
+
+        return areTransportModesCompatible(candidate.transportMode, anchor.transportMode)
+    }
+
+    private func preferredMove(between lhs: MoveSegment, and rhs: MoveSegment) -> MoveSegment {
+        let lhsScore = moveRetentionScore(lhs)
+        let rhsScore = moveRetentionScore(rhs)
+
+        if lhsScore != rhsScore {
+            return lhsScore > rhsScore ? lhs : rhs
+        }
+
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt ? lhs : rhs
+        }
+
+        return lhs.id.uuidString < rhs.id.uuidString ? lhs : rhs
+    }
+
+    private func moveRetentionScore(_ move: MoveSegment) -> Int {
+        guard let endPlace = move.endPlace else { return 0 }
+        var score = 0
+
+        if let label = endPlace.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            score += 4
+        } else if let label = endPlace.autoLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            score += 2
+        }
+
+        let endDuration = max((endPlace.departureDate ?? endPlace.arrivalDate).timeIntervalSince(endPlace.arrivalDate), 0)
+        if endDuration > Self.moveTransientStayMaximumDuration {
+            score += 3
+        }
+
+        if endPlace.outgoingMoves.count > 0 {
+            score += 1
+        }
+
+        return score
     }
 
     private func isDuplicateMove(
@@ -1482,6 +1711,14 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         new: LocationSampleSource
     ) -> LocationSampleSource {
         return new.priority > existing.priority ? new : existing
+    }
+
+    private static func totalDistance(for locations: [CLLocation]) -> CLLocationDistance {
+        guard locations.count > 1 else { return 0 }
+
+        return zip(locations, locations.dropFirst()).reduce(0) { partialResult, pair in
+            partialResult + pair.0.distance(from: pair.1)
+        }
     }
 
     private func inferredUserLabel(near coordinate: CLLocationCoordinate2D) throws -> String? {
@@ -1904,6 +2141,9 @@ enum SimulatorDemoDataSeeder {
         case .cycling:
             metersPerMinute = 260
             minimumMinutes = 10
+        case .swimming:
+            metersPerMinute = 55
+            minimumMinutes = 12
         case .automotive:
             metersPerMinute = 700
             minimumMinutes = 12
@@ -1931,7 +2171,7 @@ enum SimulatorDemoDataSeeder {
             return max(Int((distanceMeters / 0.76).rounded()), 0)
         case .running:
             return max(Int((distanceMeters / 1.02).rounded()), 0)
-        case .cycling, .automotive, .train, .plane, .boat, .stationary, .unknown:
+        case .swimming, .cycling, .automotive, .train, .plane, .boat, .stationary, .unknown:
             return nil
         }
     }
@@ -1942,6 +2182,8 @@ enum SimulatorDemoDataSeeder {
             return 1.4
         case .running:
             return 3.0
+        case .swimming:
+            return 1.2
         case .cycling:
             return 4.6
         case .automotive:
@@ -1959,6 +2201,8 @@ enum SimulatorDemoDataSeeder {
         switch mode {
         case .walking, .running:
             return 16
+        case .swimming:
+            return 22
         case .cycling:
             return 20
         case .automotive:
@@ -1985,6 +2229,8 @@ enum SimulatorDemoDataSeeder {
             baseMinutes = 8 * 60 + 15
         case .cycling:
             baseMinutes = 9 * 60 + 5
+        case .swimming:
+            baseMinutes = 12 * 60 + 25
         case .automotive:
             baseMinutes = 10 * 60 + 20
         case .train:
@@ -2335,6 +2581,8 @@ enum SimulatorDemoDataSeeder {
             return [.walking]
         case .cycling:
             return [.cycling, .walking]
+        case .swimming:
+            return []
         case .train:
             return [.transit, .automobile]
         case .plane:

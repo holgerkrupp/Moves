@@ -43,6 +43,8 @@ struct MovesApp: App {
     private let sharedModelContainer: ModelContainer
     @StateObject private var undoController = AppUndoController()
     @StateObject private var captureManager: MovesLocationCaptureManager
+    @StateObject private var watchRouteInbox: WatchRouteInbox
+    @StateObject private var healthWorkoutRouteAutoImporter: HealthWorkoutRouteAutoImportManager
 
     init() {
         do {
@@ -50,6 +52,12 @@ struct MovesApp: App {
             self.sharedModelContainer = container
             _captureManager = StateObject(
                 wrappedValue: MovesLocationCaptureManager(modelContainer: container)
+            )
+            _watchRouteInbox = StateObject(
+                wrappedValue: WatchRouteInbox(modelContainer: container)
+            )
+            _healthWorkoutRouteAutoImporter = StateObject(
+                wrappedValue: HealthWorkoutRouteAutoImportManager(modelContainer: container)
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -102,6 +110,7 @@ struct MovesApp: App {
                 Task {
                     await captureManager.start()
                     await captureManager.refreshHistoricalBackfill()
+                    await healthWorkoutRouteAutoImporter.startIfNeeded()
                 }
             }
         }

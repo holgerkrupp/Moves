@@ -1,0 +1,88 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Moves",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 311
+        }
+      },
+      {
+        "comment": "",
+        "key": "Settings",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 320
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh timeline",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 343
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places   %lld moves",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 452
+        }
+      },
+      {
+        "comment": "",
+        "key": "No timeline yet",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 479
+        }
+      },
+      {
+        "comment": "",
+        "key": "Keep Moves running in the background. Visits and movement segments appear as iOS records them.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 482
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real route tracking, %@ remaining",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1079
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real route tracking",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1080
+        }
+      },
+      {
+        "comment": "",
+        "key": "Tap to open settings. Touch and hold to start tracking.",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1082
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real route tracking",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 1098
+        }
+      }
+    ]
+  },
+  "version": 1
+}

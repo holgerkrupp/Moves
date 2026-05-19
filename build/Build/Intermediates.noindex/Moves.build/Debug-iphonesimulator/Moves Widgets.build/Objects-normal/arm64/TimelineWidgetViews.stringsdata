@@ -1,0 +1,72 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves Widgets/TimelineWidgetViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 62
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places · %lld moves",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 96
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 134
+        }
+      },
+      {
+        "comment": "",
+        "key": "Moves",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 158
+        }
+      },
+      {
+        "comment": "",
+        "key": "Moves Today",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 216
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %lld places",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 218
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 220
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ moved · %lld places",
+        "location": {
+          "startingColumn": 14,
+          "startingLine": 232
+        }
+      }
+    ]
+  },
+  "version": 1
+}

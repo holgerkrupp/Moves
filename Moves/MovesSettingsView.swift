@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import CoreLocation
+import HealthKit
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -53,8 +54,6 @@ struct MovesSettingsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 14) {
-                    RouteTrackingSettingsSection(captureManager: captureManager)
-
                     SettingsCard(title: "Map Appearance") {
                         VStack(alignment: .leading, spacing: 8) {
                             Toggle("Show big map markers", isOn: $showsBigMarkers)
@@ -82,8 +81,8 @@ struct MovesSettingsView: View {
                             export(.gpx, scope: .allDays)
                         }
                     }
-
-                    SettingsCard(title: "Other Formats") {
+                    
+                    SettingsCard(title: "Other Export Formats") {
                         SettingsActionRow(
                             title: "Selected Day (.geojson)",
                             systemImage: "map",
@@ -108,6 +107,36 @@ struct MovesSettingsView: View {
                             export(.csv, scope: .allDays)
                         }
                     }
+
+                    SettingsCard(title: "Import") {
+                        NavigationLink {
+                            HealthWorkoutRouteImportSettingsView(modelContext: modelContext)
+                        } label: {
+                            SettingsNavigationRow(
+                                title: "Apple Health workout routes",
+                                systemImage: "figure.run",
+                                status: HKHealthStore.isHealthDataAvailable() ? nil : "Unavailable"
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            RouteFileImportSettingsView(modelContext: modelContext)
+                        } label: {
+                            SettingsNavigationRow(
+                                title: "Files (GPX, TCX, KML, GeoJSON)",
+                                systemImage: "square.and.arrow.down",
+                                status: nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Text("Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+
 
                     SettingsCard(title: "Data Maintenance") {
                         SettingsActionRow(
@@ -302,6 +331,185 @@ struct MovesSettingsView: View {
             isShowingMaintenanceMessage = true
         }
     }
+
+}
+
+struct RouteTrackingSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let captureManager: MovesLocationCaptureManager
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                RouteTrackingSettingsSection(captureManager: captureManager)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 18)
+            }
+            .background {
+                LinearGradient(
+                    colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
+            .navigationTitle("Real Route Tracking")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HealthWorkoutRouteImportSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(HealthWorkoutRouteImportSettings.isEnabledKey) private var isEnabled = false
+
+    @StateObject private var importer: HealthWorkoutRouteImporter
+    @State private var isImporting = false
+    @State private var importMessage = ""
+    @State private var isShowingImportMessage = false
+
+    init(modelContext: ModelContext) {
+        _importer = StateObject(
+            wrappedValue: HealthWorkoutRouteImporter(modelContext: modelContext)
+        )
+    }
+
+    private var isEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { isEnabled },
+            set: {
+                isEnabled = $0
+                notifySettingsChanged()
+            }
+        )
+    }
+
+    private var isHealthAvailable: Bool {
+        HKHealthStore.isHealthDataAvailable()
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "Apple Health Routes") {
+                    Toggle("Use Apple Health workout routes", isOn: isEnabledBinding)
+                        .disabled(!isHealthAvailable || isImporting)
+
+                    Text(statusText)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                SettingsCard(title: "Legacy Import") {
+                    Button {
+                        importAllRoutes()
+                    } label: {
+                        Label {
+                            Text(isImporting ? "Importing all routes..." : "Import all workout routes")
+                        } icon: {
+                            Image(systemName: "tray.and.arrow.down.fill")
+                        }
+
+                    }
+                    .disabled(!isHealthAvailable || isImporting)
+
+                    if isImporting {
+                        if let progress = importer.importProgress {
+                            ProgressView(value: progress)
+                                .tint(MovesPalette.routeTracking)
+                        } else {
+                            ProgressView()
+                                .tint(MovesPalette.routeTracking)
+                        }
+
+                        if !importer.importProgressText.isEmpty {
+                            Text(importer.importProgressText)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text("Import all asks Apple Health for every supported workout route it can return.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .background {
+            LinearGradient(
+                colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+        .navigationTitle("Apple Health Routes")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
+        .alert("Apple Health Routes", isPresented: $isShowingImportMessage) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importMessage)
+        }
+    }
+
+    private var statusText: String {
+        guard isHealthAvailable else {
+            return "Health data is not available on this device."
+        }
+
+        if isEnabled {
+            return "Moves can import supported workout GPS routes from Apple Health. Turn this off to stop future Health route imports."
+        }
+
+        return "Turn this on to allow workout route imports. Already imported routes remain in the timeline until you remove or deduplicate timeline data."
+    }
+
+    private func notifySettingsChanged() {
+        NotificationCenter.default.post(
+            name: HealthWorkoutRouteImportSettings.didChangeNotification,
+            object: nil
+        )
+    }
+
+    @MainActor
+    private func importAllRoutes() {
+        guard !isImporting else { return }
+
+        isImporting = true
+
+        Task { @MainActor in
+            defer { isImporting = false }
+
+            await importer.importAllWorkoutRoutes()
+
+            if let report = importer.lastReport {
+                importMessage = "Imported \(report.routeCount) workout route(s) from \(report.workoutCount) workout(s), covering \(report.sampleCount) GPS point(s). Duplicate phone and watch points were merged automatically."
+            } else {
+                importMessage = importer.lastErrorMessage ?? "No workout routes were imported."
+            }
+
+            isShowingImportMessage = true
+        }
+    }
 }
 
 private struct SettingsCard<Content: View>: View {
@@ -343,6 +551,33 @@ private struct SettingsActionRow: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .padding(.vertical, 5)
+    }
+}
+
+private struct SettingsNavigationRow: View {
+    let title: String
+    let systemImage: String
+    let status: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Label(title, systemImage: systemImage)
+
+            Spacer(minLength: 8)
+
+            if let status {
+                Text(status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .padding(.vertical, 5)
     }
 }
@@ -614,17 +849,44 @@ private struct RouteTrackingSettingsSection: View {
 
                     if routeTrackingAuthorizationStatus == .authorizedAlways ||
                         routeTrackingAuthorizationStatus == .authorizedWhenInUse {
-                        Picker("Duration", selection: $routeTrackingDuration) {
-                            ForEach(TemporaryRouteTrackingDuration.allCases) { duration in
-                                Text(duration.title)
-                                    .tag(duration)
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                            GridRow {
+                                Text("Duration")
+                                    .gridColumnAlignment(.leading)
+
+                                Picker("Duration", selection: $routeTrackingDuration) {
+                                    ForEach(TemporaryRouteTrackingDuration.allCases) { duration in
+                                        Text(duration.title)
+                                            .tag(duration)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .gridColumnAlignment(.trailing)
+                            }
+
+                            GridRow {
+                                Text("Turn off at 50% battery")
+
+                                Toggle("Turn off at 50% battery", isOn: routeTrackingStopsAtBatteryFiftyBinding)
+                                    .labelsHidden()
+                            }
+
+                            GridRow {
+                                Text("Turn off in Low Power Mode")
+
+                                Toggle("Turn off in Low Power Mode", isOn: routeTrackingStopsInLowPowerModeBinding)
+                                    .labelsHidden()
+                            }
+
+                            GridRow {
+                                Text("Notify when tracking stops")
+
+                                Toggle("Notify when tracking stops", isOn: routeTrackingStopNotificationBinding)
+                                    .labelsHidden()
                             }
                         }
-                        .pickerStyle(.menu)
-
-                        Toggle("Turn off at 50% battery", isOn: routeTrackingStopsAtBatteryFiftyBinding)
-                        Toggle("Turn off in Low Power Mode", isOn: routeTrackingStopsInLowPowerModeBinding)
-                        Toggle("Notify when tracking stops", isOn: routeTrackingStopNotificationBinding)
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
 
                         Text("These safeguards can end the session early if power gets tight.")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -643,7 +905,10 @@ private struct RouteTrackingSettingsSection: View {
                                 : "Update route tracking",
                                 systemImage: "location.fill.viewfinder"
                             )
+                            .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
 
                         if let endsAt = routeTrackingEndsAt,
                            endsAt > .now {
@@ -654,6 +919,8 @@ private struct RouteTrackingSettingsSection: View {
                             Button("Turn off now", role: .destructive) {
                                 captureManager.disableTemporaryRouteTracking()
                             }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
                         }
 
                         if routeTrackingAuthorizationStatus == .authorizedWhenInUse {

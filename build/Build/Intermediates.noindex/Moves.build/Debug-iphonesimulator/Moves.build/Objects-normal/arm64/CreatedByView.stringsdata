@@ -1,0 +1,16 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/CreatedByView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Created in Buxtehude by",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 18
+        }
+      }
+    ]
+  },
+  "version": 1
+}

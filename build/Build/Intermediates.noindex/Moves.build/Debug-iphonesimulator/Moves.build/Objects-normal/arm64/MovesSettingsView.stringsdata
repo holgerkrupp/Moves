@@ -1,0 +1,312 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/MovesSettingsView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Deduplicate Existing Data?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 201
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 213
+        }
+      },
+      {
+        "comment": "",
+        "key": "Data Maintenance",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 218
+        }
+      },
+      {
+        "comment": "",
+        "key": "Settings",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 172
+        }
+      },
+      {
+        "comment": "",
+        "key": "When this is off, maps use small dots so more of the map stays visible.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 62
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show big map markers",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 60
+        }
+      },
+      {
+        "comment": "",
+        "key": "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 97
+        }
+      },
+      {
+        "comment": "",
+        "key": "Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 151
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 176
+        }
+      },
+      {
+        "comment": "",
+        "key": "Deduplicate",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 205
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 209
+        }
+      },
+      {
+        "comment": "",
+        "key": "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 211
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 219
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real Route Tracking",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 366
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 370
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notification Access",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 785
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real Route Tracking",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 679
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 683
+        }
+      },
+      {
+        "comment": "",
+        "key": "These safeguards can end the session early if power gets tight.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 728
+        }
+      },
+      {
+        "comment": "",
+        "key": "iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 732
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-off %@.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 752
+        }
+      },
+      {
+        "comment": "",
+        "key": "Always location access is needed to keep this running in the background.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 764
+        }
+      },
+      {
+        "comment": "",
+        "key": "Grant location access first to use this feature.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 769
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off now",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 756
+        }
+      },
+      {
+        "comment": "",
+        "key": "Duration",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 691
+        }
+      },
+      {
+        "comment": "",
+        "key": "Duration",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 694
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off at 50% battery",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 706
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off at 50% battery",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 708
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off in Low Power Mode",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 713
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off in Low Power Mode",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 715
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notify when tracking stops",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 720
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notify when tracking stops",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 722
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enable real route tracking",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 741
+        }
+      },
+      {
+        "comment": "",
+        "key": "Update route tracking",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 742
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Settings",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 786
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not Now",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 789
+        }
+      },
+      {
+        "comment": "",
+        "key": "Moves needs notification permission to send a stop alert. You can allow it in Settings.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 791
+        }
+      }
+    ]
+  },
+  "version": 1
+}

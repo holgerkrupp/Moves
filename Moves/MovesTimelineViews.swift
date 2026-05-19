@@ -181,22 +181,23 @@ struct DayTimelinePageContent: View {
             distanceByBucket[bucket, default: 0] += max(move.distanceMeters, 0)
         }
 
-        return DayTransportBucket.allCases.map { bucket in
-            DayTransportSummaryMetric(
+        return DayTransportBucket.allCases.compactMap { bucket in
+            let distance = distanceByBucket[bucket, default: 0]
+            guard distance > 0 else { return nil }
+
+            return DayTransportSummaryMetric(
                 id: bucket.rawValue,
                 title: bucket.title,
                 symbolName: bucket.symbolName,
                 tint: bucket.tint,
                 duration: durationByBucket[bucket, default: 0],
-                distanceMeters: distanceByBucket[bucket, default: 0]
+                distanceMeters: distance
             )
         }
     }
 
     private var hasTransportSummaryData: Bool {
-        transportSummaryMetrics.contains {
-            $0.duration > 0 || $0.distanceMeters > 0
-        }
+        !transportSummaryMetrics.isEmpty
     }
 
     var body: some View {
@@ -338,6 +339,7 @@ struct DayTransportSummaryMetric: Identifiable {
 
 enum DayTransportBucket: String, CaseIterable {
     case walking
+    case swimming
     case cycling
     case automotive
     case train
@@ -348,6 +350,8 @@ enum DayTransportBucket: String, CaseIterable {
         switch mode {
         case .walking, .running:
             self = .walking
+        case .swimming:
+            self = .swimming
         case .cycling:
             self = .cycling
         case .automotive:
@@ -367,6 +371,8 @@ enum DayTransportBucket: String, CaseIterable {
         switch self {
         case .walking:
             return "Walking"
+        case .swimming:
+            return "Swimming"
         case .cycling:
             return "Bike"
         case .automotive:
@@ -384,6 +390,8 @@ enum DayTransportBucket: String, CaseIterable {
         switch self {
         case .walking:
             return "figure.walk"
+        case .swimming:
+            return "figure.pool.swim"
         case .cycling:
             return "figure.outdoor.cycle"
         case .automotive:
@@ -401,6 +409,8 @@ enum DayTransportBucket: String, CaseIterable {
         switch self {
         case .walking:
             return .walking
+        case .swimming:
+            return .swimming
         case .cycling:
             return .cycling
         case .automotive:
@@ -415,20 +425,7 @@ enum DayTransportBucket: String, CaseIterable {
     }
 
     var tint: Color {
-        switch self {
-        case .walking:
-            return Color(red: 0.95, green: 0.64, blue: 0.18)
-        case .cycling:
-            return Color(red: 0.10, green: 0.63, blue: 0.54)
-        case .automotive:
-            return Color(red: 0.18, green: 0.47, blue: 0.92)
-        case .train:
-            return Color(red: 0.09, green: 0.58, blue: 0.68)
-        case .plane:
-            return Color(red: 0.26, green: 0.50, blue: 0.89)
-        case .boat:
-            return Color(red: 0.56, green: 0.48, blue: 0.70)
-        }
+        MovesPalette.transport(transportMode)
     }
 }
 

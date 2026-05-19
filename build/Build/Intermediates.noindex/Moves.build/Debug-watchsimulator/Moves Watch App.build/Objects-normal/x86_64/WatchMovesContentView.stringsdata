@@ -1,0 +1,48 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves Watch App/WatchMovesContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Accuracy %lld m",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 30
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld points",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 23
+        }
+      },
+      {
+        "comment": "",
+        "key": "Stop GPS",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 39
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start GPS",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 39
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sync",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 49
+        }
+      }
+    ]
+  },
+  "version": 1
+}

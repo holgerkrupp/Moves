@@ -271,7 +271,7 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         locations: [CLLocation]
     ) -> TransportMode {
         switch candidate {
-        case .walking, .running, .cycling, .train, .plane, .boat:
+        case .walking, .running, .swimming, .cycling, .train, .plane, .boat:
             return candidate
         case .stationary, .automotive, .unknown:
             break

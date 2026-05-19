@@ -18,10 +18,35 @@ enum MovesPalette {
     static let rail = Color(uiColor: .separator).opacity(0.75)
     static let textFieldBackground = Color(uiColor: .tertiarySystemBackground)
     static let frostedFill = Color(uiColor: .tertiarySystemFill)
-    static let place = Color(red: 0.18, green: 0.68, blue: 0.47)
-    static let move = Color(red: 0.16, green: 0.52, blue: 0.93)
-    static let start = Color(red: 0.95, green: 0.64, blue: 0.18)
-    static let routeTracking = Color(red: 0.02, green: 0.69, blue: 0.78)
+    static let place = Color("MovesPlace")
+    static let move = Color("MovesMove")
+    static let start = Color("MovesStart")
+    static let routeTracking = Color("MovesRouteTracking")
+
+    static func transport(_ mode: TransportMode) -> Color {
+        Color(transportColorAssetName(for: mode))
+    }
+
+    static func transportColorAssetName(for mode: TransportMode) -> String {
+        switch mode {
+        case .walking, .running:
+            return "MovesTransportWalking"
+        case .swimming:
+            return "MovesTransportBoat"
+        case .cycling:
+            return "MovesTransportCycling"
+        case .automotive:
+            return "MovesTransportAutomotive"
+        case .train:
+            return "MovesTransportTrain"
+        case .plane:
+            return "MovesTransportPlane"
+        case .boat:
+            return "MovesTransportBoat"
+        case .stationary, .unknown:
+            return "MovesMove"
+        }
+    }
 }
 
 enum DurationFormatter {
@@ -82,14 +107,10 @@ struct RenderedRoute: Identifiable {
         }
 
         switch transportMode {
-        case .train:
-            return Color(red: 0.09, green: 0.58, blue: 0.68)
-        case .plane:
-            return Color(red: 0.26, green: 0.50, blue: 0.89)
-        case .boat:
-            return Color(red: 0.56, green: 0.48, blue: 0.70)
-        default:
+        case .stationary, .walking, .running, .cycling, .automotive, .unknown:
             return MovesPalette.move
+        case .swimming, .train, .plane, .boat:
+            return MovesPalette.transport(transportMode)
         }
     }
 
@@ -734,7 +755,7 @@ enum RoadRouteMatcher {
             return [.transit, .automobile]
         case .plane:
             return []
-        case .boat, .stationary, .unknown:
+        case .swimming, .boat, .stationary, .unknown:
             return []
         }
     }
@@ -745,6 +766,8 @@ enum RoadRouteMatcher {
             return 25
         case .cycling:
             return 35
+        case .swimming:
+            return 45
         case .automotive:
             // Keep car routes snappable for short urban hops (e.g. nearby hotels/blocks).
             return 20
@@ -763,6 +786,8 @@ enum RoadRouteMatcher {
             return 6
         case .cycling:
             return 6
+        case .swimming:
+            return 4
         case .automotive:
             return 4
         case .train:
