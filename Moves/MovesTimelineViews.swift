@@ -201,42 +201,64 @@ struct DayTimelinePageContent: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                DayMapStrip(dayTimeline: dayTimeline, isActive: isActive)
-
-                if timelineEntries.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No segments for this day yet.")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-
-                        if dayTimeline.samples.count > 0 {
-                            Text("\(dayTimeline.samples.count) location sample\(dayTimeline.samples.count == 1 ? "" : "s") captured. Waiting for the next visit or move.")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Grant location access above to start recording visits and movement.")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .panelSurface()
-                } else {
-                    timelineList
-                        .panelSurface()
-                }
-
-                DayTransportSummaryView(
-                    metrics: transportSummaryMetrics,
-                    hasData: hasTransportSummaryData
+        GeometryReader { proxy in
+            ZStack(alignment: .bottom) {
+                DayMapStrip(
+                    dayTimeline: dayTimeline,
+                    isActive: isActive,
+                    presentation: .fullScreen
                 )
-                .panelSurface()
+
+                GlassEffectContainer(spacing: 10) {
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            timelinePanel
+
+                            DayTransportSummaryView(
+                                metrics: transportSummaryMetrics,
+                                hasData: hasTransportSummaryData
+                            )
+                            .panelSurface()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxHeight: max(proxy.size.height * 0.52, 280))
+
+                }
+              
+                .padding(.horizontal, 14)
+                .padding(.bottom, 16)
             }
-            .padding(.bottom, 24)
+            .ignoresSafeArea()
         }
         .task(id: provisionalSampleLookupKey) {
             await resolveProvisionalSampleTitle()
+        }
+    }
+
+    @ViewBuilder
+    private var timelinePanel: some View {
+        if timelineEntries.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("No segments for this day yet.")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                if dayTimeline.samples.count > 0 {
+                    Text("\(dayTimeline.samples.count) location sample\(dayTimeline.samples.count == 1 ? "" : "s") captured. Waiting for the next visit or move.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Grant location access above to start recording visits and movement.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelSurface()
+        } else {
+            timelineList
+                .panelSurface()
         }
     }
 
@@ -507,14 +529,29 @@ struct DayTransportSummaryView: View {
 }
 
 struct DayMapStrip: View {
+    enum Presentation {
+        case strip
+        case fullScreen
+    }
+
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     let dayTimeline: DayTimeline
     let isActive: Bool
+    let presentation: Presentation
 
     @State private var camera: MapCameraPosition
     @State private var historicalRoutes: [RenderedRoute]
+
+    private var interactionModes: MapInteractionModes {
+        switch presentation {
+        case .strip:
+            return [.pan, .zoom]
+        case .fullScreen:
+            return [.pan, .zoom]
+        }
+    }
 
     private var placeMarkers: [PlaceMarker] {
         dayTimeline.places
@@ -570,9 +607,10 @@ struct DayMapStrip: View {
         return [historicalRouteRefreshKey, placeKey, liveKey, latestSampleKey].joined(separator: "|")
     }
 
-    init(dayTimeline: DayTimeline, isActive: Bool) {
+    init(dayTimeline: DayTimeline, isActive: Bool, presentation: Presentation = .strip) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
+        self.presentation = presentation
 
         let renderedRoutes = Self.renderedRoutes(for: dayTimeline)
         let allCoordinates = Self.allCoordinates(
@@ -583,12 +621,12 @@ struct DayMapStrip: View {
         let cameraCoordinates = allCoordinates.isEmpty
             ? Self.latestSampleCoordinate(for: dayTimeline).map { [$0] } ?? []
             : allCoordinates
-        _camera = State(initialValue: .region(MapRegionFactory.region(for: cameraCoordinates)))
+        _camera = State(initialValue: .region(Self.region(for: cameraCoordinates, presentation: presentation)))
         _historicalRoutes = State(initialValue: renderedRoutes)
     }
 
     var body: some View {
-        Map(position: $camera, interactionModes: [.pan, .zoom]) {
+        Map(position: $camera, interactionModes: interactionModes) {
             ForEach(historicalRoutes) { route in
                 if route.shadowCoordinates.count > 1 {
                     MapPolyline(coordinates: route.shadowCoordinates)
@@ -633,12 +671,7 @@ struct DayMapStrip: View {
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
-        .frame(height: 180)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
-        }
+        .modifier(DayMapPresentationModifier(presentation: presentation))
         .task(id: "\(historicalRouteRefreshKey)|\(isActive ? 1 : 0)") {
             guard isActive else { return }
             await refreshHistoricalRouteCoordinates()
@@ -690,8 +723,23 @@ struct DayMapStrip: View {
             : allCoordinates
 
         if !cameraCoordinates.isEmpty {
-            camera = .region(MapRegionFactory.region(for: cameraCoordinates))
+            camera = .region(Self.region(for: cameraCoordinates, presentation: presentation))
         }
+    }
+
+    private static func region(
+        for coordinates: [CLLocationCoordinate2D],
+        presentation: Presentation
+    ) -> MKCoordinateRegion {
+        var region = MapRegionFactory.region(for: coordinates)
+        guard presentation == .fullScreen, !coordinates.isEmpty else {
+            return region
+        }
+
+        region.span.latitudeDelta *= 1.8
+        region.span.longitudeDelta *= 1.35
+        region.center.latitude -= region.span.latitudeDelta * 0.16
+        return region
     }
 
     private static func renderedRoutes(for dayTimeline: DayTimeline) -> [RenderedRoute] {
@@ -739,6 +787,35 @@ struct DayMapStrip: View {
                 "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
             }
             .joined(separator: ",")
+    }
+}
+
+private struct DayMapPresentationModifier: ViewModifier {
+    let presentation: DayMapStrip.Presentation
+
+    func body(content: Content) -> some View {
+        switch presentation {
+        case .strip:
+            content
+                .frame(height: 180)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
+                }
+        case .fullScreen:
+            content
+                .ignoresSafeArea()
+                .overlay(alignment: .bottom) {
+                    LinearGradient(
+                        colors: [.clear, Color.black.opacity(0.18)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 260)
+                    .allowsHitTesting(false)
+                }
+        }
     }
 }
 

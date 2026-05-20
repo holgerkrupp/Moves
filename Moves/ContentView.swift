@@ -360,44 +360,36 @@ struct ContentView: View {
             ZStack {
                 background
 
-                VStack(spacing: 12) {
-                    if let trackingPermissionPrompt {
-                        trackingPermissionBanner(trackingPermissionPrompt)
-                    }
-
-                    if let bannerData = trackingStatusBannerData(
-                        for: captureManager,
-                        context: .timeline
-                    ) {
-                        TrackingStatusBanner(
-                            data: bannerData,
-                            buttonAction: {
-                                captureManager.disableTemporaryRouteTracking()
-                            }
-                        )
-                    }
-
-                    if dayTimelines.isEmpty {
+                if dayTimelines.isEmpty {
+                    VStack(spacing: 12) {
+                        timelineTopOverlay
                         emptyState
-                    } else {
-                        dayHeader
-
-                        TabView(selection: $selectedPageIndex) {
-                            ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
-                                DayTimelinePage(
-                                    dayKey: day.dayKey,
-                                    isActive: index == selectedPageIndex
-                                )
-                                    .tag(index)
-                                    
-                            }
-                        }
-                        .ignoresSafeArea()
-                        .tabViewStyle(.page(indexDisplayMode: .never))
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                } else {
+                    TabView(selection: $selectedPageIndex) {
+                        ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
+                            DayTimelinePage(
+                                dayKey: day.dayKey,
+                                isActive: index == selectedPageIndex
+                            )
+                            .tag(index)
+
+                        }
+                    }
+                    .ignoresSafeArea()
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
+
+                if !dayTimelines.isEmpty {
+                    VStack {
+                        timelineTopOverlay
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                }
                 
             }
             
@@ -410,31 +402,35 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "gearshape")
                     }
+                    
                     .help("Settings")
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        RouteTrackingToolbarButton(
-                            endsAt: captureManager.temporaryRouteTrackingEndsAt,
-                            authorizationStatus: captureManager.authorizationStatus,
-                            tapAction: {
-                                isShowingRouteTrackingSettings = true
-                            },
-                            longPressAction: {
-                                captureManager.enableTemporaryRouteTracking(
-                                    duration: captureManager.temporaryRouteTrackingDuration
-                                )
+                   
+                        HStack(spacing: 12) {
+                            RouteTrackingToolbarButton(
+                                endsAt: captureManager.temporaryRouteTrackingEndsAt,
+                                authorizationStatus: captureManager.authorizationStatus,
+                                tapAction: {
+                                    isShowingRouteTrackingSettings = true
+                                },
+                                longPressAction: {
+                                    captureManager.enableTemporaryRouteTracking(
+                                        duration: captureManager.temporaryRouteTrackingDuration
+                                    )
+                                }
+                            )
+                            
+                            Button {
+                                Task { await captureManager.refreshHistoricalBackfill() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
                             }
-                        )
-
-                        Button {
-                            Task { await captureManager.refreshHistoricalBackfill() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
+                            .help("Refresh timeline")
+                           
                         }
-                        .help("Refresh timeline")
-                    }
+                    
                 }
             }
         }
@@ -528,6 +524,33 @@ struct ContentView: View {
             }
         }
         .panelSurface()
+    }
+
+    private var timelineTopOverlay: some View {
+        GlassEffectContainer(spacing: 10) {
+            VStack(spacing: 10) {
+                if let trackingPermissionPrompt {
+                    trackingPermissionBanner(trackingPermissionPrompt)
+                }
+
+                if let bannerData = trackingStatusBannerData(
+                    for: captureManager,
+                    context: .timeline
+                ) {
+                    TrackingStatusBanner(
+                        data: bannerData,
+                        buttonAction: {
+                            captureManager.disableTemporaryRouteTracking()
+                        }
+                    )
+                }
+
+                if !dayTimelines.isEmpty {
+                    dayHeader
+                        .panelSurface()
+                }
+            }
+        }
     }
 
     private var dayHeader: some View {
@@ -1388,13 +1411,11 @@ struct PanelSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(12)
-            .background {
+
+            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(MovesPalette.card.opacity(colorScheme == .dark ? 0.88 : 0.92))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(MovesPalette.border, lineWidth: 1)
-                    }
+                    .stroke(MovesPalette.border.opacity(colorScheme == .dark ? 0.7 : 0.55), lineWidth: 1)
             }
     }
 }
