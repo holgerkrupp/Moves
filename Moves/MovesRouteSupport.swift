@@ -22,6 +22,7 @@ enum MovesPalette {
     static let move = Color("MovesMove")
     static let start = Color("MovesStart")
     static let routeTracking = Color("MovesRouteTracking")
+    static let healthRoute = Color(uiColor: .systemPink)
 
     static func transport(_ mode: TransportMode) -> Color {
         Color(transportColorAssetName(for: mode))
@@ -90,6 +91,7 @@ struct RenderedRoute: Identifiable {
     let id: String
     let coordinates: [CLLocationCoordinate2D]
     let usesHighAccuracyRouteTracking: Bool
+    let usesHealthWorkoutRoute: Bool
     let transportMode: TransportMode
 
     var shadowCoordinates: [CLLocationCoordinate2D] {
@@ -102,6 +104,10 @@ struct RenderedRoute: Identifiable {
     }
 
     var tint: Color {
+        if usesHealthWorkoutRoute {
+            return MovesPalette.healthRoute
+        }
+
         if usesHighAccuracyRouteTracking {
             return MovesPalette.routeTracking
         }
@@ -306,7 +312,7 @@ enum MapRegionFactory {
 }
 
 enum MoveRouteGeometry {
-    private static let routeMatchingVersion = "route-v6"
+    private static let routeMatchingVersion = "route-v8-intermediate-anchors"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         let sampleCoordinates = move.samples.preferredRouteDisplaySamples
@@ -324,8 +330,16 @@ enum MoveRouteGeometry {
 
         return RouteCoordinateOps.dedupeSequentialCoordinates(
             coordinates,
-            minimumDistanceMeters: 6
+            minimumDistanceMeters: rawCoordinateDedupeDistance(for: move)
         )
+    }
+
+    static func rawCoordinateDedupeDistance(for move: MoveSegment) -> CLLocationDistance {
+        move.usesHealthWorkoutRoute ? 1 : 6
+    }
+
+    static func highAccuracyDisplayDedupeDistance(for move: MoveSegment) -> CLLocationDistance {
+        move.usesHealthWorkoutRoute ? 1 : 4
     }
 
     static func cacheSignature(for move: MoveSegment, fallback: [CLLocationCoordinate2D]) -> String {
@@ -367,8 +381,33 @@ enum MoveRouteGeometry {
 }
 
 extension MoveSegment {
+    var hasManualRouteCoordinates: Bool {
+        manualRouteCoordinatesData != nil
+    }
+
+    var manualRouteCoordinates: [CLLocationCoordinate2D]? {
+        let coordinates = RouteCoordinateStorage.decode(manualRouteCoordinatesData)
+        return coordinates.count > 1 ? coordinates : nil
+    }
+
+    var preferredRouteCoordinates: [CLLocationCoordinate2D]? {
+        manualRouteCoordinates
+    }
+
+    func storeManualRouteCoordinates(_ coordinates: [CLLocationCoordinate2D]) {
+        manualRouteCoordinatesData = RouteCoordinateStorage.encode(coordinates)
+    }
+
+    func clearManualRouteCoordinates() {
+        manualRouteCoordinatesData = nil
+    }
+
     var routeDisplayTint: Color {
-        usesHighAccuracyRouteTracking ? MovesPalette.routeTracking : MovesPalette.move
+        if usesHealthWorkoutRoute {
+            return MovesPalette.healthRoute
+        }
+
+        return usesHighAccuracyRouteTracking ? MovesPalette.routeTracking : MovesPalette.move
     }
 }
 
@@ -516,11 +555,156 @@ enum PlaneRouteGeometry {
 }
 
 @MainActor
+enum ManualRouteGeometry {
+    static func previewAnchors(
+        currentRoute: [CLLocationCoordinate2D],
+        draggedCoordinate: CLLocationCoordinate2D,
+        transportMode: TransportMode,
+        closestIndex: Int
+    ) -> [CLLocationCoordinate2D] {
+        guard currentRoute.count > 1 else {
+            return currentRoute
+        }
+
+        if transportMode == .boat {
+            var anchors = RouteCoordinateOps.sampleAnchors(from: currentRoute, maximumCount: 8)
+            let insertionIndex = nearestInsertionIndex(
+                in: anchors,
+                originalRoute: currentRoute,
+                closestIndex: closestIndex
+            )
+            anchors.insert(draggedCoordinate, at: insertionIndex)
+            return splineCoordinates(for: anchors)
+        }
+
+        var anchors = RoadRouteMatcher.routeAnchors(for: currentRoute, transportMode: transportMode)
+        let insertionIndex = nearestInsertionIndex(
+            in: anchors,
+            originalRoute: currentRoute,
+            closestIndex: closestIndex
+        )
+        anchors.insert(draggedCoordinate, at: insertionIndex)
+        return RouteCoordinateOps.dedupeSequentialCoordinates(anchors, minimumDistanceMeters: 6)
+    }
+
+    static func committedCoordinates(
+        currentRoute: [CLLocationCoordinate2D],
+        draggedCoordinate: CLLocationCoordinate2D,
+        transportMode: TransportMode,
+        closestIndex: Int
+    ) async -> [CLLocationCoordinate2D] {
+        guard currentRoute.count > 1 else {
+            return currentRoute
+        }
+
+        if transportMode == .boat {
+            return previewAnchors(
+                currentRoute: currentRoute,
+                draggedCoordinate: draggedCoordinate,
+                transportMode: transportMode,
+                closestIndex: closestIndex
+            )
+        }
+
+        let anchors = previewAnchors(
+            currentRoute: currentRoute,
+            draggedCoordinate: draggedCoordinate,
+            transportMode: transportMode,
+            closestIndex: closestIndex
+        )
+        return await RoadRouteMatcher.matchedManualCoordinates(
+            for: anchors,
+            transportMode: transportMode
+        )
+    }
+
+    private static func nearestInsertionIndex(
+        in anchors: [CLLocationCoordinate2D],
+        originalRoute: [CLLocationCoordinate2D],
+        closestIndex: Int
+    ) -> Int {
+        guard anchors.count > 1 else { return anchors.endIndex }
+        guard !originalRoute.isEmpty else { return anchors.endIndex }
+
+        let clampedIndex = min(max(closestIndex, 0), originalRoute.count - 1)
+        let closestCoordinate = originalRoute[clampedIndex]
+
+        let nearestAnchorIndex = anchors.enumerated().min { lhs, rhs in
+            RouteCoordinateOps.distanceMeters(from: lhs.element, to: closestCoordinate)
+                < RouteCoordinateOps.distanceMeters(from: rhs.element, to: closestCoordinate)
+        }?.offset ?? anchors.count / 2
+
+        if nearestAnchorIndex == 0 { return 1 }
+        if nearestAnchorIndex >= anchors.count - 1 { return anchors.count - 1 }
+        return nearestAnchorIndex
+    }
+
+    private static func splineCoordinates(for anchors: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        guard anchors.count > 2 else {
+            return anchors
+        }
+
+        var coordinates: [CLLocationCoordinate2D] = []
+        coordinates.reserveCapacity(anchors.count * 12)
+
+        for index in 0..<(anchors.count - 1) {
+            let p0 = anchors[max(index - 1, 0)]
+            let p1 = anchors[index]
+            let p2 = anchors[index + 1]
+            let p3 = anchors[min(index + 2, anchors.count - 1)]
+
+            for step in 0..<12 {
+                let t = Double(step) / 12.0
+                coordinates.append(catmullRom(p0: p0, p1: p1, p2: p2, p3: p3, t: t))
+            }
+        }
+
+        if let last = anchors.last {
+            coordinates.append(last)
+        }
+
+        return RouteCoordinateOps.dedupeSequentialCoordinates(
+            coordinates,
+            minimumDistanceMeters: 3
+        )
+    }
+
+    private static func catmullRom(
+        p0: CLLocationCoordinate2D,
+        p1: CLLocationCoordinate2D,
+        p2: CLLocationCoordinate2D,
+        p3: CLLocationCoordinate2D,
+        t: Double
+    ) -> CLLocationCoordinate2D {
+        let t2 = t * t
+        let t3 = t2 * t
+
+        func value(_ v0: Double, _ v1: Double, _ v2: Double, _ v3: Double) -> Double {
+            0.5 * (
+                (2 * v1) +
+                (-v0 + v2) * t +
+                (2 * v0 - 5 * v1 + 4 * v2 - v3) * t2 +
+                (-v0 + 3 * v1 - 3 * v2 + v3) * t3
+            )
+        }
+
+        return CLLocationCoordinate2D(
+            latitude: value(p0.latitude, p1.latitude, p2.latitude, p3.latitude),
+            longitude: value(p0.longitude, p1.longitude, p2.longitude, p3.longitude)
+        )
+    }
+}
+
+@MainActor
 enum RoadRouteMatcher {
     private static let memo = RouteMatchMemo()
     private static let transientFallbackMemoTTL: TimeInterval = 3 * 60
 
     static func matchedCoordinates(for move: MoveSegment) async -> [CLLocationCoordinate2D] {
+        if let manualCoordinates = move.manualRouteCoordinates {
+            return manualCoordinates
+        }
+
         let fallback = MoveRouteGeometry.rawCoordinates(for: move)
         let cacheKey = MoveRouteGeometry.cacheKey(for: move, fallback: fallback)
         let cacheSignature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
@@ -528,7 +712,7 @@ enum RoadRouteMatcher {
         if move.usesHighAccuracyRouteTracking {
             let coordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
                 fallback,
-                minimumDistanceMeters: 4
+                minimumDistanceMeters: MoveRouteGeometry.highAccuracyDisplayDedupeDistance(for: move)
             )
             await memo.storePersistent(coordinates, for: cacheKey)
             move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
@@ -586,6 +770,21 @@ enum RoadRouteMatcher {
         return result.coordinates
     }
 
+    static func matchedManualCoordinates(
+        for anchors: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) async -> [CLLocationCoordinate2D] {
+        let coordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+            anchors,
+            minimumDistanceMeters: 6
+        )
+        let result = await resolveCoordinates(
+            fallback: coordinates,
+            transportMode: transportMode
+        )
+        return result.coordinates
+    }
+
     private static func resolveCoordinates(
         fallback: [CLLocationCoordinate2D],
         transportMode: TransportMode
@@ -607,19 +806,7 @@ enum RoadRouteMatcher {
             return (fallback, true)
         }
 
-        let anchors: [CLLocationCoordinate2D]
-        if fallback.count <= 10,
-           let start = fallback.first,
-           let end = fallback.last {
-            // Sparse tracks are often synthetic or noisy; endpoint routing is more reliable.
-            anchors = [start, end]
-        } else {
-            let requestedAnchorLimit = anchorLimit(for: transportMode)
-            anchors = RouteCoordinateOps.sampleAnchors(
-                from: fallback,
-                maximumCount: requestedAnchorLimit
-            )
-        }
+        let anchors = routeAnchors(for: fallback, transportMode: transportMode)
         guard anchors.count > 1 else {
             return (fallback, true)
         }
@@ -694,6 +881,16 @@ enum RoadRouteMatcher {
 
         // If we tried to match but got no route, don't persist this fallback permanently.
         return (fallback, !attemptedNetworkMatch)
+    }
+
+    static func routeAnchors(
+        for fallback: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) -> [CLLocationCoordinate2D] {
+        RouteCoordinateOps.sampleAnchors(
+            from: fallback,
+            maximumCount: anchorLimit(for: transportMode)
+        )
     }
 
     private static func routeSegment(

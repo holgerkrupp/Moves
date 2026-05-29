@@ -103,7 +103,7 @@
         "key": "Move",
         "location": {
           "startingColumn": 26,
-          "startingLine": 274
+          "startingLine": 298
         }
       },
       {
@@ -111,7 +111,7 @@
         "key": "Delete Move?",
         "location": {
           "startingColumn": 13,
-          "startingLine": 310
+          "startingLine": 338
         }
       },
       {
@@ -119,23 +119,23 @@
         "key": "Could Not Delete Move",
         "location": {
           "startingColumn": 16,
-          "startingLine": 322
+          "startingLine": 350
         }
       },
       {
         "comment": "",
         "key": "Start",
         "location": {
-          "startingColumn": 28,
-          "startingLine": 243
+          "startingColumn": 36,
+          "startingLine": 251
         }
       },
       {
         "comment": "",
         "key": "End",
         "location": {
-          "startingColumn": 28,
-          "startingLine": 264
+          "startingColumn": 36,
+          "startingLine": 272
         }
       },
       {
@@ -143,7 +143,23 @@
         "key": "Transport mode",
         "location": {
           "startingColumn": 23,
-          "startingLine": 297
+          "startingLine": 314
+        }
+      },
+      {
+        "comment": "",
+        "key": "Stop editing route",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 326
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit route",
+        "location": {
+          "startingColumn": 73,
+          "startingLine": 326
         }
       },
       {
@@ -151,7 +167,7 @@
         "key": "Delete",
         "location": {
           "startingColumn": 20,
-          "startingLine": 314
+          "startingLine": 342
         }
       },
       {
@@ -159,7 +175,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 318
+          "startingLine": 346
         }
       },
       {
@@ -167,7 +183,7 @@
         "key": "Delete Move",
         "location": {
           "startingColumn": 39,
-          "startingLine": 403
+          "startingLine": 602
         }
       },
       {
@@ -175,7 +191,7 @@
         "key": "This removes this move from the timeline. You can undo the deletion afterwards.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 320
+          "startingLine": 348
         }
       },
       {
@@ -183,7 +199,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 323
+          "startingLine": 351
         }
       },
       {
@@ -191,7 +207,47 @@
         "key": "%@   %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 336
+          "startingLine": 389
+        }
+      },
+      {
+        "comment": "",
+        "key": "Apple Health route",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 365
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag the route line to adjust it",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 385
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manual route",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 371
+        }
+      },
+      {
+        "comment": "",
+        "key": "Revert",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 378
+        }
+      },
+      {
+        "comment": "",
+        "key": "Transport mode",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 408
         }
       }
     ]

@@ -4,42 +4,50 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "Accuracy %lld m",
-        "location": {
-          "startingColumn": 22,
-          "startingLine": 30
-        }
-      },
-      {
-        "comment": "",
-        "key": "%lld points",
-        "location": {
-          "startingColumn": 26,
-          "startingLine": 23
-        }
-      },
-      {
-        "comment": "",
         "key": "Stop GPS",
         "location": {
-          "startingColumn": 42,
-          "startingLine": 39
+          "startingColumn": 58,
+          "startingLine": 100
         }
       },
       {
         "comment": "",
         "key": "Start GPS",
         "location": {
-          "startingColumn": 55,
-          "startingLine": 39
+          "startingColumn": 71,
+          "startingLine": 100
         }
       },
       {
         "comment": "",
-        "key": "Sync",
+        "key": "Stop GPS",
         "location": {
-          "startingColumn": 23,
-          "startingLine": 49
+          "startingColumn": 46,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start GPS",
+        "location": {
+          "startingColumn": 59,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld moves today",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 113
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 108
         }
       }
     ]

@@ -5,6 +5,49 @@
 	<key>logFormatVersion</key>
 	<integer>12</integer>
 	<key>logs</key>
-	<dict/>
+	<dict>
+		<key>69A5EC5B-5D80-4A49-9BAD-AEDCC09FF0AD</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>69A5EC5B-5D80-4A49-9BAD-AEDCC09FF0AD.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>48</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Moves project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Moves</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Testing project Moves with scheme Moves</string>
+			<key>timeStartedRecording</key>
+			<real>801583531.81638598</real>
+			<key>timeStoppedRecording</key>
+			<real>801583545.55927098</real>
+			<key>title</key>
+			<string>Testing project Moves with scheme Moves</string>
+			<key>uniqueIdentifier</key>
+			<string>69A5EC5B-5D80-4A49-9BAD-AEDCC09FF0AD</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

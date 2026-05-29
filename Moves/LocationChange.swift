@@ -559,6 +559,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
 final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCaptureService {
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
     @Published private(set) var isMonitoring = false
+    @Published private(set) var isBackgroundLocationListeningEnabled = true
     @Published private(set) var lastCaptureAt: Date?
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var temporaryRouteTrackingDuration: TemporaryRouteTrackingDuration = .endOfDay
@@ -589,6 +590,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         static let stopAtFiftyPercentBattery = "Moves.temporaryRouteTracking.stopAtFiftyPercentBattery"
         static let stopInLowPowerMode = "Moves.temporaryRouteTracking.stopInLowPowerMode"
         static let stopNotificationEnabled = "Moves.temporaryRouteTracking.stopNotificationEnabled"
+    }
+
+    enum BackgroundLocationListeningSettings {
+        static let isEnabledKey = "Moves.backgroundLocationListening.isEnabled"
     }
 
     private static let stopNotificationIdentifier = "Moves.temporaryRouteTracking.stoppedNotification"
@@ -626,6 +631,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
             installTemporaryRouteTrackingEnergyObservers()
         }
         restoreTemporaryRouteTrackingState()
+        restoreBackgroundLocationListeningState()
         updateBackgroundLocationAllowance()
     }
 
@@ -649,9 +655,14 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
         switch authorizationStatus {
         case .authorizedAlways:
-            return isMonitoring ? "Tracking in background" : "Ready"
+            if isMonitoring {
+                return "Tracking in background"
+            }
+            return isBackgroundLocationListeningEnabled ? "Ready" : "Background listening off"
         case .authorizedWhenInUse:
-            return "Tracking only while app is active"
+            return isBackgroundLocationListeningEnabled
+                ? "Tracking only while app is active"
+                : "Background listening off"
         case .denied:
             return "Location access denied"
         case .restricted:
@@ -714,6 +725,15 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         pendingOneShotLocationSource = nil
         isMonitoring = false
         isHighAccuracyMonitoring = false
+    }
+
+    func setBackgroundLocationListeningEnabled(_ isEnabled: Bool) {
+        isBackgroundLocationListeningEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: BackgroundLocationListeningSettings.isEnabledKey)
+
+        guard !shouldSkipLiveTracking else { return }
+
+        applyTrackingConfiguration()
     }
 
     func refreshHistoricalBackfill() async {
@@ -840,6 +860,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     private func startLowPowerMonitoringIfNeeded() {
+        guard isBackgroundLocationListeningEnabled else {
+            manager.stopMonitoringVisits()
+            isMonitoring = false
+            return
+        }
         guard !isMonitoring else { return }
 
         manager.startMonitoringVisits()
@@ -868,7 +893,13 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
                 isHighAccuracyMonitoring = true
             }
         } else {
-            manager.startMonitoringSignificantLocationChanges()
+            if isBackgroundLocationListeningEnabled {
+                manager.startMonitoringSignificantLocationChanges()
+            } else {
+                manager.stopMonitoringSignificantLocationChanges()
+                manager.stopMonitoringVisits()
+                isMonitoring = false
+            }
             manager.stopUpdatingLocation()
             isHighAccuracyMonitoring = false
             manager.desiredAccuracy = Self.lowPowerDesiredAccuracy
@@ -887,6 +918,17 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     private func updateBackgroundLocationAllowance() {
         manager.allowsBackgroundLocationUpdates = authorizationStatus == .authorizedAlways
+            && (isBackgroundLocationListeningEnabled || isTemporaryRouteTrackingActive)
+    }
+
+    private func restoreBackgroundLocationListeningState() {
+        if userDefaults.object(forKey: BackgroundLocationListeningSettings.isEnabledKey) == nil {
+            isBackgroundLocationListeningEnabled = true
+        } else {
+            isBackgroundLocationListeningEnabled = userDefaults.bool(
+                forKey: BackgroundLocationListeningSettings.isEnabledKey
+            )
+        }
     }
 
     private var isTemporaryRouteTrackingActive: Bool {
@@ -1178,6 +1220,8 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
     }
 
     func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        guard isBackgroundLocationListeningEnabled else { return }
+
         refreshTemporaryRouteTrackingStateIfNeeded()
 
         let visitTimestamp = visit.arrivalDate == .distantPast ? Date.now : visit.arrivalDate
@@ -1203,6 +1247,11 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
         guard !locations.isEmpty else { return }
 
         refreshTemporaryRouteTrackingStateIfNeeded()
+
+        guard pendingOneShotLocationSource != nil
+            || isTemporaryRouteTrackingActive
+            || isBackgroundLocationListeningEnabled
+        else { return }
 
         lastCaptureAt = .now
         let source: LocationSampleSource = pendingOneShotLocationSource ?? (isTemporaryRouteTrackingActive ? .routeTracking : .significantChange)

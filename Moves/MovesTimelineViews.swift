@@ -661,6 +661,7 @@ struct DayMapStrip: View {
                     id: move.id.uuidString,
                     coordinates: matched,
                     usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking,
+                    usesHealthWorkoutRoute: move.usesHealthWorkoutRoute,
                     transportMode: move.transportMode
                 )
             )
@@ -703,8 +704,9 @@ struct DayMapStrip: View {
 
                 return RenderedRoute(
                     id: move.id.uuidString,
-                    coordinates: move.cachedRouteCoordinates(for: signature) ?? fallback,
+                    coordinates: move.manualRouteCoordinates ?? move.cachedRouteCoordinates(for: signature) ?? fallback,
                     usesHighAccuracyRouteTracking: move.usesHighAccuracyRouteTracking,
+                    usesHealthWorkoutRoute: move.usesHealthWorkoutRoute,
                     transportMode: move.transportMode
                 )
             }
@@ -767,6 +769,16 @@ struct StorylineRow: View {
                     Image(systemName: entry.iconName)
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(entry.iconTint)
+                    if entry.showsHealthSourceBadge {
+                        Circle()
+                            .fill(MovesPalette.healthRoute)
+                            .frame(width: 8, height: 8)
+                            .overlay {
+                                Circle()
+                                    .stroke(MovesPalette.card, lineWidth: 1)
+                            }
+                            .offset(x: 8, y: -8)
+                    }
                 }
 
                 Rectangle()
@@ -882,6 +894,15 @@ enum TimelineEntry: Identifiable {
         }
     }
 
+    var showsHealthSourceBadge: Bool {
+        switch self {
+        case .move(let segment):
+            return segment.usesHealthWorkoutRoute
+        default:
+            return false
+        }
+    }
+
     var titleText: String {
         switch self {
         case .start(let place, _):
@@ -921,7 +942,11 @@ enum TimelineEntry: Identifiable {
             let duration = DurationFormatter.text(for: segment.timelineDuration)
             let distance = Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters)
                 .formatted(.measurement(width: .abbreviated, usage: .road))
-            return "\(segment.transportMode.title)   \(duration)   \(distance)"
+            var details = [segment.transportMode.title, duration, distance]
+            if segment.usesHealthWorkoutRoute {
+                details.append("Apple Health")
+            }
+            return details.joined(separator: "   ")
         case .liveRoute(let snapshot):
             let duration = DurationFormatter.text(for: snapshot.duration)
             let distance = Measurement(value: max(snapshot.distanceMeters, 0), unit: UnitLength.meters)

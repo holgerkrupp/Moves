@@ -81,7 +81,7 @@ struct TrackingStatusBanner: View {
                 Button(buttonTitle, role: data.buttonRole) {
                     buttonAction()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glass)
                 .controlSize(.small)
             }
         }
@@ -122,6 +122,22 @@ func trackingStatusBannerData(
                 tint: MovesPalette.routeTracking,
                 buttonTitle: context == .timeline ? "Turn off now" : nil,
                 buttonRole: context == .timeline ? .destructive : nil
+            )
+        case .notDetermined, .denied, .restricted:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    if !captureManager.isBackgroundLocationListeningEnabled {
+        switch captureManager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return TrackingStatusBannerData(
+                title: "Location tracking is turned off",
+                message: "Moves is not listening for visits or significant location changes. Turn it back on in Route Tracking settings.",
+                systemImage: "location.slash",
+                tint: .secondary
             )
         case .notDetermined, .denied, .restricted:
             break
@@ -414,28 +430,27 @@ struct ContentView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        RouteTrackingToolbarButton(
-                            endsAt: captureManager.temporaryRouteTrackingEndsAt,
-                            authorizationStatus: captureManager.authorizationStatus,
-                            tapAction: {
-                                isShowingRouteTrackingSettings = true
-                            },
-                            longPressAction: {
-                                captureManager.enableTemporaryRouteTracking(
-                                    duration: captureManager.temporaryRouteTrackingDuration
-                                )
-                            }
-                        )
-
-                        Button {
-                            Task { await captureManager.refreshHistoricalBackfill() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .help("Refresh timeline")
-                    }
+                    
+                      
+                            RouteTrackingToolbarButton(
+                                endsAt: captureManager.temporaryRouteTrackingEndsAt,
+                                authorizationStatus: captureManager.authorizationStatus,
+                                tapAction: {
+                                    isShowingRouteTrackingSettings = true
+                                },
+                                longPressAction: {
+                                    captureManager.enableTemporaryRouteTracking(
+                                        duration: captureManager.temporaryRouteTrackingDuration
+                                    )
+                                }
+                            )
+                           
+                            
+                            
+                        
+                    
                 }
+               
             }
         }
         .sheet(isPresented: $isShowingSettings) {
@@ -523,7 +538,7 @@ struct ContentView: View {
                 Button(buttonTitle) {
                     performTrackingPromptAction(action)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glass)
                 .controlSize(.small)
             }
         }

@@ -110,7 +110,7 @@ struct MovesSettingsView: View {
 
                     SettingsCard(title: "Import") {
                         NavigationLink {
-                            HealthWorkoutRouteImportSettingsView(modelContext: modelContext)
+                            HealthWorkoutRouteImportSettingsView()
                         } label: {
                             SettingsNavigationRow(
                                 title: "Apple Health workout routes",
@@ -370,18 +370,11 @@ struct RouteTrackingSettingsSheet: View {
 
 private struct HealthWorkoutRouteImportSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var healthRouteImportManager: HealthWorkoutRouteAutoImportManager
     @AppStorage(HealthWorkoutRouteImportSettings.isEnabledKey) private var isEnabled = false
 
-    @StateObject private var importer: HealthWorkoutRouteImporter
-    @State private var isImporting = false
     @State private var importMessage = ""
     @State private var isShowingImportMessage = false
-
-    init(modelContext: ModelContext) {
-        _importer = StateObject(
-            wrappedValue: HealthWorkoutRouteImporter(modelContext: modelContext)
-        )
-    }
 
     private var isEnabledBinding: Binding<Bool> {
         Binding(
@@ -402,7 +395,7 @@ private struct HealthWorkoutRouteImportSettingsView: View {
             LazyVStack(spacing: 14) {
                 SettingsCard(title: "Apple Health Routes") {
                     Toggle("Use Apple Health workout routes", isOn: isEnabledBinding)
-                        .disabled(!isHealthAvailable || isImporting)
+                        .disabled(!isHealthAvailable || healthRouteImportManager.isHistoricalImporting)
 
                     Text(statusText)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -414,31 +407,30 @@ private struct HealthWorkoutRouteImportSettingsView: View {
                         importAllRoutes()
                     } label: {
                         Label {
-                            Text(isImporting ? "Importing all routes..." : "Import all workout routes")
+                            Text(importAllButtonTitle)
+                                .frame(maxWidth: .infinity)
                         } icon: {
-                            Image(systemName: "tray.and.arrow.down.fill")
+                            Image(systemName: importAllButtonSystemImage)
                         }
-
+                        .frame(maxWidth: .infinity)
                     }
-                    .disabled(!isHealthAvailable || isImporting)
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .tint(isImporting ? .red : MovesPalette.routeTracking)
+                    .disabled(!isHealthAvailable && !isImporting)
 
                     if isImporting {
-                        if let progress = importer.importProgress {
-                            ProgressView(value: progress)
-                                .tint(MovesPalette.routeTracking)
-                        } else {
-                            ProgressView()
-                                .tint(MovesPalette.routeTracking)
-                        }
+                        ProgressView()
+                            .tint(MovesPalette.routeTracking)
 
-                        if !importer.importProgressText.isEmpty {
-                            Text(importer.importProgressText)
+                        if !healthRouteImportManager.historicalImportProgressText.isEmpty {
+                            Text(healthRouteImportManager.historicalImportProgressText)
                                 .font(.system(size: 12, weight: .medium, design: .rounded))
                                 .foregroundStyle(.secondary)
                         }
                     }
 
-                    Text("Import all asks Apple Health for every supported workout route it can return.")
+                    Text(importAllHelpText)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
@@ -469,6 +461,10 @@ private struct HealthWorkoutRouteImportSettingsView: View {
         } message: {
             Text(importMessage)
         }
+        .onChange(of: healthRouteImportManager.isHistoricalImporting) { wasImporting, isImporting in
+            guard wasImporting, !isImporting else { return }
+            showHistoricalImportResultIfAvailable()
+        }
     }
 
     private var statusText: String {
@@ -483,6 +479,34 @@ private struct HealthWorkoutRouteImportSettingsView: View {
         return "Turn this on to allow workout route imports. Already imported routes remain in the timeline until you remove or deduplicate timeline data."
     }
 
+    private var importAllButtonTitle: String {
+        if isImporting {
+            return "Cancel Import"
+        }
+
+        if HealthWorkoutRouteImporter.hasInterruptedHistoricalImport {
+            return "Resume workout route import"
+        }
+
+        return "Import all workout routes"
+    }
+
+    private var importAllButtonSystemImage: String {
+        isImporting ? "pause.circle.fill" : "tray.and.arrow.down.fill"
+    }
+
+    private var importAllHelpText: String {
+        if isImporting {
+            return "The import keeps running if you leave this screen. If iOS pauses the app in the background, progress is saved and the next launch resumes automatically."
+        }
+
+        if HealthWorkoutRouteImporter.hasInterruptedHistoricalImport {
+            return "A previous historical import was interrupted. Resume continues from the last checked workout instead of starting over."
+        }
+
+        return "Import all asks Apple Health for every supported workout route it can return. If iOS pauses the app, progress is saved and the next import resumes from there."
+    }
+
     private func notifySettingsChanged() {
         NotificationCenter.default.post(
             name: HealthWorkoutRouteImportSettings.didChangeNotification,
@@ -492,21 +516,25 @@ private struct HealthWorkoutRouteImportSettingsView: View {
 
     @MainActor
     private func importAllRoutes() {
-        guard !isImporting else { return }
+        if isImporting {
+            healthRouteImportManager.cancelHistoricalImport()
+            return
+        }
 
-        isImporting = true
+        healthRouteImportManager.startHistoricalImportIfNeeded()
+    }
 
-        Task { @MainActor in
-            defer { isImporting = false }
+    private var isImporting: Bool {
+        healthRouteImportManager.isHistoricalImporting
+    }
 
-            await importer.importAllWorkoutRoutes()
-
-            if let report = importer.lastReport {
-                importMessage = "Imported \(report.routeCount) workout route(s) from \(report.workoutCount) workout(s), covering \(report.sampleCount) GPS point(s). Duplicate phone and watch points were merged automatically."
-            } else {
-                importMessage = importer.lastErrorMessage ?? "No workout routes were imported."
-            }
-
+    private func showHistoricalImportResultIfAvailable() {
+        if let report = healthRouteImportManager.lastHistoricalImportReport {
+            let prefix = report.didResumeInterruptedImport ? "Resumed and imported" : "Imported"
+            importMessage = "\(prefix) \(report.routeCount) workout route(s) from \(report.workoutCount) workout(s), covering \(report.sampleCount) GPS point(s). Duplicate phone and watch points were merged automatically."
+            isShowingImportMessage = true
+        } else if let message = healthRouteImportManager.lastHistoricalImportErrorMessage {
+            importMessage = message
             isShowingImportMessage = true
         }
     }
@@ -584,19 +612,15 @@ private struct SettingsNavigationRow: View {
 
 @MainActor
 private func routeTrackingBannerData(
-    isDemoMode: Bool,
     authorizationStatus: CLAuthorizationStatus,
     lastErrorMessage: String?,
     duration: TemporaryRouteTrackingDuration,
     endsAt: Date?,
     stopsAtFiftyPercentBattery: Bool,
     stopsInLowPowerMode: Bool,
+    isBackgroundLocationListeningEnabled: Bool,
     context: TrackingStatusBannerContext
 ) -> TrackingStatusBannerData? {
-    if isDemoMode {
-        return nil
-    }
-
     if let lastErrorMessage {
         return TrackingStatusBannerData(
             title: "Location tracking error",
@@ -636,6 +660,15 @@ private func routeTrackingBannerData(
 
     switch authorizationStatus {
     case .authorizedAlways:
+        if !isBackgroundLocationListeningEnabled {
+            return TrackingStatusBannerData(
+                title: "Background tracking is off",
+                message: "Moves will not listen for visits or significant location changes until you turn it on again or start real route tracking.",
+                systemImage: "location.slash",
+                tint: .secondary
+            )
+        }
+
         return TrackingStatusBannerData(
             title: "Background tracking is enabled",
             message: "Moves can record in the background.",
@@ -747,6 +780,7 @@ private struct RouteTrackingSettingsSection: View {
     @State private var routeTrackingStopsAtFiftyPercentBattery: Bool
     @State private var routeTrackingStopsInLowPowerMode: Bool
     @State private var routeTrackingStopNotificationEnabled: Bool
+    @State private var isBackgroundLocationListeningEnabled: Bool
     @State private var isShowingNotificationPermissionAlert = false
 
     init(captureManager: MovesLocationCaptureManager) {
@@ -763,6 +797,9 @@ private struct RouteTrackingSettingsSection: View {
         )
         _routeTrackingStopNotificationEnabled = State(
             initialValue: captureManager.temporaryRouteTrackingStopNotificationEnabled
+        )
+        _isBackgroundLocationListeningEnabled = State(
+            initialValue: captureManager.isBackgroundLocationListeningEnabled
         )
     }
 
@@ -810,15 +847,20 @@ private struct RouteTrackingSettingsSection: View {
 
     private var bannerData: TrackingStatusBannerData? {
         routeTrackingBannerData(
-            isDemoMode: captureManager.isDemoMode,
             authorizationStatus: routeTrackingAuthorizationStatus,
             lastErrorMessage: routeTrackingLastErrorMessage,
             duration: routeTrackingDuration,
             endsAt: routeTrackingEndsAt,
             stopsAtFiftyPercentBattery: routeTrackingStopsAtFiftyPercentBattery,
             stopsInLowPowerMode: routeTrackingStopsInLowPowerMode,
+            isBackgroundLocationListeningEnabled: isBackgroundLocationListeningEnabled,
             context: .settings
         )
+    }
+
+    private var isRouteTrackingActive: Bool {
+        guard let routeTrackingEndsAt else { return false }
+        return routeTrackingEndsAt > .now
     }
 
     @MainActor
@@ -837,106 +879,134 @@ private struct RouteTrackingSettingsSection: View {
                 TrackingStatusBanner(data: bannerData)
             }
 
-            if !captureManager.isDemoMode {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Real Route Tracking")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Tracking Modes")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
 
-                    Text("Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on.")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                Toggle(
+                    "Listen for location changes",
+                    isOn: $isBackgroundLocationListeningEnabled
+                )
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
 
-                    if routeTrackingAuthorizationStatus == .authorizedAlways ||
-                        routeTrackingAuthorizationStatus == .authorizedWhenInUse {
-                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                            GridRow {
-                                Text("Duration")
-                                    .gridColumnAlignment(.leading)
+                Text("Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelSurface()
 
-                                Picker("Duration", selection: $routeTrackingDuration) {
-                                    ForEach(TemporaryRouteTrackingDuration.allCases) { duration in
-                                        Text(duration.title)
-                                            .tag(duration)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Real Route Tracking")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                Text("Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                if routeTrackingAuthorizationStatus == .authorizedAlways ||
+                    routeTrackingAuthorizationStatus == .authorizedWhenInUse {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                        GridRow {
+                            Text("Duration")
+                                .gridColumnAlignment(.leading)
+
+                            Menu {
+                                ForEach(TemporaryRouteTrackingDuration.allCases) { duration in
+                                    Button {
+                                        routeTrackingDuration = duration
+                                    } label: {
+                                        if routeTrackingDuration == duration {
+                                            Label(duration.title, systemImage: "checkmark")
+                                        } else {
+                                            Text(duration.title)
+                                        }
                                     }
                                 }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(routeTrackingDuration.title)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .gridColumnAlignment(.trailing)
+                        }
+
+                        GridRow {
+                            Text("Turn off at 50% battery")
+
+                            Toggle("Turn off at 50% battery", isOn: routeTrackingStopsAtBatteryFiftyBinding)
                                 .labelsHidden()
-                                .pickerStyle(.menu)
-                                .gridColumnAlignment(.trailing)
-                            }
-
-                            GridRow {
-                                Text("Turn off at 50% battery")
-
-                                Toggle("Turn off at 50% battery", isOn: routeTrackingStopsAtBatteryFiftyBinding)
-                                    .labelsHidden()
-                            }
-
-                            GridRow {
-                                Text("Turn off in Low Power Mode")
-
-                                Toggle("Turn off in Low Power Mode", isOn: routeTrackingStopsInLowPowerModeBinding)
-                                    .labelsHidden()
-                            }
-
-                            GridRow {
-                                Text("Notify when tracking stops")
-
-                                Toggle("Notify when tracking stops", isOn: routeTrackingStopNotificationBinding)
-                                    .labelsHidden()
-                            }
                         }
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
 
-                        Text("These safeguards can end the session early if power gets tight.")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
+                        GridRow {
+                            Text("Turn off in Low Power Mode")
 
-                        Text("iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them.")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
+                            Toggle("Turn off in Low Power Mode", isOn: routeTrackingStopsInLowPowerModeBinding)
+                                .labelsHidden()
+                        }
 
-                        Button {
+                        GridRow {
+                            Text("Notify when tracking stops")
+
+                            Toggle("Notify when tracking stops", isOn: routeTrackingStopNotificationBinding)
+                                .labelsHidden()
+                        }
+                    }
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+
+                    Text("These safeguards can end the session early if power gets tight.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+
+                    Text("iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        if isRouteTrackingActive {
+                            captureManager.disableTemporaryRouteTracking()
+                        } else {
                             captureManager.enableTemporaryRouteTracking(duration: routeTrackingDuration)
-                        } label: {
-                            Label(
-                                routeTrackingEndsAt == nil
-                                ? "Enable real route tracking"
-                                : "Update route tracking",
-                                systemImage: "location.fill.viewfinder"
-                            )
-                            .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                    } label: {
+                        Label(
+                            isRouteTrackingActive
+                            ? "Turn off"
+                            : "Enable real route tracking",
+                            systemImage: isRouteTrackingActive
+                            ? "location.slash"
+                            : "location.fill.viewfinder"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .tint(isRouteTrackingActive ? .red : nil)
 
-                        if let endsAt = routeTrackingEndsAt,
-                           endsAt > .now {
-                            Text("Auto-off \(routeTrackingDuration.availabilityText).")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-
-                            Button("Turn off now", role: .destructive) {
-                                captureManager.disableTemporaryRouteTracking()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.regular)
-                        }
-
-                        if routeTrackingAuthorizationStatus == .authorizedWhenInUse {
-                            Text("Always location access is needed to keep this running in the background.")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text("Grant location access first to use this feature.")
+                    if isRouteTrackingActive {
+                        Text("Auto-off \(routeTrackingDuration.availabilityText).")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
+
+                    if routeTrackingAuthorizationStatus == .authorizedWhenInUse {
+                        Text("Always location access is needed to keep this running in the background.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Grant location access first to use this feature.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .panelSurface()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelSurface()
         }
         .onReceive(captureManager.$temporaryRouteTrackingDuration.removeDuplicates()) { routeTrackingDuration = $0 }
         .onReceive(captureManager.$temporaryRouteTrackingEndsAt.removeDuplicates()) { routeTrackingEndsAt = $0 }
@@ -945,6 +1015,10 @@ private struct RouteTrackingSettingsSection: View {
         .onReceive(captureManager.$temporaryRouteTrackingStopsAtFiftyPercentBattery.removeDuplicates()) { routeTrackingStopsAtFiftyPercentBattery = $0 }
         .onReceive(captureManager.$temporaryRouteTrackingStopsInLowPowerMode.removeDuplicates()) { routeTrackingStopsInLowPowerMode = $0 }
         .onReceive(captureManager.$temporaryRouteTrackingStopNotificationEnabled.removeDuplicates()) { routeTrackingStopNotificationEnabled = $0 }
+        .onReceive(captureManager.$isBackgroundLocationListeningEnabled.removeDuplicates()) { isBackgroundLocationListeningEnabled = $0 }
+        .onChange(of: isBackgroundLocationListeningEnabled) { _, isEnabled in
+            captureManager.setBackgroundLocationListeningEnabled(isEnabled)
+        }
         .alert("Notification Access", isPresented: $isShowingNotificationPermissionAlert) {
             Button("Open Settings") {
                 openURL(URL(string: UIApplication.openSettingsURLString)!)

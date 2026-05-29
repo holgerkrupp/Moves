@@ -103,6 +103,7 @@ struct MovesApp: App {
             ContentView()
                 .environmentObject(captureManager)
                 .environmentObject(undoController)
+                .environmentObject(healthWorkoutRouteAutoImporter)
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { _, newPhase in
@@ -110,6 +111,7 @@ struct MovesApp: App {
                 Task {
                     await captureManager.start()
                     await captureManager.refreshHistoricalBackfill()
+                    healthWorkoutRouteAutoImporter.resumeInterruptedHistoricalImportIfNeeded()
                     await healthWorkoutRouteAutoImporter.startIfNeeded()
                 }
             }

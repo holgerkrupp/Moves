@@ -194,6 +194,10 @@ struct MoveMapDetailView: View {
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
     @State private var isShowingTransportPicker = false
+    @State private var isEditingManualRoute = false
+    @State private var manualRouteDrag: ManualRouteDragState?
+    @State private var routeBeforeManualDrag: [CLLocationCoordinate2D] = []
+    @State private var isSavingManualRoute = false
     @State private var isConfirmingDeletion = false
     @State private var isDeleting = false
     @State private var deleteErrorMessage = ""
@@ -204,6 +208,7 @@ struct MoveMapDetailView: View {
             id: segment.id.uuidString,
             coordinates: routeCoordinates,
             usesHighAccuracyRouteTracking: segment.usesHighAccuracyRouteTracking,
+            usesHealthWorkoutRoute: segment.usesHealthWorkoutRoute,
             transportMode: segment.transportMode
         )
     }
@@ -231,43 +236,61 @@ struct MoveMapDetailView: View {
         self.segment = segment
         let all = MoveRouteGeometry.rawCoordinates(for: segment)
         let signature = MoveRouteGeometry.cacheSignature(for: segment, fallback: all)
-        let initialRoute = segment.cachedRouteCoordinates(for: signature) ?? all
+        let initialRoute = segment.manualRouteCoordinates ?? segment.cachedRouteCoordinates(for: signature) ?? all
 
         _camera = State(initialValue: .region(MapRegionFactory.region(for: initialRoute)))
         _routeCoordinates = State(initialValue: initialRoute)
     }
 
     var body: some View {
-        Map(position: $camera) {
-            if let start = segment.startPlace?.coordinate {
-                if showsBigMarkers {
-                    Marker("Start", coordinate: start)
-                        .tint(MovesPalette.place)
-                } else {
-                    Annotation("Start", coordinate: start, anchor: .center) {
-                        MapLocationDot(tint: MovesPalette.place)
+        MapReader { proxy in
+            ZStack {
+                Map(position: $camera) {
+                    if let start = segment.startPlace?.coordinate {
+                        if showsBigMarkers {
+                            Marker("Start", coordinate: start)
+                                .tint(MovesPalette.place)
+                        } else {
+                            Annotation("Start", coordinate: start, anchor: .center) {
+                                MapLocationDot(tint: MovesPalette.place)
+                            }
+                        }
+                    }
+
+                    if activeRenderedRoute.shadowCoordinates.count > 1 {
+                        MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
+                            .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
+                    }
+
+                    if activeRenderedRoute.coordinates.count > 1 {
+                        MapPolyline(coordinates: activeRenderedRoute.coordinates)
+                            .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
+                    }
+
+                    if let end = segment.endPlace?.coordinate {
+                        if showsBigMarkers {
+                            Marker("End", coordinate: end)
+                                .tint(.red)
+                        } else {
+                            Annotation("End", coordinate: end, anchor: .center) {
+                                MapLocationDot(tint: .red)
+                            }
+                        }
                     }
                 }
-            }
 
-            if activeRenderedRoute.shadowCoordinates.count > 1 {
-                MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
-                    .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
-            }
-
-            if activeRenderedRoute.coordinates.count > 1 {
-                MapPolyline(coordinates: activeRenderedRoute.coordinates)
-                    .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
-            }
-
-            if let end = segment.endPlace?.coordinate {
-                if showsBigMarkers {
-                    Marker("End", coordinate: end)
-                        .tint(.red)
-                } else {
-                    Annotation("End", coordinate: end, anchor: .center) {
-                        MapLocationDot(tint: .red)
-                    }
+                if isEditingManualRoute {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    updateManualRouteDrag(at: value.location, proxy: proxy)
+                                }
+                                .onEnded { value in
+                                    finishManualRouteDrag(at: value.location, proxy: proxy)
+                                }
+                        )
                 }
             }
         }
@@ -292,12 +315,23 @@ struct MoveMapDetailView: View {
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
-                    isConfirmingDeletion = true
-                } label: {
-                    Image(systemName: "trash")
+                HStack(spacing: 10) {
+                    Button {
+                        isEditingManualRoute.toggle()
+                        manualRouteDrag = nil
+                    } label: {
+                        Image(systemName: isEditingManualRoute ? "hand.draw.fill" : "hand.draw")
+                    }
+                    .disabled(routeCoordinates.count < 2 || isSavingManualRoute)
+                    .help(isEditingManualRoute ? "Stop editing route" : "Edit route")
+
+                    Button(role: .destructive) {
+                        isConfirmingDeletion = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(isDeleting)
                 }
-                .disabled(isDeleting)
             }
         }
         .confirmationDialog(
@@ -327,6 +361,31 @@ struct MoveMapDetailView: View {
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                 Text(segment.transportMode.title)
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
+                if segment.usesHealthWorkoutRoute {
+                    Label("Apple Health route", systemImage: "heart.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(MovesPalette.healthRoute)
+                }
+                if segment.hasManualRouteCoordinates {
+                    HStack(spacing: 10) {
+                        Label("Manual route", systemImage: "hand.draw.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(activeRenderedRoute.tint)
+
+                        Button {
+                            revertManualRoute()
+                        } label: {
+                            Label("Revert", systemImage: "arrow.uturn.backward")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(isSavingManualRoute)
+                    }
+                } else if isEditingManualRoute {
+                    Label("Drag the route line to adjust it", systemImage: "hand.draw")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(activeRenderedRoute.tint)
+                }
                 Text("\(DurationFormatter.text(for: segment.timelineDuration))   \(Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.primary.opacity(0.75))
@@ -392,8 +451,10 @@ struct MoveMapDetailView: View {
         let previousMode = segment.transportMode
         let previousRouteCacheSignature = segment.routeCacheSignature
         let previousRouteCacheCoordinatesData = segment.routeCacheCoordinatesData
+        let previousManualRouteCoordinatesData = segment.manualRouteCoordinatesData
         segment.transportMode = newMode
         segment.clearCachedRouteCoordinates()
+        segment.clearManualRouteCoordinates()
         routeCoordinates = MoveRouteGeometry.rawCoordinates(for: segment)
 
         do {
@@ -405,6 +466,7 @@ struct MoveMapDetailView: View {
             segment.transportMode = previousMode
             segment.routeCacheSignature = previousRouteCacheSignature
             segment.routeCacheCoordinatesData = previousRouteCacheCoordinatesData
+            segment.manualRouteCoordinatesData = previousManualRouteCoordinatesData
             print("Failed to save move transport mode: \(error.localizedDescription)")
         }
     }
@@ -418,6 +480,108 @@ struct MoveMapDetailView: View {
             } catch {
                 print("Failed to persist matched route cache: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func updateManualRouteDrag(at point: CGPoint, proxy: MapProxy) {
+        guard isEditingManualRoute, routeCoordinates.count > 1 else { return }
+
+        if manualRouteDrag == nil {
+            guard let nearest = nearestRoutePoint(to: point, proxy: proxy),
+                  nearest.distance <= 32 else {
+                return
+            }
+            routeBeforeManualDrag = routeCoordinates
+            manualRouteDrag = ManualRouteDragState(closestRouteIndex: nearest.index)
+        }
+
+        guard let draggedCoordinate = proxy.convert(point, from: .local),
+              let drag = manualRouteDrag else {
+            return
+        }
+
+        routeCoordinates = ManualRouteGeometry.previewAnchors(
+            currentRoute: routeBeforeManualDrag,
+            draggedCoordinate: draggedCoordinate,
+            transportMode: segment.transportMode,
+            closestIndex: drag.closestRouteIndex
+        )
+    }
+
+    private func finishManualRouteDrag(at point: CGPoint, proxy: MapProxy) {
+        guard let drag = manualRouteDrag,
+              let draggedCoordinate = proxy.convert(point, from: .local) else {
+            if !routeBeforeManualDrag.isEmpty {
+                routeCoordinates = routeBeforeManualDrag
+            }
+            manualRouteDrag = nil
+            routeBeforeManualDrag = []
+            return
+        }
+
+        let baseRoute = routeBeforeManualDrag
+        manualRouteDrag = nil
+        routeBeforeManualDrag = []
+        isSavingManualRoute = true
+
+        Task { @MainActor in
+            let committed = await ManualRouteGeometry.committedCoordinates(
+                currentRoute: baseRoute,
+                draggedCoordinate: draggedCoordinate,
+                transportMode: segment.transportMode,
+                closestIndex: drag.closestRouteIndex
+            )
+
+            guard committed.count > 1 else {
+                isSavingManualRoute = false
+                return
+            }
+
+            segment.storeManualRouteCoordinates(committed)
+            routeCoordinates = committed
+
+            do {
+                try modelContext.save()
+            } catch {
+                modelContext.rollback()
+                routeCoordinates = segment.manualRouteCoordinates ?? baseRoute
+                print("Failed to save manual route: \(error.localizedDescription)")
+            }
+
+            isSavingManualRoute = false
+        }
+    }
+
+    private func nearestRoutePoint(to point: CGPoint, proxy: MapProxy) -> (index: Int, distance: CGFloat)? {
+        var nearest: (index: Int, distance: CGFloat)?
+
+        for (index, coordinate) in routeCoordinates.enumerated() {
+            guard let routePoint = proxy.convert(coordinate, to: .local) else { continue }
+            let distance = hypot(routePoint.x - point.x, routePoint.y - point.y)
+            if nearest == nil || distance < nearest!.distance {
+                nearest = (index, distance)
+            }
+        }
+
+        return nearest
+    }
+
+    private func revertManualRoute() {
+        guard segment.hasManualRouteCoordinates else { return }
+        isSavingManualRoute = true
+        segment.clearManualRouteCoordinates()
+
+        do {
+            try modelContext.save()
+            Task { @MainActor in
+                await refreshRouteCoordinates()
+                isSavingManualRoute = false
+            }
+        } catch {
+            modelContext.rollback()
+            routeCoordinates = segment.manualRouteCoordinates ?? routeCoordinates
+            isSavingManualRoute = false
+            print("Failed to revert manual route: \(error.localizedDescription)")
         }
     }
 
@@ -443,6 +607,10 @@ struct MoveMapDetailView: View {
             isShowingDeleteError = true
         }
     }
+}
+
+private struct ManualRouteDragState {
+    let closestRouteIndex: Int
 }
 
 private struct DeletedPlaceUndoPayload {
@@ -524,6 +692,7 @@ private struct DeletedMoveUndoPayload {
     let dayTimeline: DayTimeline?
     let routeCacheSignature: String?
     let routeCacheCoordinatesData: Data?
+    let manualRouteCoordinatesData: Data?
     let samples: [LocationSample]
 
     init(segment: MoveSegment) {
@@ -540,6 +709,7 @@ private struct DeletedMoveUndoPayload {
         dayTimeline = segment.dayTimeline
         routeCacheSignature = segment.routeCacheSignature
         routeCacheCoordinatesData = segment.routeCacheCoordinatesData
+        manualRouteCoordinatesData = segment.manualRouteCoordinatesData
         samples = segment.samples
     }
 
@@ -562,6 +732,7 @@ private struct DeletedMoveUndoPayload {
         restored.dayTimeline = dayTimeline
         restored.routeCacheSignature = routeCacheSignature
         restored.routeCacheCoordinatesData = routeCacheCoordinatesData
+        restored.manualRouteCoordinatesData = manualRouteCoordinatesData
         context.insert(restored)
 
         for sample in samples {

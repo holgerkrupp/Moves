@@ -7,7 +7,7 @@
         "key": "Moves Today",
         "location": {
           "startingColumn": 35,
-          "startingLine": 18
+          "startingLine": 20
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Shows today’s move distance, transport split, and visited locations.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 19
+          "startingLine": 21
         }
       }
     ]

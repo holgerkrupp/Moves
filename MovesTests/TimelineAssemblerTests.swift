@@ -178,6 +178,54 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertFalse(segment.usesHighAccuracyRouteTracking)
     }
 
+    func testHealthWorkoutRouteGeometryKeepsCloseSpacedPoints() {
+        let startDate = Date(timeIntervalSince1970: 1_710_000_000)
+        let segment = MoveSegment(
+            dedupeKey: "health-route-detail",
+            startDate: startDate,
+            endDate: startDate.addingTimeInterval(30),
+            transportMode: .walking,
+            distanceMeters: 4,
+            stepCount: nil
+        )
+
+        segment.samples = [
+            LocationSample(
+                location: makeLocation(
+                    latitude: 52.520000,
+                    longitude: 13.405000,
+                    speed: 1,
+                    timestamp: startDate
+                ),
+                source: .healthWorkoutRoute,
+                dedupeKey: "health-1"
+            ),
+            LocationSample(
+                location: makeLocation(
+                    latitude: 52.520018,
+                    longitude: 13.405000,
+                    speed: 1,
+                    timestamp: startDate.addingTimeInterval(10)
+                ),
+                source: .healthWorkoutRoute,
+                dedupeKey: "health-2"
+            ),
+            LocationSample(
+                location: makeLocation(
+                    latitude: 52.520036,
+                    longitude: 13.405000,
+                    speed: 1,
+                    timestamp: startDate.addingTimeInterval(20)
+                ),
+                source: .healthWorkoutRoute,
+                dedupeKey: "health-3"
+            ),
+        ]
+
+        XCTAssertTrue(segment.usesHealthWorkoutRoute)
+        XCTAssertEqual(MoveRouteGeometry.rawCoordinates(for: segment).count, 3)
+    }
+
     func testMoveSegmentRouteCacheRoundTripsAndHonorsSignatureChanges() {
         let segment = MoveSegment(
             dedupeKey: "move-cache",
@@ -266,6 +314,29 @@ final class TimelineAssemblerTests: XCTestCase {
         ]
 
         XCTAssertNotEqual(first, MoveRouteGeometry.cacheSignature(for: segment, fallback: changedFallback))
+    }
+
+    func testRoadRouteAnchorsKeepIntermediatePointsForShortRoutes() {
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.520000, longitude: 13.405000),
+            CLLocationCoordinate2D(latitude: 52.521000, longitude: 13.406000),
+            CLLocationCoordinate2D(latitude: 52.522000, longitude: 13.407000),
+            CLLocationCoordinate2D(latitude: 52.523000, longitude: 13.408000),
+            CLLocationCoordinate2D(latitude: 52.524000, longitude: 13.409000),
+        ]
+
+        let anchors = RoadRouteMatcher.routeAnchors(for: coordinates, transportMode: .automotive)
+
+        XCTAssertEqual(anchors.first?.latitude, coordinates.first?.latitude)
+        XCTAssertEqual(anchors.last?.latitude, coordinates.last?.latitude)
+        XCTAssertTrue(
+            anchors.dropFirst().dropLast().contains { anchor in
+                coordinates.dropFirst().dropLast().contains { coordinate in
+                    anchor.latitude == coordinate.latitude && anchor.longitude == coordinate.longitude
+                }
+            },
+            "Expected route matching anchors to include intermediate route points."
+        )
     }
 
     func testTemporaryRouteTrackingEndOfDayFallsBackToTheStartOfTomorrow() {

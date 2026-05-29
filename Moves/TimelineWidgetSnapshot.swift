@@ -182,7 +182,7 @@ extension TimelineWidgetSnapshot {
             .flatMap { move in
                 let fallback = MoveRouteGeometry.rawCoordinates(for: move)
                 let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
-                return move.cachedRouteCoordinates(for: signature) ?? fallback
+                return move.manualRouteCoordinates ?? move.cachedRouteCoordinates(for: signature) ?? fallback
             }
 
         guard !rawCoordinates.isEmpty else { return [] }

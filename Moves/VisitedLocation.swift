@@ -240,6 +240,7 @@ final class MoveSegment {
     var dayTimeline: DayTimeline?
     var routeCacheSignature: String? = nil
     var routeCacheCoordinatesData: Data? = nil
+    var manualRouteCoordinatesData: Data? = nil
 
     @Relationship(deleteRule: .nullify, originalName: "samples", inverse: \LocationSample.moveSegment)
     var samplesStorage: [LocationSample]? = nil
@@ -284,6 +285,10 @@ final class MoveSegment {
 
     var usesHighAccuracyRouteTracking: Bool {
         samples.contains { $0.source.isRouteTrack }
+    }
+
+    var usesHealthWorkoutRoute: Bool {
+        samples.contains { $0.source == .healthWorkoutRoute }
     }
 
     func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
@@ -354,7 +359,6 @@ final class LocationSample {
     }
 }
 
-@MainActor
 protocol TimelineRepository {
     func addOrUpdateVisit(from visit: CLVisit) throws -> VisitPlace
     func appendSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample]
@@ -424,6 +428,7 @@ struct MoveSegmentSnapshot: Codable {
     let dayKey: String?
     let routeCacheSignature: String?
     let routeCacheCoordinatesData: Data?
+    let manualRouteCoordinatesData: Data?
 }
 
 struct LocationSampleSnapshot: Codable {
@@ -483,7 +488,6 @@ enum TimelineDeduplicationSnapshotStore {
     }
 }
 
-@MainActor
 final class SwiftDataTimelineRepository: TimelineRepository {
     private let modelContext: ModelContext
     private static let sampleDedupeTimeWindow: TimeInterval = 5 * 60
@@ -572,7 +576,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     endPlaceID: move.endPlace?.id,
                     dayKey: move.dayTimeline?.dayKey,
                     routeCacheSignature: move.routeCacheSignature,
-                    routeCacheCoordinatesData: move.routeCacheCoordinatesData
+                    routeCacheCoordinatesData: move.routeCacheCoordinatesData,
+                    manualRouteCoordinatesData: move.manualRouteCoordinatesData
                 )
             },
             samples: samples.map { sample in
@@ -650,6 +655,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             move.transportModeRawValue = moveSnapshot.transportModeRawValue
             move.routeCacheSignature = moveSnapshot.routeCacheSignature
             move.routeCacheCoordinatesData = moveSnapshot.routeCacheCoordinatesData
+            move.manualRouteCoordinatesData = moveSnapshot.manualRouteCoordinatesData
             if let dayKey = moveSnapshot.dayKey {
                 move.dayTimeline = timelinesByDayKey[dayKey]
             }

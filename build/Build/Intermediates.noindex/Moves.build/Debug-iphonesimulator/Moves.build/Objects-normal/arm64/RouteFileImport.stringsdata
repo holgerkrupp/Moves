@@ -1,0 +1,48 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/RouteFileImport.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "File Route Import",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 169
+        }
+      },
+      {
+        "comment": "",
+        "key": "File Route Import",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 197
+        }
+      },
+      {
+        "comment": "",
+        "key": "Supports GPX, TCX, KML, and GeoJSON route files. You can select one or multiple files at once. Duplicate points are merged automatically, and imported route tracks are preferred over less accurate phone/watch samples.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 152
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 173
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 198
+        }
+      }
+    ]
+  },
+  "version": 1
+}

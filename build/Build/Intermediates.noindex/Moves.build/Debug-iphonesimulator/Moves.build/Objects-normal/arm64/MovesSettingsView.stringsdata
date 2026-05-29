@@ -7,7 +7,7 @@
         "key": "Deduplicate Existing Data?",
         "location": {
           "startingColumn": 13,
-          "startingLine": 201
+          "startingLine": 214
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Export",
         "location": {
           "startingColumn": 16,
-          "startingLine": 213
+          "startingLine": 226
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Data Maintenance",
         "location": {
           "startingColumn": 16,
-          "startingLine": 218
+          "startingLine": 231
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Settings",
         "location": {
           "startingColumn": 30,
-          "startingLine": 172
+          "startingLine": 185
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "When this is off, maps use small dots so more of the map stays visible.",
         "location": {
           "startingColumn": 34,
-          "startingLine": 62
+          "startingLine": 61
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "Show big map markers",
         "location": {
           "startingColumn": 36,
-          "startingLine": 60
+          "startingLine": 59
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically.",
         "location": {
           "startingColumn": 30,
-          "startingLine": 97
+          "startingLine": 134
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap.",
         "location": {
           "startingColumn": 30,
-          "startingLine": 151
+          "startingLine": 164
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "Done",
         "location": {
           "startingColumn": 28,
-          "startingLine": 176
+          "startingLine": 189
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "Deduplicate",
         "location": {
           "startingColumn": 20,
-          "startingLine": 205
+          "startingLine": 218
         }
       },
       {
@@ -87,7 +87,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 209
+          "startingLine": 222
         }
       },
       {
@@ -95,7 +95,7 @@
         "key": "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 211
+          "startingLine": 224
         }
       },
       {
@@ -103,7 +103,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 214
+          "startingLine": 227
         }
       },
       {
@@ -111,7 +111,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 219
+          "startingLine": 232
         }
       },
       {
@@ -119,7 +119,7 @@
         "key": "Real Route Tracking",
         "location": {
           "startingColumn": 30,
-          "startingLine": 366
+          "startingLine": 358
         }
       },
       {
@@ -127,7 +127,47 @@
         "key": "Done",
         "location": {
           "startingColumn": 28,
-          "startingLine": 370
+          "startingLine": 362
+        }
+      },
+      {
+        "comment": "",
+        "key": "Apple Health Routes",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 450
+        }
+      },
+      {
+        "comment": "",
+        "key": "Apple Health Routes",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 459
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use Apple Health workout routes",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 397
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 454
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 460
         }
       },
       {
@@ -135,151 +175,159 @@
         "key": "Notification Access",
         "location": {
           "startingColumn": 16,
-          "startingLine": 785
+          "startingLine": 1022
+        }
+      },
+      {
+        "comment": "",
+        "key": "Tracking Modes",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 883
+        }
+      },
+      {
+        "comment": "",
+        "key": "Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 893
+        }
+      },
+      {
+        "comment": "",
+        "key": "Listen for location changes",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 888
         }
       },
       {
         "comment": "",
         "key": "Real Route Tracking",
         "location": {
-          "startingColumn": 26,
-          "startingLine": 679
+          "startingColumn": 22,
+          "startingLine": 901
         }
       },
       {
         "comment": "",
         "key": "Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on.",
         "location": {
-          "startingColumn": 26,
-          "startingLine": 683
+          "startingColumn": 22,
+          "startingLine": 905
         }
       },
       {
         "comment": "",
         "key": "These safeguards can end the session early if power gets tight.",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 728
+          "startingColumn": 26,
+          "startingLine": 962
         }
       },
       {
         "comment": "",
         "key": "iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them.",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 732
+          "startingColumn": 26,
+          "startingLine": 966
         }
       },
       {
         "comment": "",
         "key": "Auto-off %@.",
         "location": {
-          "startingColumn": 34,
-          "startingLine": 752
+          "startingColumn": 30,
+          "startingLine": 992
         }
       },
       {
         "comment": "",
         "key": "Always location access is needed to keep this running in the background.",
         "location": {
-          "startingColumn": 34,
-          "startingLine": 764
+          "startingColumn": 30,
+          "startingLine": 998
         }
       },
       {
         "comment": "",
         "key": "Grant location access first to use this feature.",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 769
+          "startingColumn": 26,
+          "startingLine": 1003
         }
       },
       {
         "comment": "",
-        "key": "Turn off now",
+        "key": "Duration",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 913
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off at 50% battery",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 940
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off at 50% battery",
         "location": {
           "startingColumn": 36,
-          "startingLine": 756
-        }
-      },
-      {
-        "comment": "",
-        "key": "Duration",
-        "location": {
-          "startingColumn": 38,
-          "startingLine": 691
-        }
-      },
-      {
-        "comment": "",
-        "key": "Duration",
-        "location": {
-          "startingColumn": 40,
-          "startingLine": 694
-        }
-      },
-      {
-        "comment": "",
-        "key": "Turn off at 50% battery",
-        "location": {
-          "startingColumn": 38,
-          "startingLine": 706
-        }
-      },
-      {
-        "comment": "",
-        "key": "Turn off at 50% battery",
-        "location": {
-          "startingColumn": 40,
-          "startingLine": 708
+          "startingLine": 942
         }
       },
       {
         "comment": "",
         "key": "Turn off in Low Power Mode",
         "location": {
-          "startingColumn": 38,
-          "startingLine": 713
+          "startingColumn": 34,
+          "startingLine": 947
         }
       },
       {
         "comment": "",
         "key": "Turn off in Low Power Mode",
         "location": {
-          "startingColumn": 40,
-          "startingLine": 715
+          "startingColumn": 36,
+          "startingLine": 949
         }
       },
       {
         "comment": "",
         "key": "Notify when tracking stops",
         "location": {
-          "startingColumn": 38,
-          "startingLine": 720
+          "startingColumn": 34,
+          "startingLine": 954
         }
       },
       {
         "comment": "",
         "key": "Notify when tracking stops",
         "location": {
-          "startingColumn": 40,
-          "startingLine": 722
+          "startingColumn": 36,
+          "startingLine": 956
+        }
+      },
+      {
+        "comment": "",
+        "key": "Turn off",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 979
         }
       },
       {
         "comment": "",
         "key": "Enable real route tracking",
         "location": {
-          "startingColumn": 35,
-          "startingLine": 741
-        }
-      },
-      {
-        "comment": "",
-        "key": "Update route tracking",
-        "location": {
-          "startingColumn": 35,
-          "startingLine": 742
+          "startingColumn": 31,
+          "startingLine": 980
         }
       },
       {
@@ -287,7 +335,7 @@
         "key": "Open Settings",
         "location": {
           "startingColumn": 20,
-          "startingLine": 786
+          "startingLine": 1023
         }
       },
       {
@@ -295,7 +343,7 @@
         "key": "Not Now",
         "location": {
           "startingColumn": 20,
-          "startingLine": 789
+          "startingLine": 1026
         }
       },
       {
@@ -303,7 +351,7 @@
         "key": "Moves needs notification permission to send a stop alert. You can allow it in Settings.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 791
+          "startingLine": 1028
         }
       }
     ]

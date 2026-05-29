@@ -43,6 +43,9 @@
     "Always location access is needed to keep this running in the background." : {
 
     },
+    "Apple Health route" : {
+
+    },
     "Apple Health Routes" : {
 
     },
@@ -53,6 +56,9 @@
 
     },
     "Auto-off %@." : {
+
+    },
+    "Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking." : {
 
     },
     "Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap." : {
@@ -106,10 +112,16 @@
     "Done" : {
 
     },
+    "Drag the route line to adjust it" : {
+
+    },
     "Duration" : {
 
     },
     "Earliest" : {
+
+    },
+    "Edit route" : {
 
     },
     "Enable real route tracking" : {
@@ -130,15 +142,6 @@
     "Grant location access first to use this feature." : {
 
     },
-    "Import all asks Apple Health for every supported workout route it can return." : {
-
-    },
-    "Import all workout routes" : {
-
-    },
-    "Importing all routes..." : {
-
-    },
     "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically." : {
 
     },
@@ -152,6 +155,12 @@
 
     },
     "Label (Home, Work...)" : {
+
+    },
+    "Listen for location changes" : {
+
+    },
+    "Manual route" : {
 
     },
     "Most active days" : {
@@ -208,7 +217,7 @@
     "Real route tracking, %@ remaining" : {
 
     },
-    "Refresh timeline" : {
+    "Revert" : {
 
     },
     "Save" : {
@@ -221,6 +230,9 @@
 
     },
     "Start" : {
+
+    },
+    "Stop editing route" : {
 
     },
     "Supports GPX, TCX, KML, and GeoJSON route files. You can select one or multiple files at once. Duplicate points are merged automatically, and imported route tracks are preferred over less accurate phone/watch samples." : {
@@ -244,19 +256,19 @@
     "Total" : {
 
     },
+    "Tracking Modes" : {
+
+    },
     "Transport mode" : {
+
+    },
+    "Turn off" : {
 
     },
     "Turn off at 50% battery" : {
 
     },
     "Turn off in Low Power Mode" : {
-
-    },
-    "Turn off now" : {
-
-    },
-    "Update route tracking" : {
 
     },
     "Use Apple Health workout routes" : {
