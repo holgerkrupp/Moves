@@ -83,6 +83,15 @@ extension LocationSampleSource {
             return false
         }
     }
+
+    var preservesRouteResolution: Bool {
+        switch self {
+        case .healthWorkoutRoute, .watchRouteTracking, .fileRouteImport:
+            return true
+        case .routeTracking, .visit, .significantChange, .watchSignificantChange, .launchBackfill, .authorizationGrant:
+            return false
+        }
+    }
 }
 
 extension Array where Element == LocationSample {
@@ -784,7 +793,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         for location in locations {
             let dedupeKey = Self.makeSampleDedupeKey(for: location)
-            if let existing = try findSample(byDedupeKey: dedupeKey) ?? findNearbySample(matching: location) {
+            let existing = try findSample(byDedupeKey: dedupeKey)
+                ?? (source.preservesRouteResolution ? nil : findNearbySample(matching: location))
+            if let existing {
                 existing.source = Self.preferredSource(existing: existing.source, new: source)
                 inserted.append(existing)
                 continue

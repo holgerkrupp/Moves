@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>files</key>
+	<dict>
+		<key>Assets.car</key>
+		<data>
+		n79DNjVg90sFRIgfEsof4FqSR3U=
+		</data>
+		<key>Info.plist</key>
+		<data>
+		/KXycZlgvSv2Lyz5W/0uEfbYi6Q=
+		</data>
+		<key>Moves Watch App.debug.dylib</key>
+		<data>
+		VT2rKRWoFZzPGf4KE0eH0RYkQnY=
+		</data>
+		<key>PkgInfo</key>
+		<data>
+		n57qDP4tZfLD1rCS43W0B4LQjzE=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/Assets.car</key>
+		<data>
+		3kr5NV0MBOoqAhEhgFEHq9Y27LE=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/Info.plist</key>
+		<data>
+		/NZIHzZI+y72mAL8CABHKzR/HlQ=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets</key>
+		<data>
+		wjYxFNSDUA+1+bIELNrAQ9owbOM=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets.debug.dylib</key>
+		<data>
+		FAXAOcUeDgElDTYgDlBbvE1Z1Hc=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/_CodeSignature/CodeResources</key>
+		<data>
+		AlsR4X7OA21zYaGSgCNEHZWp4oc=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/__preview.dylib</key>
+		<data>
+		apgqqzVVtGdkCbpyLpAqCUP2Pxw=
+		</data>
+		<key>PlugIns/Moves Watch Widgets.appex/embedded.mobileprovision</key>
+		<data>
+		F88JY28F0aYT4lVeZr/RpMQ6Xgo=
+		</data>
+		<key>__preview.dylib</key>
+		<data>
+		B4g7Knnt+yFZzfKHDwx7tOZe8dA=
+		</data>
+		<key>embedded.mobileprovision</key>
+		<data>
+		R/w+gDKjUmBDsoK3jGYYxF+GOhQ=
+		</data>
+	</dict>
+	<key>files2</key>
+	<dict>
+		<key>Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			LHQh4Gq6+pgohISP/y6VtnX1JC2SkPja5/qJ6C6BAew=
+			</data>
+		</dict>
+		<key>Moves Watch App.debug.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			A66EYtFyuVf2zGnonrZrYHDn8W/OMV2149lNQLEaKJo=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			B38G4OnJO7TlHQz5SWFaHXb/TwDCxapCONMCUZ303Z4=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			b+2CYDrOIRuDWQblLbJv7yR3IfFI6HLiXXIgQzYDnI4=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			+WFCLs5NayTNUxnBAAWj5k4EZPhC5v7bhrKyJZdJqBo=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets.debug.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			vEHtVQ94kDACRU5BqumI8q2QZOyVKTngLe/0KJhBA08=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/_CodeSignature/CodeResources</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			HnVUvVy+UKVarpZsZ4a5ty1s60OVze7KM1BmTOHmP+c=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/__preview.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			vvfVKygj0NoGuP8h3K/iQzUsIe+CgdAsm9GE8IS4lPU=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Watch Widgets.appex/embedded.mobileprovision</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			ARkeHPofwcP4+yXhaTbRPFTekTXMW0EoJPRgHr9ss0w=
+			</data>
+		</dict>
+		<key>__preview.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			3SD4DHyzVXjaD3kkZj/wVlbs3Wgn56YuO5SaVEz+pM8=
+			</data>
+		</dict>
+		<key>embedded.mobileprovision</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			w+0YORJufUzInc8hiyPEKIjju5W1o8Vu6gfTXzGR26A=
+			</data>
+		</dict>
+	</dict>
+	<key>rules</key>
+	<dict>
+		<key>^.*</key>
+		<true/>
+		<key>^.*\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^.*\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Base\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^version.plist$</key>
+		<true/>
+	</dict>
+	<key>rules2</key>
+	<dict>
+		<key>.*\.dSYM($|/)</key>
+		<dict>
+			<key>weight</key>
+			<real>11</real>
+		</dict>
+		<key>^(.*/)?\.DS_Store$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>2000</real>
+		</dict>
+		<key>^.*</key>
+		<true/>
+		<key>^.*\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^.*\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Base\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^Info\.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^PkgInfo$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^embedded\.provisionprofile$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^version\.plist$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+	</dict>
+</dict>
+</plist>

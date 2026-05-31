@@ -1,0 +1,414 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>files</key>
+	<dict>
+		<key>AppIcon60x60@2x.png</key>
+		<data>
+		4+qWvAypnNPbT2GLIbLCtwImb6Q=
+		</data>
+		<key>AppIcon76x76@2x~ipad.png</key>
+		<data>
+		9DKA/VSOEXFb1T8pr7/wQifnuw0=
+		</data>
+		<key>Assets.car</key>
+		<data>
+		yFhv3pCAmmKkICBS78idAUnmP0g=
+		</data>
+		<key>Info.plist</key>
+		<data>
+		kA7Jf+72hnUJpFxYOMiYS2RVCXA=
+		</data>
+		<key>Moves.debug.dylib</key>
+		<data>
+		fn1i9qaOlgw/05g1kP4ae/m0dfo=
+		</data>
+		<key>PkgInfo</key>
+		<data>
+		n57qDP4tZfLD1rCS43W0B4LQjzE=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/Assets.car</key>
+		<data>
+		bEwcQtJWDX0LZlp5VdY2htL2sJ8=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/Info.plist</key>
+		<data>
+		DLDCfnfQUM91qghTw+ruIW/HxOw=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/Moves Widgets</key>
+		<data>
+		nHnLi8BDibCKQDBRq1pnDENLJQc=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/Moves Widgets.debug.dylib</key>
+		<data>
+		0vX/1B4/yKU1YK6GvmzlfCExeQI=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/_CodeSignature/CodeResources</key>
+		<data>
+		IFmrTYC0LSfZag/J+YFLExmhEMY=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/__preview.dylib</key>
+		<data>
+		SFcR8fr15slmTJQG553eZ/+IMzQ=
+		</data>
+		<key>PlugIns/Moves Widgets.appex/embedded.mobileprovision</key>
+		<data>
+		G1ysuraPYejfuzzlAuYZjVtIt7M=
+		</data>
+		<key>Watch/Moves Watch App.app/Assets.car</key>
+		<data>
+		n79DNjVg90sFRIgfEsof4FqSR3U=
+		</data>
+		<key>Watch/Moves Watch App.app/Info.plist</key>
+		<data>
+		/KXycZlgvSv2Lyz5W/0uEfbYi6Q=
+		</data>
+		<key>Watch/Moves Watch App.app/Moves Watch App</key>
+		<data>
+		Qe6FQ5DpFYmcsGvQc9t7TSrdBX8=
+		</data>
+		<key>Watch/Moves Watch App.app/Moves Watch App.debug.dylib</key>
+		<data>
+		VT2rKRWoFZzPGf4KE0eH0RYkQnY=
+		</data>
+		<key>Watch/Moves Watch App.app/PkgInfo</key>
+		<data>
+		n57qDP4tZfLD1rCS43W0B4LQjzE=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Assets.car</key>
+		<data>
+		3kr5NV0MBOoqAhEhgFEHq9Y27LE=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Info.plist</key>
+		<data>
+		/NZIHzZI+y72mAL8CABHKzR/HlQ=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets</key>
+		<data>
+		wjYxFNSDUA+1+bIELNrAQ9owbOM=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets.debug.dylib</key>
+		<data>
+		FAXAOcUeDgElDTYgDlBbvE1Z1Hc=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/_CodeSignature/CodeResources</key>
+		<data>
+		AlsR4X7OA21zYaGSgCNEHZWp4oc=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/__preview.dylib</key>
+		<data>
+		apgqqzVVtGdkCbpyLpAqCUP2Pxw=
+		</data>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/embedded.mobileprovision</key>
+		<data>
+		F88JY28F0aYT4lVeZr/RpMQ6Xgo=
+		</data>
+		<key>Watch/Moves Watch App.app/_CodeSignature/CodeResources</key>
+		<data>
+		KHyzFUzMnQfE+BFXq3/XUmtoFZs=
+		</data>
+		<key>Watch/Moves Watch App.app/__preview.dylib</key>
+		<data>
+		B4g7Knnt+yFZzfKHDwx7tOZe8dA=
+		</data>
+		<key>Watch/Moves Watch App.app/embedded.mobileprovision</key>
+		<data>
+		R/w+gDKjUmBDsoK3jGYYxF+GOhQ=
+		</data>
+		<key>__preview.dylib</key>
+		<data>
+		iUWqNNQAMLU7wfbl4/A1fTJgGzA=
+		</data>
+		<key>embedded.mobileprovision</key>
+		<data>
+		pJ8U5+Rc+3NdhN8vT4k3etlWlf8=
+		</data>
+	</dict>
+	<key>files2</key>
+	<dict>
+		<key>AppIcon60x60@2x.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			wxBmPh5PXtwqw1VHnRFHZAN4Oz+m/mtyXEx19rqbB2Q=
+			</data>
+		</dict>
+		<key>AppIcon76x76@2x~ipad.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			icVhQJ5ak9tZuHheEuRAEGagdt/Xjuq9vSJfofsSPJc=
+			</data>
+		</dict>
+		<key>Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			jIp+i2UF7QP9p2xyrp9FLfvg/vHE3CvDwmeC+JU2Fpo=
+			</data>
+		</dict>
+		<key>Moves.debug.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			awLT+rV0GI47reUjMfDs1qCOr8jvuSPFupwag1ZXavw=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FaL/TTAraML6rhs8oSIfKETEtKfkgqw2ilTxAWTg1Sw=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			T7qfQai903dSXK/u2oUOJkO0+q6vJqCepnO/ziCMKRk=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/Moves Widgets</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			/PagA5MXFGHRYTTJn/qH2SlR2pTEhwglFrbBrub+Dlw=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/Moves Widgets.debug.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			LlEdVdavtaga6iURVWh71ulzUMeAJUnFRpquhjtRWhQ=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/_CodeSignature/CodeResources</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			uHNgVF18lUS/nk6hW/dEa5oWbbQMghjfVVyOjTRg53o=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/__preview.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			L4P6Jrw449oFZT6mBtGgDM4UsDji+YrXa6UICGD7+to=
+			</data>
+		</dict>
+		<key>PlugIns/Moves Widgets.appex/embedded.mobileprovision</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			VOkzygsFgev6IxJI9E1sWsrFj1RB7eWtNi9h2ggtOlo=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			LHQh4Gq6+pgohISP/y6VtnX1JC2SkPja5/qJ6C6BAew=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Krq6kAvVaHmS2u5JfVWaDWXbb2ns/xLJ7s4nyMESdWM=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/Moves Watch App</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			PlGGCchzrazdRnrnKEjkGfUCc02BAnr621PsykTKfno=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/Moves Watch App.debug.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			A66EYtFyuVf2zGnonrZrYHDn8W/OMV2149lNQLEaKJo=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PkgInfo</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			glAhkclISwTWhTdPmHmgBmBpxJuKyuegSwHTjQfo7KA=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			B38G4OnJO7TlHQz5SWFaHXb/TwDCxapCONMCUZ303Z4=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			b+2CYDrOIRuDWQblLbJv7yR3IfFI6HLiXXIgQzYDnI4=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			+WFCLs5NayTNUxnBAAWj5k4EZPhC5v7bhrKyJZdJqBo=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets.debug.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			vEHtVQ94kDACRU5BqumI8q2QZOyVKTngLe/0KJhBA08=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/_CodeSignature/CodeResources</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			HnVUvVy+UKVarpZsZ4a5ty1s60OVze7KM1BmTOHmP+c=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/__preview.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			vvfVKygj0NoGuP8h3K/iQzUsIe+CgdAsm9GE8IS4lPU=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/embedded.mobileprovision</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			ARkeHPofwcP4+yXhaTbRPFTekTXMW0EoJPRgHr9ss0w=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/_CodeSignature/CodeResources</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			aAzr/FIWLXC0zMZJlk0KHTvHm6MQf7HsM9PGIX45aVM=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/__preview.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			3SD4DHyzVXjaD3kkZj/wVlbs3Wgn56YuO5SaVEz+pM8=
+			</data>
+		</dict>
+		<key>Watch/Moves Watch App.app/embedded.mobileprovision</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			w+0YORJufUzInc8hiyPEKIjju5W1o8Vu6gfTXzGR26A=
+			</data>
+		</dict>
+		<key>__preview.dylib</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			uUOR0ApmRKt9P/X+IpJz2Q5glOvTztDHvCA86hUosLo=
+			</data>
+		</dict>
+		<key>embedded.mobileprovision</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			L77cybFbBxhgQSjJOUEQEoPQVoKmP9ndqp42wyg2R+Q=
+			</data>
+		</dict>
+	</dict>
+	<key>rules</key>
+	<dict>
+		<key>^.*</key>
+		<true/>
+		<key>^.*\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^.*\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Base\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^version.plist$</key>
+		<true/>
+	</dict>
+	<key>rules2</key>
+	<dict>
+		<key>.*\.dSYM($|/)</key>
+		<dict>
+			<key>weight</key>
+			<real>11</real>
+		</dict>
+		<key>^(.*/)?\.DS_Store$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>2000</real>
+		</dict>
+		<key>^.*</key>
+		<true/>
+		<key>^.*\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^.*\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Base\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^Info\.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^PkgInfo$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^embedded\.provisionprofile$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^version\.plist$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+	</dict>
+</dict>
+</plist>

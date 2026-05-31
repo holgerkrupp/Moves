@@ -43,6 +43,9 @@
     "Always location access is needed to keep this running in the background." : {
 
     },
+    "Apple Health could not be opened from this device." : {
+
+    },
     "Apple Health route" : {
 
     },
@@ -74,6 +77,9 @@
 
     },
     "Could Not Delete Place" : {
+
+    },
+    "Could Not Open Apple Health" : {
 
     },
     "Created in Buxtehude by" : {
@@ -200,6 +206,9 @@
 
     },
     "OK" : {
+
+    },
+    "Open in Apple Health" : {
 
     },
     "Open Settings" : {

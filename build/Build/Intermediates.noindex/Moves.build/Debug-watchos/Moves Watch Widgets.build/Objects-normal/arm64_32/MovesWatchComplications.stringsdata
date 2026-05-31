@@ -1,0 +1,56 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves Widgets/MovesWatchComplications.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Moves Today",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 20
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shows move distance, transport distance, and visited locations.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 21
+        }
+      },
+      {
+        "comment": "",
+        "key": "Moves Launcher",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 39
+        }
+      },
+      {
+        "comment": "",
+        "key": "A compact launcher for opening Moves on Apple Watch.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 40
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Moves",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 70
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Moves",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 66
+        }
+      }
+    ]
+  },
+  "version": 1
+}

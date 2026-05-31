@@ -1,0 +1,56 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves Watch App/WatchMovesContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Stop GPS",
+        "location": {
+          "startingColumn": 58,
+          "startingLine": 100
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start GPS",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 100
+        }
+      },
+      {
+        "comment": "",
+        "key": "Stop GPS",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start GPS",
+        "location": {
+          "startingColumn": 59,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld moves today",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 113
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 108
+        }
+      }
+    ]
+  },
+  "version": 1
+}

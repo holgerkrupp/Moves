@@ -1,0 +1,8 @@
+Target dependency graph (4 targets)
+Target 'Moves' in project 'Moves'
+➜ Explicit dependency on target 'Moves Watch App' in project 'Moves'
+➜ Explicit dependency on target 'Moves Widgets' in project 'Moves'
+Target 'Moves Widgets' in project 'Moves' (no dependencies)
+Target 'Moves Watch App' in project 'Moves'
+➜ Explicit dependency on target 'Moves Watch Widgets' in project 'Moves'
+Target 'Moves Watch Widgets' in project 'Moves' (no dependencies)

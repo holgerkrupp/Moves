@@ -1,0 +1,49 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/Moves Watch Widgets-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/Moves Watch Widgets-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/Moves Watch Widgets-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/Moves Watch Widgets-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/Moves Watch Widgets-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves Widgets/MovesWatchComplications.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/MovesWatchComplications~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves Widgets/TimelineWidgetSnapshotShared.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetSnapshotShared~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves Widgets/TimelineWidgetViews.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/TimelineWidgetViews~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Build/Intermediates.noindex/Moves.build/Debug-watchos/Moves Watch Widgets.build/Objects-normal/arm64_32/GeneratedAssetSymbols~partial.swiftmodule"
+  }
+}

@@ -188,6 +188,7 @@ struct MoveMapDetailView: View {
     @EnvironmentObject private var undoController: AppUndoController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @Bindable var segment: MoveSegment
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
 
@@ -197,11 +198,15 @@ struct MoveMapDetailView: View {
     @State private var isEditingManualRoute = false
     @State private var manualRouteDrag: ManualRouteDragState?
     @State private var routeBeforeManualDrag: [CLLocationCoordinate2D] = []
+    @State private var liveManualRouteMatchTask: Task<Void, Never>?
+    @State private var manualRouteDragRevision = 0
+    @State private var isIgnoringCurrentManualRouteGesture = false
     @State private var isSavingManualRoute = false
     @State private var isConfirmingDeletion = false
     @State private var isDeleting = false
     @State private var deleteErrorMessage = ""
     @State private var isShowingDeleteError = false
+    @State private var isShowingHealthOpenError = false
 
     private var activeRenderedRoute: RenderedRoute {
         RenderedRoute(
@@ -244,55 +249,40 @@ struct MoveMapDetailView: View {
 
     var body: some View {
         MapReader { proxy in
-            ZStack {
-                Map(position: $camera) {
-                    if let start = segment.startPlace?.coordinate {
-                        if showsBigMarkers {
-                            Marker("Start", coordinate: start)
-                                .tint(MovesPalette.place)
-                        } else {
-                            Annotation("Start", coordinate: start, anchor: .center) {
-                                MapLocationDot(tint: MovesPalette.place)
-                            }
-                        }
-                    }
-
-                    if activeRenderedRoute.shadowCoordinates.count > 1 {
-                        MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
-                            .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
-                    }
-
-                    if activeRenderedRoute.coordinates.count > 1 {
-                        MapPolyline(coordinates: activeRenderedRoute.coordinates)
-                            .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
-                    }
-
-                    if let end = segment.endPlace?.coordinate {
-                        if showsBigMarkers {
-                            Marker("End", coordinate: end)
-                                .tint(.red)
-                        } else {
-                            Annotation("End", coordinate: end, anchor: .center) {
-                                MapLocationDot(tint: .red)
-                            }
+            Map(position: $camera, interactionModes: mapInteractionModes) {
+                if let start = segment.startPlace?.coordinate {
+                    if showsBigMarkers {
+                        Marker("Start", coordinate: start)
+                            .tint(MovesPalette.place)
+                    } else {
+                        Annotation("Start", coordinate: start, anchor: .center) {
+                            MapLocationDot(tint: MovesPalette.place)
                         }
                     }
                 }
 
-                if isEditingManualRoute {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    updateManualRouteDrag(at: value.location, proxy: proxy)
-                                }
-                                .onEnded { value in
-                                    finishManualRouteDrag(at: value.location, proxy: proxy)
-                                }
-                        )
+                if activeRenderedRoute.shadowCoordinates.count > 1 {
+                    MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
+                        .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
+                }
+
+                if activeRenderedRoute.coordinates.count > 1 {
+                    MapPolyline(coordinates: activeRenderedRoute.coordinates)
+                        .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
+                }
+
+                if let end = segment.endPlace?.coordinate {
+                    if showsBigMarkers {
+                        Marker("End", coordinate: end)
+                            .tint(.red)
+                    } else {
+                        Annotation("End", coordinate: end, anchor: .center) {
+                            MapLocationDot(tint: .red)
+                        }
+                    }
                 }
             }
+            .simultaneousGesture(manualRouteEditGesture(proxy: proxy))
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
         .navigationTitle("Move")
@@ -316,9 +306,22 @@ struct MoveMapDetailView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 10) {
+                    if segment.usesHealthWorkoutRoute {
+                        Button {
+                            openAppleHealth()
+                        } label: {
+                            Label("Open in Apple Health", systemImage: "heart.text.square")
+                                .labelStyle(.iconOnly)
+                        }
+                        .help("Open in Apple Health")
+                    }
+
                     Button {
                         isEditingManualRoute.toggle()
                         manualRouteDrag = nil
+                        isIgnoringCurrentManualRouteGesture = false
+                        liveManualRouteMatchTask?.cancel()
+                        liveManualRouteMatchTask = nil
                     } label: {
                         Image(systemName: isEditingManualRoute ? "hand.draw.fill" : "hand.draw")
                     }
@@ -351,6 +354,11 @@ struct MoveMapDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(deleteErrorMessage)
+        }
+        .alert("Could Not Open Apple Health", isPresented: $isShowingHealthOpenError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Apple Health could not be opened from this device.")
         }
         .task(id: routeRefreshKey) {
             await refreshRouteCoordinates()
@@ -397,10 +405,33 @@ struct MoveMapDetailView: View {
         }
     }
 
+    private func openAppleHealth() {
+        guard let url = URL(string: "x-apple-health://") else { return }
+        openURL(url) { accepted in
+            if !accepted {
+                isShowingHealthOpenError = true
+            }
+        }
+    }
+
     private var moveRouteTitle: String {
         let start = segment.startPlace?.displayTitle ?? "Unknown start"
         let end = segment.endPlace?.displayTitle ?? "Unknown destination"
         return "\(start) to \(end)"
+    }
+
+    private var mapInteractionModes: MapInteractionModes {
+        isEditingManualRoute && manualRouteDrag != nil ? [.zoom] : [.pan, .zoom]
+    }
+
+    private func manualRouteEditGesture(proxy: MapProxy) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                updateManualRouteDrag(at: value.location, proxy: proxy)
+            }
+            .onEnded { value in
+                finishManualRouteDrag(at: value.location, proxy: proxy)
+            }
     }
 
     private var transportModePickerContent: some View {
@@ -485,10 +516,12 @@ struct MoveMapDetailView: View {
 
     private func updateManualRouteDrag(at point: CGPoint, proxy: MapProxy) {
         guard isEditingManualRoute, routeCoordinates.count > 1 else { return }
+        guard !isIgnoringCurrentManualRouteGesture else { return }
 
         if manualRouteDrag == nil {
             guard let nearest = nearestRoutePoint(to: point, proxy: proxy),
                   nearest.distance <= 32 else {
+                isIgnoringCurrentManualRouteGesture = true
                 return
             }
             routeBeforeManualDrag = routeCoordinates
@@ -506,6 +539,11 @@ struct MoveMapDetailView: View {
             transportMode: segment.transportMode,
             closestIndex: drag.closestRouteIndex
         )
+        scheduleLiveManualRouteMatch(
+            baseRoute: routeBeforeManualDrag,
+            draggedCoordinate: draggedCoordinate,
+            drag: drag
+        )
     }
 
     private func finishManualRouteDrag(at point: CGPoint, proxy: MapProxy) {
@@ -516,12 +554,19 @@ struct MoveMapDetailView: View {
             }
             manualRouteDrag = nil
             routeBeforeManualDrag = []
+            isIgnoringCurrentManualRouteGesture = false
+            liveManualRouteMatchTask?.cancel()
+            liveManualRouteMatchTask = nil
             return
         }
 
         let baseRoute = routeBeforeManualDrag
         manualRouteDrag = nil
         routeBeforeManualDrag = []
+        isIgnoringCurrentManualRouteGesture = false
+        manualRouteDragRevision += 1
+        liveManualRouteMatchTask?.cancel()
+        liveManualRouteMatchTask = nil
         isSavingManualRoute = true
 
         Task { @MainActor in
@@ -549,6 +594,43 @@ struct MoveMapDetailView: View {
             }
 
             isSavingManualRoute = false
+        }
+    }
+
+    private func scheduleLiveManualRouteMatch(
+        baseRoute: [CLLocationCoordinate2D],
+        draggedCoordinate: CLLocationCoordinate2D,
+        drag: ManualRouteDragState
+    ) {
+        guard segment.transportMode != .boat else { return }
+
+        manualRouteDragRevision += 1
+        let revision = manualRouteDragRevision
+        let transportMode = segment.transportMode
+
+        liveManualRouteMatchTask?.cancel()
+        liveManualRouteMatchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+            } catch {
+                return
+            }
+
+            let matched = await ManualRouteGeometry.committedCoordinates(
+                currentRoute: baseRoute,
+                draggedCoordinate: draggedCoordinate,
+                transportMode: transportMode,
+                closestIndex: drag.closestRouteIndex
+            )
+
+            guard !Task.isCancelled,
+                  revision == manualRouteDragRevision,
+                  manualRouteDrag != nil,
+                  matched.count > 1 else {
+                return
+            }
+
+            routeCoordinates = matched
         }
     }
 

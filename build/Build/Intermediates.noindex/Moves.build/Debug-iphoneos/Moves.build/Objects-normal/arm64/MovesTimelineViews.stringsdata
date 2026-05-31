@@ -1,0 +1,64 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/MovesTimelineViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "No segments for this day yet.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 210
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld location sample%@ captured. Waiting for the next visit or move.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "Grant location access above to start recording visits and movement.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 218
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day Summary",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 446
+        }
+      },
+      {
+        "comment": "",
+        "key": "No movement summary available yet.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 450
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 461
+        }
+      },
+      {
+        "comment": "",
+        "key": "Captured location",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 626
+        }
+      }
+    ]
+  },
+  "version": 1
+}

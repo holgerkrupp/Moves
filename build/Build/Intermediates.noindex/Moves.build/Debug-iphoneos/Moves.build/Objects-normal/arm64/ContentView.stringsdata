@@ -1,0 +1,160 @@
+{
+  "source": "/Users/holgerkrupp/Developer/Moves/Moves/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Moves",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 420
+        }
+      },
+      {
+        "comment": "",
+        "key": "Settings",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 429
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places   %lld moves",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 573
+        }
+      },
+      {
+        "comment": "",
+        "key": "No timeline yet",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 600
+        }
+      },
+      {
+        "comment": "",
+        "key": "Keep Moves running in the background. Visits and movement segments appear as iOS records them.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 603
+        }
+      },
+      {
+        "comment": "",
+        "key": "Jump to Date",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 950
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 846
+        }
+      },
+      {
+        "comment": "",
+        "key": "Earliest",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 859
+        }
+      },
+      {
+        "comment": "",
+        "key": "Today",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 867
+        }
+      },
+      {
+        "comment": "",
+        "key": "No matching days for this filter yet.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 910
+        }
+      },
+      {
+        "comment": "",
+        "key": "Most active days",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 877
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld places",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 927
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld moves",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 931
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 954
+        }
+      },
+      {
+        "comment": "",
+        "key": "Activity filter",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 965
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real route tracking, %@ remaining",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1474
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real route tracking",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1475
+        }
+      },
+      {
+        "comment": "",
+        "key": "Tap to open settings. Touch and hold to start tracking.",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1477
+        }
+      },
+      {
+        "comment": "",
+        "key": "Real route tracking",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 1493
+        }
+      }
+    ]
+  },
+  "version": 1
+}

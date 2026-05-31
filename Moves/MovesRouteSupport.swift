@@ -319,6 +319,13 @@ enum MoveRouteGeometry {
             .sorted(by: { $0.timestamp < $1.timestamp })
             .map(\.coordinate)
 
+        if move.usesHealthWorkoutRoute, sampleCoordinates.count > 1 {
+            return RouteCoordinateOps.dedupeSequentialCoordinates(
+                sampleCoordinates,
+                minimumDistanceMeters: rawCoordinateDedupeDistance(for: move)
+            )
+        }
+
         var coordinates: [CLLocationCoordinate2D] = []
         if let start = move.startPlace?.coordinate {
             coordinates.append(start)
@@ -335,11 +342,11 @@ enum MoveRouteGeometry {
     }
 
     static func rawCoordinateDedupeDistance(for move: MoveSegment) -> CLLocationDistance {
-        move.usesHealthWorkoutRoute ? 1 : 6
+        move.usesHealthWorkoutRoute ? 0 : 6
     }
 
     static func highAccuracyDisplayDedupeDistance(for move: MoveSegment) -> CLLocationDistance {
-        move.usesHealthWorkoutRoute ? 1 : 4
+        move.usesHealthWorkoutRoute ? 0 : 4
     }
 
     static func cacheSignature(for move: MoveSegment, fallback: [CLLocationCoordinate2D]) -> String {

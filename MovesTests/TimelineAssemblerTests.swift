@@ -221,9 +221,63 @@ final class TimelineAssemblerTests: XCTestCase {
                 dedupeKey: "health-3"
             ),
         ]
+        segment.startPlace = VisitPlace(
+            arrivalDate: startDate,
+            departureDate: startDate,
+            latitude: 52.519000,
+            longitude: 13.404000,
+            horizontalAccuracy: 20
+        )
+        segment.endPlace = VisitPlace(
+            arrivalDate: startDate.addingTimeInterval(30),
+            departureDate: nil,
+            latitude: 52.521000,
+            longitude: 13.406000,
+            horizontalAccuracy: 20
+        )
 
         XCTAssertTrue(segment.usesHealthWorkoutRoute)
-        XCTAssertEqual(MoveRouteGeometry.rawCoordinates(for: segment).count, 3)
+        let coordinates = MoveRouteGeometry.rawCoordinates(for: segment)
+        XCTAssertEqual(coordinates.count, 3)
+        XCTAssertEqual(coordinates.first?.latitude, 52.520000)
+        XCTAssertEqual(coordinates.last?.latitude, 52.520036)
+    }
+
+    func testHealthWorkoutRouteImportPreservesDenseRouteSamples() throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let startDate = Date(timeIntervalSince1970: 1_710_000_000)
+        let routeLocations = [
+            makeLocation(
+                latitude: 52.520000,
+                longitude: 13.405000,
+                speed: 1,
+                timestamp: startDate
+            ),
+            makeLocation(
+                latitude: 52.520018,
+                longitude: 13.405000,
+                speed: 1,
+                timestamp: startDate.addingTimeInterval(10)
+            ),
+            makeLocation(
+                latitude: 52.520036,
+                longitude: 13.405000,
+                speed: 1,
+                timestamp: startDate.addingTimeInterval(20)
+            ),
+        ]
+
+        let move = try repository.importRouteTrack(
+            locations: routeLocations,
+            source: .healthWorkoutRoute,
+            transportMode: .walking
+        )
+
+        XCTAssertNotNil(move)
+        guard let move else { return }
+        XCTAssertEqual(move.samples.count, 3)
+        XCTAssertEqual(MoveRouteGeometry.rawCoordinates(for: move).count, 3)
     }
 
     func testMoveSegmentRouteCacheRoundTripsAndHonorsSignatureChanges() {
