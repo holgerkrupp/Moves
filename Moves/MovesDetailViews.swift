@@ -5,6 +5,7 @@
 //  Place and move detail screens extracted from ContentView.
 //
 
+import CoreTransferable
 import Foundation
 import MapKit
 import SwiftData
@@ -218,6 +219,14 @@ struct QuickLabelButton: View {
 }
 
 struct MoveMapDetailView: View {
+    private static let exportFilenameDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+        return formatter
+    }()
+
     @EnvironmentObject private var undoController: AppUndoController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -227,6 +236,7 @@ struct MoveMapDetailView: View {
 
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
+    @State private var moveGPXShareFile: GPXShareFile?
     @State private var draftComment: String
     @State private var isShowingTransportPicker = false
     @State private var isEditingManualRoute = false
@@ -281,6 +291,9 @@ struct MoveMapDetailView: View {
 
         _camera = State(initialValue: .region(MapRegionFactory.region(for: initialRoute)))
         _routeCoordinates = State(initialValue: initialRoute)
+        _moveGPXShareFile = State(
+            initialValue: Self.makeGPXShareFile(for: segment, coordinates: initialRoute)
+        )
         _draftComment = State(initialValue: segment.comment ?? "")
     }
 
@@ -360,6 +373,8 @@ struct MoveMapDetailView: View {
                         }
                         .help("Open in Apple Health")
                     }
+
+                    moveShareButton
 
                     Button {
                         setManualRouteEditing(!isEditingManualRoute)
@@ -464,6 +479,52 @@ struct MoveMapDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private var moveShareButton: some View {
+        if let exportFile = moveGPXShareFile {
+            ShareLink(
+                item: exportFile,
+                subject: Text(moveRouteTitle),
+                message: Text("GPX route exported from Moves."),
+                preview: SharePreview(exportFile.filename)
+            ) {
+                Label("Share GPX", systemImage: "square.and.arrow.up")
+                    .labelStyle(.iconOnly)
+            }
+            .disabled(isSavingManualRoute || manualRouteDrag != nil)
+            .help("Share move as GPX")
+            .accessibilityLabel("Share move as GPX")
+        } else {
+            Button {} label: {
+                Label("Share GPX", systemImage: "square.and.arrow.up")
+                    .labelStyle(.iconOnly)
+            }
+            .disabled(true)
+            .help("A route is needed to share this move as GPX")
+            .accessibilityLabel("Share move as GPX")
+        }
+    }
+
+    private static func makeGPXShareFile(
+        for segment: MoveSegment,
+        coordinates: [CLLocationCoordinate2D]
+    ) -> GPXShareFile? {
+        let timestamp = Self.exportFilenameDateFormatter.string(from: segment.timelineStartDate)
+        guard let payload = TimelineExporter.makeMoveGPXPayload(
+            move: segment,
+            coordinates: coordinates,
+            fileStem: "moves-\(timestamp)-\(segment.transportMode.rawValue)"
+        ) else {
+            return nil
+        }
+
+        return GPXShareFile(data: payload.data, filename: payload.filename)
+    }
+
+    private func refreshMoveGPXShareFile() {
+        moveGPXShareFile = Self.makeGPXShareFile(for: segment, coordinates: routeCoordinates)
+    }
+
     private func openAppleHealth() {
         guard let url = URL(string: "x-apple-health://") else { return }
         openURL(url) { accepted in
@@ -489,6 +550,7 @@ struct MoveMapDetailView: View {
 
         do {
             try modelContext.save()
+            refreshMoveGPXShareFile()
         } catch {
             modelContext.rollback()
             draftComment = segment.comment ?? ""
@@ -572,6 +634,7 @@ struct MoveMapDetailView: View {
         segment.clearCachedRouteCoordinates()
         segment.clearManualRouteCoordinates()
         routeCoordinates = MoveRouteGeometry.rawCoordinates(for: segment)
+        refreshMoveGPXShareFile()
         manualRouteWaypointCoordinates = isEditingManualRoute
             ? ManualRouteGeometry.waypoints(for: routeCoordinates, transportMode: newMode)
             : []
@@ -586,6 +649,8 @@ struct MoveMapDetailView: View {
             segment.routeCacheSignature = previousRouteCacheSignature
             segment.routeCacheCoordinatesData = previousRouteCacheCoordinatesData
             segment.manualRouteCoordinatesData = previousManualRouteCoordinatesData
+            routeCoordinates = segment.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: segment)
+            refreshMoveGPXShareFile()
             print("Failed to save move transport mode: \(error.localizedDescription)")
         }
     }
@@ -593,6 +658,7 @@ struct MoveMapDetailView: View {
     @MainActor
     private func refreshRouteCoordinates() async {
         routeCoordinates = await RoadRouteMatcher.matchedCoordinates(for: segment)
+        refreshMoveGPXShareFile()
         if isEditingManualRoute, manualRouteDrag == nil {
             manualRouteWaypointCoordinates = ManualRouteGeometry.waypoints(
                 for: routeCoordinates,
@@ -688,6 +754,7 @@ struct MoveMapDetailView: View {
 
             segment.storeManualRouteCoordinates(committed)
             routeCoordinates = committed
+            refreshMoveGPXShareFile()
             if isEditingManualRoute {
                 manualRouteWaypointCoordinates = ManualRouteGeometry.waypoints(
                     for: committed,
@@ -700,6 +767,7 @@ struct MoveMapDetailView: View {
             } catch {
                 modelContext.rollback()
                 routeCoordinates = segment.manualRouteCoordinates ?? baseRoute
+                refreshMoveGPXShareFile()
                 print("Failed to save manual route: \(error.localizedDescription)")
             }
 

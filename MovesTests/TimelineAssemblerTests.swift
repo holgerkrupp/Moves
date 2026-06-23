@@ -393,6 +393,69 @@ final class TimelineAssemblerTests: XCTestCase {
         )
     }
 
+    func testRouteMatchRejectsAStreetRouteThatIsMuchLongerThanTheRecordedTrack() {
+        let recorded = [
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1100, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1200, longitude: 11.5000),
+        ]
+        let detour = [
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5500),
+            CLLocationCoordinate2D(latitude: 48.1200, longitude: 11.5500),
+            CLLocationCoordinate2D(latitude: 48.1200, longitude: 11.5000),
+        ]
+
+        XCTAssertFalse(
+            RouteMatchPlausibility.isAcceptable(
+                detour,
+                comparedTo: recorded,
+                transportMode: .automotive
+            )
+        )
+    }
+
+    func testRouteMatchRejectsAHighwayRouteFarFromRecordedIntermediatePoints() {
+        let recorded = [
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1500, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.6000),
+        ]
+        let endpointRoute = [
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.6000),
+        ]
+
+        XCTAssertFalse(
+            RouteMatchPlausibility.isAcceptable(
+                endpointRoute,
+                comparedTo: recorded,
+                transportMode: .automotive
+            )
+        )
+    }
+
+    func testRouteMatchAcceptsAStreetRouteCloseToRecordedPoints() {
+        let recorded = [
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1100, longitude: 11.5100),
+            CLLocationCoordinate2D(latitude: 48.1200, longitude: 11.5200),
+        ]
+        let matched = [
+            CLLocationCoordinate2D(latitude: 48.1000, longitude: 11.5000),
+            CLLocationCoordinate2D(latitude: 48.1105, longitude: 11.5105),
+            CLLocationCoordinate2D(latitude: 48.1200, longitude: 11.5200),
+        ]
+
+        XCTAssertTrue(
+            RouteMatchPlausibility.isAcceptable(
+                matched,
+                comparedTo: recorded,
+                transportMode: .automotive
+            )
+        )
+    }
+
     func testTemporaryRouteTrackingEndOfDayFallsBackToTheStartOfTomorrow() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

@@ -1,5 +1,6 @@
-import Foundation
 import CoreLocation
+import CoreTransferable
+import Foundation
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -1083,6 +1084,26 @@ struct TimelineExportDocument: FileDocument {
     }
 }
 
+struct GPXShareFile: Transferable {
+    let data: Data
+    let filename: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .xml) { file in
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+
+            let url = directory.appending(path: file.filename)
+            try file.data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        }
+    }
+}
+
 enum TimelineExporter {
     private static let iso8601: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -1112,6 +1133,95 @@ enum TimelineExporter {
             data: exportData,
             filename: "\(fileStem).\(format.fileExtension)",
             contentType: format.contentType
+        )
+    }
+
+    static func makeMoveGPXPayload(
+        move: MoveSegment,
+        coordinates: [CLLocationCoordinate2D],
+        fileStem: String
+    ) -> TimelineExportPayload? {
+        let points = routePoints(
+            for: coordinates,
+            startDate: move.timelineStartDate,
+            endDate: move.endDate
+        )
+        guard points.count > 1 else { return nil }
+
+        let startTitle = move.startPlace?.displayTitle ?? "Unknown start"
+        let endTitle = move.endPlace?.displayTitle ?? "Unknown destination"
+        let trackName = "\(startTitle) to \(endTitle)"
+
+        var xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" creator="Moves iOS Rebuild" xmlns="http://www.topografix.com/GPX/1/1">
+          <metadata>
+            <name>\(xmlEscaped(trackName))</name>
+            <time>\(iso8601.string(from: move.timelineStartDate))</time>
+          </metadata>
+        """
+
+        if let startPlace = move.startPlace {
+            xml += """
+
+              <wpt lat="\(coordinateString(startPlace.latitude))" lon="\(coordinateString(startPlace.longitude))">
+                <name>\(xmlEscaped(startTitle))</name>
+                <time>\(iso8601.string(from: move.timelineStartDate))</time>
+              </wpt>
+            """
+        }
+
+        if let endPlace = move.endPlace {
+            xml += """
+
+              <wpt lat="\(coordinateString(endPlace.latitude))" lon="\(coordinateString(endPlace.longitude))">
+                <name>\(xmlEscaped(endTitle))</name>
+                <time>\(iso8601.string(from: move.endDate))</time>
+              </wpt>
+            """
+        }
+
+        xml += """
+
+          <trk>
+            <name>\(xmlEscaped(trackName))</name>
+            <type>\(xmlEscaped(move.transportMode.title))</type>
+        """
+
+        if let comment = move.comment?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !comment.isEmpty {
+            xml += """
+
+                <desc>\(xmlEscaped(comment))</desc>
+            """
+        }
+
+        xml += """
+
+            <trkseg>
+        """
+
+        for point in points {
+            xml += """
+
+              <trkpt lat="\(coordinateString(point.latitude))" lon="\(coordinateString(point.longitude))">
+                <time>\(iso8601.string(from: point.timestamp))</time>
+              </trkpt>
+            """
+        }
+
+        xml += """
+
+            </trkseg>
+          </trk>
+        </gpx>
+        """
+
+        guard let data = xml.data(using: .utf8) else { return nil }
+        return TimelineExportPayload(
+            data: data,
+            filename: "\(fileStem).gpx",
+            contentType: .xml
         )
     }
 
@@ -1363,6 +1473,45 @@ enum TimelineExporter {
 
         let sortedPoints = points.sorted(by: { $0.timestamp < $1.timestamp })
         return dedupeSequentialPoints(in: sortedPoints)
+    }
+
+    private static func routePoints(
+        for coordinates: [CLLocationCoordinate2D],
+        startDate: Date,
+        endDate: Date
+    ) -> [TimelineTrackPoint] {
+        let coordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+            coordinates,
+            minimumDistanceMeters: 0.01
+        )
+        guard coordinates.count > 1 else { return [] }
+
+        let segmentDistances = zip(coordinates, coordinates.dropFirst()).map {
+            RouteCoordinateOps.distanceMeters(from: $0.0, to: $0.1)
+        }
+        let totalDistance = segmentDistances.reduce(0, +)
+        let duration = max(endDate.timeIntervalSince(startDate), 0)
+        var distanceTravelled: CLLocationDistance = 0
+
+        return coordinates.enumerated().map { index, coordinate in
+            if index > 0 {
+                distanceTravelled += segmentDistances[index - 1]
+            }
+
+            let fraction: Double
+            if totalDistance > 0 {
+                fraction = distanceTravelled / totalDistance
+            } else {
+                fraction = Double(index) / Double(coordinates.count - 1)
+            }
+
+            return TimelineTrackPoint(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+                elevation: nil,
+                timestamp: startDate.addingTimeInterval(duration * fraction)
+            )
+        }
     }
 
     private static func dedupeSequentialPoints(in points: [TimelineTrackPoint]) -> [TimelineTrackPoint] {

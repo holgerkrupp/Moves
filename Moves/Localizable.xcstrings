@@ -37,6 +37,9 @@
         }
       }
     },
+    "A route is needed to share this move as GPX" : {
+
+    },
     "Activity filter" : {
 
     },
@@ -142,6 +145,9 @@
     "File Route Import" : {
 
     },
+    "GPX route exported from Moves." : {
+
+    },
     "Grant location access above to start recording visits and movement." : {
 
     },
@@ -173,6 +179,9 @@
 
     },
     "Move" : {
+
+    },
+    "Move remarks" : {
 
     },
     "Moves" : {
@@ -217,6 +226,9 @@
     "Place" : {
 
     },
+    "Place remarks" : {
+
+    },
     "Real route tracking" : {
 
     },
@@ -226,6 +238,9 @@
     "Real route tracking, %@ remaining" : {
 
     },
+    "Remarks" : {
+
+    },
     "Revert" : {
 
     },
@@ -233,6 +248,12 @@
 
     },
     "Settings" : {
+
+    },
+    "Share GPX" : {
+
+    },
+    "Share move as GPX" : {
 
     },
     "Show big map markers" : {

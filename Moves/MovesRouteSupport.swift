@@ -312,7 +312,7 @@ enum MapRegionFactory {
 }
 
 enum MoveRouteGeometry {
-    private static let routeMatchingVersion = "route-v8-intermediate-anchors"
+    private static let routeMatchingVersion = "route-v9-plausibility-fallback"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         let sampleCoordinates = move.samples.preferredRouteDisplaySamples
@@ -448,20 +448,51 @@ enum RouteCoordinateOps {
         from coordinates: [CLLocationCoordinate2D],
         maximumCount: Int
     ) -> [CLLocationCoordinate2D] {
-        guard coordinates.count > maximumCount, maximumCount > 1 else {
-            return coordinates
+        sampleAnchorIndices(from: coordinates, maximumCount: maximumCount)
+            .map { coordinates[$0] }
+    }
+
+    static func sampleAnchorIndices(
+        from coordinates: [CLLocationCoordinate2D],
+        maximumCount: Int
+    ) -> [Int] {
+        guard !coordinates.isEmpty else { return [] }
+        guard maximumCount > 1 else { return [coordinates.startIndex] }
+        guard coordinates.count > maximumCount else {
+            return Array(coordinates.indices)
         }
 
         let step = Double(coordinates.count - 1) / Double(maximumCount - 1)
-        var anchors: [CLLocationCoordinate2D] = []
-        anchors.reserveCapacity(maximumCount)
+        var sampledIndices: [Int] = []
+        sampledIndices.reserveCapacity(maximumCount)
 
         for index in 0..<maximumCount {
             let rawIndex = Int((Double(index) * step).rounded(.toNearestOrAwayFromZero))
-            anchors.append(coordinates[min(rawIndex, coordinates.count - 1)])
+            sampledIndices.append(min(rawIndex, coordinates.count - 1))
         }
 
-        return dedupeSequentialCoordinates(anchors, minimumDistanceMeters: 25)
+        var dedupedIndices: [Int] = []
+        dedupedIndices.reserveCapacity(sampledIndices.count)
+
+        for index in sampledIndices {
+            guard dedupedIndices.last != index else { continue }
+
+            let isEndpoint = index == coordinates.startIndex || index == coordinates.index(before: coordinates.endIndex)
+            if !isEndpoint,
+               let previousIndex = dedupedIndices.last,
+               distanceMeters(from: coordinates[previousIndex], to: coordinates[index]) < 25 {
+                continue
+            }
+
+            dedupedIndices.append(index)
+        }
+
+        let lastIndex = coordinates.index(before: coordinates.endIndex)
+        if dedupedIndices.last != lastIndex {
+            dedupedIndices.append(lastIndex)
+        }
+
+        return dedupedIndices
     }
 
     static func append(_ coordinates: [CLLocationCoordinate2D], to route: inout [CLLocationCoordinate2D]) {
@@ -487,6 +518,147 @@ enum RouteCoordinateOps {
     ) -> CLLocationDistance {
         CLLocation(latitude: lhs.latitude, longitude: lhs.longitude)
             .distance(from: CLLocation(latitude: rhs.latitude, longitude: rhs.longitude))
+    }
+}
+
+enum RouteMatchPlausibility {
+    static func isAcceptable(
+        _ matched: [CLLocationCoordinate2D],
+        comparedTo recorded: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) -> Bool {
+        guard matched.count > 1 else { return false }
+        guard recorded.count > 2 else { return true }
+
+        let recordedDistance = routeDistance(for: recorded)
+        guard recordedDistance >= 50 else { return true }
+
+        let matchedDistance = routeDistance(for: matched)
+        let maximumDistance = max(
+            recordedDistance * maximumLengthRatio(for: transportMode),
+            recordedDistance + absoluteLengthAllowance(for: transportMode)
+        )
+        guard matchedDistance <= maximumDistance else {
+            return false
+        }
+
+        let maximumDeviation = maximumRecordedPointDeviation(
+            recorded,
+            from: matched
+        )
+        return maximumDeviation <= corridorAllowance(for: transportMode)
+    }
+
+    static func selectionScore(
+        for matched: [CLLocationCoordinate2D],
+        comparedTo recorded: [CLLocationCoordinate2D]
+    ) -> CLLocationDistance {
+        guard !recorded.isEmpty else {
+            return routeDistance(for: matched)
+        }
+
+        let meanDeviation = recorded.reduce(0) { partialResult, coordinate in
+            partialResult + minimumDistance(from: coordinate, to: matched)
+        } / Double(recorded.count)
+        let lengthDifference = abs(routeDistance(for: matched) - routeDistance(for: recorded))
+        return meanDeviation + (lengthDifference * 0.05)
+    }
+
+    private static func maximumRecordedPointDeviation(
+        _ recorded: [CLLocationCoordinate2D],
+        from matched: [CLLocationCoordinate2D]
+    ) -> CLLocationDistance {
+        let intermediatePoints = recorded.dropFirst().dropLast()
+        return intermediatePoints.reduce(0) { maximum, coordinate in
+            max(maximum, minimumDistance(from: coordinate, to: matched))
+        }
+    }
+
+    private static func minimumDistance(
+        from coordinate: CLLocationCoordinate2D,
+        to polyline: [CLLocationCoordinate2D]
+    ) -> CLLocationDistance {
+        guard let first = polyline.first else {
+            return .greatestFiniteMagnitude
+        }
+        guard polyline.count > 1 else {
+            return RouteCoordinateOps.distanceMeters(from: coordinate, to: first)
+        }
+
+        let point = MKMapPoint(coordinate)
+        var minimumDistance = CLLocationDistance.greatestFiniteMagnitude
+
+        for pair in zip(polyline, polyline.dropFirst()) {
+            let start = MKMapPoint(pair.0)
+            let end = MKMapPoint(pair.1)
+            let deltaX = end.x - start.x
+            let deltaY = end.y - start.y
+            let squaredLength = (deltaX * deltaX) + (deltaY * deltaY)
+
+            let projection: MKMapPoint
+            if squaredLength == 0 {
+                projection = start
+            } else {
+                let rawFraction = (
+                    ((point.x - start.x) * deltaX) +
+                    ((point.y - start.y) * deltaY)
+                ) / squaredLength
+                let fraction = min(max(rawFraction, 0), 1)
+                projection = MKMapPoint(
+                    x: start.x + (deltaX * fraction),
+                    y: start.y + (deltaY * fraction)
+                )
+            }
+
+            minimumDistance = min(minimumDistance, point.distance(to: projection))
+        }
+
+        return minimumDistance
+    }
+
+    private static func maximumLengthRatio(for mode: TransportMode) -> Double {
+        switch mode {
+        case .walking, .running:
+            return 1.45
+        case .cycling:
+            return 1.5
+        case .automotive:
+            return 1.5
+        case .train:
+            return 1.8
+        case .swimming, .plane, .boat, .stationary, .unknown:
+            return 2
+        }
+    }
+
+    private static func absoluteLengthAllowance(for mode: TransportMode) -> CLLocationDistance {
+        switch mode {
+        case .walking, .running:
+            return 500
+        case .cycling:
+            return 800
+        case .automotive:
+            return 1_500
+        case .train:
+            return 3_000
+        case .swimming, .plane, .boat, .stationary, .unknown:
+            return 1_500
+        }
+    }
+
+    private static func corridorAllowance(for mode: TransportMode) -> CLLocationDistance {
+        switch mode {
+        case .walking, .running:
+            return 350
+        case .cycling:
+            return 500
+        case .automotive:
+            return 1_000
+        case .train:
+            return 2_500
+        case .swimming, .plane, .boat, .stationary, .unknown:
+            return 1_000
+        }
     }
 }
 
@@ -844,22 +1016,28 @@ enum RoadRouteMatcher {
             return (fallback, true)
         }
 
-        let anchors = anchorsOverride ?? routeAnchors(for: fallback, transportMode: transportMode)
-        guard anchors.count > 1 else {
+        let anchorIndices = anchorsOverride == nil
+            ? routeAnchorIndices(for: fallback, transportMode: transportMode)
+            : Array(fallback.indices)
+        guard anchorIndices.count > 1 else {
             return (fallback, true)
         }
 
         var matchedCoordinates: [CLLocationCoordinate2D] = []
         var matchedSegmentCount = 0
         var attemptedNetworkMatch = false
+        var sawRouteCandidate = false
 
-        for pair in zip(anchors, anchors.dropFirst()) {
-            let start = pair.0
-            let end = pair.1
+        for pair in zip(anchorIndices, anchorIndices.dropFirst()) {
+            let startIndex = pair.0
+            let endIndex = pair.1
+            let start = fallback[startIndex]
+            let end = fallback[endIndex]
+            let recordedSegment = Array(fallback[startIndex...endIndex])
             let segmentDistance = RouteCoordinateOps.distanceMeters(from: start, to: end)
 
             if segmentDistance < minimumMatchDistance(for: transportMode) {
-                RouteCoordinateOps.append([start, end], to: &matchedCoordinates)
+                RouteCoordinateOps.append(recordedSegment, to: &matchedCoordinates)
                 continue
             }
 
@@ -867,8 +1045,11 @@ enum RoadRouteMatcher {
             let segmentResult = await routeSegment(
                 from: start,
                 to: end,
-                transportTypes: transportTypes
+                transportTypes: transportTypes,
+                recordedSegment: recordedSegment,
+                transportMode: transportMode
             )
+            sawRouteCandidate = sawRouteCandidate || segmentResult.hadRouteCandidates
 
             if segmentResult.throttled {
                 // Throttling is temporary; return fallback but avoid persisting it as "final".
@@ -879,53 +1060,46 @@ enum RoadRouteMatcher {
                 matchedSegmentCount += 1
                 RouteCoordinateOps.append(snappedSegment, to: &matchedCoordinates)
             } else {
-                RouteCoordinateOps.append([start, end], to: &matchedCoordinates)
+                // Preserve every recorded point when no street route can follow this segment.
+                RouteCoordinateOps.append(recordedSegment, to: &matchedCoordinates)
             }
         }
 
         if matchedSegmentCount > 0 {
-            return (
-                RouteCoordinateOps.dedupeSequentialCoordinates(
+            let resolvedCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
                 matchedCoordinates,
                 minimumDistanceMeters: 6
-                ),
-                true
             )
+
+            if RouteMatchPlausibility.isAcceptable(
+                resolvedCoordinates,
+                comparedTo: fallback,
+                transportMode: transportMode
+            ) {
+                return (resolvedCoordinates, true)
+            }
+
+            return (fallback, true)
         }
 
-        // If sampled anchors all failed, retry once with direct endpoints.
-        if anchors.count > 2,
-           let start = anchors.first,
-           let end = anchors.last {
-            attemptedNetworkMatch = true
-            let directResult = await routeSegment(
-                from: start,
-                to: end,
-                transportTypes: transportTypes
-            )
-            if directResult.throttled {
-                return (fallback, false)
-            }
-            if let directCoordinates = directResult.coordinates {
-                return (
-                    RouteCoordinateOps.dedupeSequentialCoordinates(
-                        directCoordinates,
-                        minimumDistanceMeters: 6
-                    ),
-                    true
-                )
-            }
-        }
-
-        // If we tried to match but got no route, don't persist this fallback permanently.
-        return (fallback, !attemptedNetworkMatch)
+        // A returned-but-implausible route is a stable reason to keep the raw track.
+        // Pure network failures remain transient so they can be retried later.
+        return (fallback, sawRouteCandidate || !attemptedNetworkMatch)
     }
 
     static func routeAnchors(
         for fallback: [CLLocationCoordinate2D],
         transportMode: TransportMode
     ) -> [CLLocationCoordinate2D] {
-        RouteCoordinateOps.sampleAnchors(
+        routeAnchorIndices(for: fallback, transportMode: transportMode)
+            .map { fallback[$0] }
+    }
+
+    static func routeAnchorIndices(
+        for fallback: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) -> [Int] {
+        RouteCoordinateOps.sampleAnchorIndices(
             from: fallback,
             maximumCount: anchorLimit(for: transportMode)
         )
@@ -934,36 +1108,58 @@ enum RoadRouteMatcher {
     private static func routeSegment(
         from start: CLLocationCoordinate2D,
         to end: CLLocationCoordinate2D,
-        transportTypes: [MKDirectionsTransportType]
-    ) async -> (coordinates: [CLLocationCoordinate2D]?, throttled: Bool) {
+        transportTypes: [MKDirectionsTransportType],
+        recordedSegment: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) async -> (
+        coordinates: [CLLocationCoordinate2D]?,
+        throttled: Bool,
+        hadRouteCandidates: Bool
+    ) {
+        var hadRouteCandidates = false
+
         for transportType in transportTypes {
             guard await DirectionsRequestLimiter.shared.reserveSlot() else {
-                return (nil, true)
+                return (nil, true, hadRouteCandidates)
             }
 
             let request = MKDirections.Request()
             request.source = mapItem(for: start)
             request.destination = mapItem(for: end)
             request.transportType = transportType
-            request.requestsAlternateRoutes = false
+            request.requestsAlternateRoutes = true
 
             do {
                 let response = try await MKDirections(request: request).calculate()
-                guard let route = response.routes.first else { continue }
-                let coordinates = route.polyline.allCoordinates
-                if coordinates.count > 1 {
-                    return (coordinates, false)
+                let candidates = response.routes.compactMap { route -> [CLLocationCoordinate2D]? in
+                    let coordinates = route.polyline.allCoordinates
+                    return coordinates.count > 1 ? coordinates : nil
+                }
+                hadRouteCandidates = hadRouteCandidates || !candidates.isEmpty
+
+                let acceptableCandidates = candidates.filter {
+                    RouteMatchPlausibility.isAcceptable(
+                        $0,
+                        comparedTo: recordedSegment,
+                        transportMode: transportMode
+                    )
+                }
+                if let bestCandidate = acceptableCandidates.min(by: { lhs, rhs in
+                    RouteMatchPlausibility.selectionScore(for: lhs, comparedTo: recordedSegment)
+                        < RouteMatchPlausibility.selectionScore(for: rhs, comparedTo: recordedSegment)
+                }) {
+                    return (bestCandidate, false, hadRouteCandidates)
                 }
             } catch {
                 let throttled = await DirectionsRequestLimiter.shared.registerFailure(error)
                 if throttled {
-                    return (nil, true)
+                    return (nil, true, hadRouteCandidates)
                 }
                 continue
             }
         }
 
-        return (nil, false)
+        return (nil, false, hadRouteCandidates)
     }
 
     private static func mapItem(for coordinate: CLLocationCoordinate2D) -> MKMapItem {
@@ -1024,7 +1220,7 @@ enum RoadRouteMatcher {
         case .swimming:
             return 4
         case .automotive:
-            return 4
+            return 6
         case .train:
             return 5
         case .plane:
