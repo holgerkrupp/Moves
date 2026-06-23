@@ -92,12 +92,39 @@ struct DayTimelinePageContent: View {
 
     @State private var provisionalSampleResolvedTitle: String?
     @State private var provisionalSampleResolvedKey: String?
+    @State private var presentationCache: DayTimelinePresentationCache
+
+    init(dayTimeline: DayTimeline, isActive: Bool) {
+        self.dayTimeline = dayTimeline
+        self.isActive = isActive
+        _presentationCache = State(initialValue: Self.makePresentationCache(for: dayTimeline))
+    }
 
     private var liveRouteSnapshot: LiveRouteTrackingSnapshot? {
         liveRouteTrackingSnapshot(for: dayTimeline, captureManager: captureManager)
     }
 
     private var timelineEntries: [TimelineEntry] {
+        var entries = presentationCache.timelineEntries
+
+        if entries.isEmpty, let latestSample = presentationCache.latestSample {
+            entries.append(
+                .sample(
+                    location: latestSample,
+                    sampleCount: presentationCache.sortedSamples.count,
+                    resolvedName: provisionalSampleTitle(for: latestSample)
+                )
+            )
+        }
+
+        if let liveRouteSnapshot {
+            entries.append(.liveRoute(liveRouteSnapshot))
+        }
+
+        return entries
+    }
+
+    private static func makePresentationCache(for dayTimeline: DayTimeline) -> DayTimelinePresentationCache {
         let places = dayTimeline.places
             .filter { !shouldHidePlaceFromTimeline($0) }
             .map(TimelineEntry.place)
@@ -128,24 +155,16 @@ struct DayTimelinePageContent: View {
             }
         }
 
-        if entries.isEmpty, let latestSample = samples.last {
-            entries.append(
-                .sample(
-                    location: latestSample,
-                    sampleCount: samples.count,
-                    resolvedName: provisionalSampleTitle(for: latestSample)
-                )
-            )
-        }
-
-        if let liveRouteSnapshot {
-            entries.append(.liveRoute(liveRouteSnapshot))
-        }
-
-        return entries
+        return DayTimelinePresentationCache(
+            timelineEntries: entries,
+            transportSummaryMetrics: transportSummaryMetrics(for: dayTimeline),
+            sortedSamples: samples
+        )
     }
 
-    private func shouldHidePlaceFromTimeline(_ place: VisitPlace) -> Bool {
+    private static func shouldHidePlaceFromTimeline(_ place: VisitPlace) -> Bool {
+        guard let dayTimeline = place.dayTimeline else { return false }
+
         if hasExplicitUserLabel(place) {
             return false
         }
@@ -166,11 +185,15 @@ struct DayTimelinePageContent: View {
         return isShortTransitStop && hasIncomingMove && hasOutgoingMove
     }
 
-    private func hasExplicitUserLabel(_ place: VisitPlace) -> Bool {
+    private static func hasExplicitUserLabel(_ place: VisitPlace) -> Bool {
         !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     private var transportSummaryMetrics: [DayTransportSummaryMetric] {
+        presentationCache.transportSummaryMetrics
+    }
+
+    private static func transportSummaryMetrics(for dayTimeline: DayTimeline) -> [DayTransportSummaryMetric] {
         var durationByBucket: [DayTransportBucket: TimeInterval] = [:]
         var distanceByBucket: [DayTransportBucket: CLLocationDistance] = [:]
 
@@ -238,6 +261,9 @@ struct DayTimelinePageContent: View {
         .task(id: provisionalSampleLookupKey) {
             await resolveProvisionalSampleTitle()
         }
+        .onChange(of: dayTimeline.dayKey) { _, _ in
+            presentationCache = Self.makePresentationCache(for: dayTimeline)
+        }
     }
 
     private var timelineList: some View {
@@ -288,22 +314,20 @@ struct DayTimelinePageContent: View {
     }
 
     private var provisionalSampleLookupKey: String {
-        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
-        guard let latestSample = samples.last else { return "none" }
-        return Self.sampleLookupKey(for: latestSample, sampleCount: samples.count)
+        guard let latestSample = presentationCache.latestSample else { return "none" }
+        return Self.sampleLookupKey(for: latestSample, sampleCount: presentationCache.sortedSamples.count)
     }
 
     private func provisionalSampleTitle(for sample: LocationSample) -> String? {
-        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
-        let key = Self.sampleLookupKey(for: sample, sampleCount: samples.count)
+        let key = Self.sampleLookupKey(for: sample, sampleCount: presentationCache.sortedSamples.count)
         guard provisionalSampleResolvedKey == key else { return nil }
         return provisionalSampleResolvedTitle
     }
 
     @MainActor
     private func resolveProvisionalSampleTitle() async {
-        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
-        guard let latestSample = samples.last else {
+        let samples = presentationCache.sortedSamples
+        guard let latestSample = presentationCache.latestSample else {
             provisionalSampleResolvedKey = nil
             provisionalSampleResolvedTitle = nil
             return
@@ -325,6 +349,16 @@ struct DayTimelinePageContent: View {
     private static func sampleLookupKey(for sample: LocationSample, sampleCount: Int) -> String {
         let timestamp = Int(sample.timestamp.timeIntervalSince1970.rounded())
         return "\(sample.dedupeKey)|\(timestamp)|\(sampleCount)"
+    }
+}
+
+private struct DayTimelinePresentationCache {
+    let timelineEntries: [TimelineEntry]
+    let transportSummaryMetrics: [DayTransportSummaryMetric]
+    let sortedSamples: [LocationSample]
+
+    var latestSample: LocationSample? {
+        sortedSamples.last
     }
 }
 
@@ -506,6 +540,55 @@ struct DayTransportSummaryView: View {
     }
 }
 
+private struct DayMapPresentationCache {
+    let placeMarkers: [PlaceMarker]
+    let latestSampleCoordinate: CLLocationCoordinate2D?
+    let routeRefreshKey: String
+    let placeRefreshKey: String
+    let latestSampleKey: String
+}
+
+private struct DayMapRouteCacheEntry {
+    let routes: [RenderedRoute]
+    let isFullyMatched: Bool
+}
+
+@MainActor
+private enum DayMapRouteCache {
+    private static var entries: [String: DayMapRouteCacheEntry] = [:]
+    private static var keysInUseOrder: [String] = []
+    private static let maximumEntryCount = 18
+
+    static func routes(for key: String) -> DayMapRouteCacheEntry? {
+        guard let entry = entries[key] else { return nil }
+        markRecentlyUsed(key)
+        return entry
+    }
+
+    static func store(_ routes: [RenderedRoute], for key: String, isFullyMatched: Bool) {
+        if let existing = entries[key], existing.isFullyMatched, !isFullyMatched {
+            markRecentlyUsed(key)
+            return
+        }
+
+        entries[key] = DayMapRouteCacheEntry(routes: routes, isFullyMatched: isFullyMatched)
+        markRecentlyUsed(key)
+        trimIfNeeded()
+    }
+
+    private static func markRecentlyUsed(_ key: String) {
+        keysInUseOrder.removeAll { $0 == key }
+        keysInUseOrder.append(key)
+    }
+
+    private static func trimIfNeeded() {
+        while keysInUseOrder.count > maximumEntryCount {
+            let oldest = keysInUseOrder.removeFirst()
+            entries.removeValue(forKey: oldest)
+        }
+    }
+}
+
 struct DayMapStrip: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
@@ -515,11 +598,10 @@ struct DayMapStrip: View {
 
     @State private var camera: MapCameraPosition
     @State private var historicalRoutes: [RenderedRoute]
+    @State private var presentationCache: DayMapPresentationCache
 
     private var placeMarkers: [PlaceMarker] {
-        dayTimeline.places
-            .sorted(by: { $0.arrivalDate < $1.arrivalDate })
-            .map { PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate) }
+        presentationCache.placeMarkers
     }
 
     private var liveRouteSnapshot: LiveRouteTrackingSnapshot? {
@@ -527,10 +609,7 @@ struct DayMapStrip: View {
     }
 
     private var latestSampleCoordinate: CLLocationCoordinate2D? {
-        dayTimeline.samples
-            .sorted(by: { $0.timestamp < $1.timestamp })
-            .last?
-            .coordinate
+        presentationCache.latestSampleCoordinate
     }
 
     private var historicalRouteCoordinates: [CLLocationCoordinate2D] {
@@ -538,53 +617,32 @@ struct DayMapStrip: View {
     }
 
     private var historicalRouteRefreshKey: String {
-        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
-        return sortedMoves.map { move in
-            let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
-            let end = Int(move.endDate.timeIntervalSince1970.rounded())
-            let sampleKey = Self.refreshSampleKey(for: move.samples)
-
-            return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(sampleKey)"
-        }
-        .joined(separator: ",")
+        presentationCache.routeRefreshKey
     }
 
     private var cameraRefreshKey: String {
-        let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
-        let placeKey = sortedPlaces.map { place in
-            let arrival = Int(place.arrivalDate.timeIntervalSince1970.rounded())
-            let departure = Int((place.departureDate ?? place.arrivalDate).timeIntervalSince1970.rounded())
-            return "\(place.id.uuidString)|\(arrival)|\(departure)"
-        }
-        .joined(separator: ",")
-
-        let latestSampleKey = dayTimeline.samples
-            .sorted(by: { $0.timestamp < $1.timestamp })
-            .last
-            .map { sample in
-                "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
-            }
-            ?? "none"
-
         let liveKey = liveRouteSnapshot?.id ?? "none"
-        return [historicalRouteRefreshKey, placeKey, liveKey, latestSampleKey].joined(separator: "|")
+        return [presentationCache.routeRefreshKey, presentationCache.placeRefreshKey, liveKey, presentationCache.latestSampleKey].joined(separator: "|")
     }
 
     init(dayTimeline: DayTimeline, isActive: Bool) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
 
-        let renderedRoutes = Self.renderedRoutes(for: dayTimeline)
+        let cache = Self.makePresentationCache(for: dayTimeline)
+        let cachedRoutes = DayMapRouteCache.routes(for: cache.routeRefreshKey)
+        let renderedRoutes = cachedRoutes?.routes ?? Self.renderedRoutes(for: dayTimeline)
         let allCoordinates = Self.allCoordinates(
             for: dayTimeline,
             routeCoordinates: renderedRoutes.flatMap { $0.coordinates },
             liveRouteCoordinates: []
         )
         let cameraCoordinates = allCoordinates.isEmpty
-            ? Self.latestSampleCoordinate(for: dayTimeline).map { [$0] } ?? []
+            ? cache.latestSampleCoordinate.map { [$0] } ?? []
             : allCoordinates
         _camera = State(initialValue: .region(MapRegionFactory.region(for: cameraCoordinates)))
         _historicalRoutes = State(initialValue: renderedRoutes)
+        _presentationCache = State(initialValue: cache)
     }
 
     var body: some View {
@@ -646,10 +704,19 @@ struct DayMapStrip: View {
         .task(id: cameraRefreshKey) {
             refreshCamera()
         }
+        .onChange(of: dayTimeline.dayKey) { _, _ in
+            presentationCache = Self.makePresentationCache(for: dayTimeline)
+        }
     }
 
     @MainActor
     private func refreshHistoricalRouteCoordinates() async {
+        if let cached = DayMapRouteCache.routes(for: historicalRouteRefreshKey), cached.isFullyMatched {
+            historicalRoutes = cached.routes
+            refreshCamera()
+            return
+        }
+
         let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
         var renderedRoutes: [RenderedRoute] = []
         renderedRoutes.reserveCapacity(sortedMoves.count)
@@ -668,6 +735,7 @@ struct DayMapStrip: View {
         }
 
         historicalRoutes = renderedRoutes
+        DayMapRouteCache.store(renderedRoutes, for: historicalRouteRefreshKey, isFullyMatched: true)
         if modelContext.hasChanges {
             do {
                 try modelContext.save()
@@ -687,7 +755,7 @@ struct DayMapStrip: View {
             liveRouteCoordinates: liveCoordinates
         )
         let cameraCoordinates = allCoordinates.isEmpty
-            ? Self.latestSampleCoordinate(for: dayTimeline).map { [$0] } ?? []
+            ? presentationCache.latestSampleCoordinate.map { [$0] } ?? []
             : allCoordinates
 
         if !cameraCoordinates.isEmpty {
@@ -696,7 +764,7 @@ struct DayMapStrip: View {
     }
 
     private static func renderedRoutes(for dayTimeline: DayTimeline) -> [RenderedRoute] {
-        dayTimeline.moves
+        let renderedRoutes = dayTimeline.moves
             .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
             .map { move in
                 let fallback = MoveRouteGeometry.rawCoordinates(for: move)
@@ -710,6 +778,12 @@ struct DayMapStrip: View {
                     transportMode: move.transportMode
                 )
             }
+        DayMapRouteCache.store(
+            renderedRoutes,
+            for: routeRefreshKey(for: dayTimeline),
+            isFullyMatched: false
+        )
+        return renderedRoutes
     }
 
     private static func allCoordinates(
@@ -726,6 +800,56 @@ struct DayMapStrip: View {
             .sorted(by: { $0.timestamp < $1.timestamp })
             .last?
             .coordinate
+    }
+
+    private static func makePresentationCache(for dayTimeline: DayTimeline) -> DayMapPresentationCache {
+        let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
+        let placeMarkers = sortedPlaces.map {
+            PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate)
+        }
+        let placeRefreshKey = sortedPlaces.map { place in
+            let arrival = Int(place.arrivalDate.timeIntervalSince1970.rounded())
+            let departure = Int((place.departureDate ?? place.arrivalDate).timeIntervalSince1970.rounded())
+            return "\(place.id.uuidString)|\(arrival)|\(departure)"
+        }
+        .joined(separator: ",")
+
+        let sortedSamples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        let latestSample = sortedSamples.last
+        let latestSampleKey = latestSample.map { sample in
+            "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
+        } ?? "none"
+
+        return DayMapPresentationCache(
+            placeMarkers: placeMarkers,
+            latestSampleCoordinate: latestSample?.coordinate,
+            routeRefreshKey: routeRefreshKey(for: dayTimeline),
+            placeRefreshKey: placeRefreshKey,
+            latestSampleKey: latestSampleKey
+        )
+    }
+
+    private static func routeRefreshKey(for dayTimeline: DayTimeline) -> String {
+        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+        return sortedMoves.map { move in
+            let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
+            let end = Int(move.endDate.timeIntervalSince1970.rounded())
+            let sampleKey = Self.refreshSampleKey(for: move.samples)
+
+            return "\(move.id.uuidString)|\(move.transportMode.rawValue)|\(start)|\(end)|\(sampleKey)|\(routeStateKey(for: move))"
+        }
+        .joined(separator: ",")
+    }
+
+    private static func routeStateKey(for move: MoveSegment) -> String {
+        if let manualData = move.manualRouteCoordinatesData {
+            var hasher = Hasher()
+            hasher.combine(manualData.count)
+            hasher.combine(manualData)
+            return "manual:\(hasher.finalize())"
+        }
+
+        return "calculated:\(move.routeCacheSignature ?? "none")"
     }
 
     private static func refreshSampleKey(for samples: [LocationSample]) -> String {

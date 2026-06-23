@@ -13,137 +13,142 @@
 				<key>testAddOrUpdateVisitDeduplicatesNearlyIdenticalVisits</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.017470955848693848</real>
+					<real>0.027546048164367676</real>
 				</dict>
 				<key>testClassifierDoesNotMarkLongDistanceAsStationaryWhenSpeedIsZero</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.014297008514404297</real>
+					<real>0.0017690658569335938</real>
 				</dict>
 				<key>testClassifierFallsBackToSpeedWhenMotionDataIsUnavailable</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0063790082931518555</real>
+					<real>0.00072991847991943359</real>
 				</dict>
 				<key>testClassifierInfersPlaneFromVeryHighSpeed</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0032249689102172852</real>
+					<real>0.00063097476959228516</real>
 				</dict>
 				<key>testClassifierInfersTrainFromHigherSustainedSpeed</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0011780261993408203</real>
+					<real>0.00063300132751464844</real>
 				</dict>
 				<key>testDayTimelineCountsRepeatedVisitsToTheSameLocationOnce</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0012559890747070312</real>
+					<real>0.0059080123901367188</real>
 				</dict>
 				<key>testDeleteMoveUndoRegistrationRestoresMoveSnapshot</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.013580918312072754</real>
+					<real>0.011363029479980469</real>
 				</dict>
 				<key>testHealthWorkoutRouteGeometryKeepsCloseSpacedPoints</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0023900270462036133</real>
+					<real>0.0022960901260375977</real>
+				</dict>
+				<key>testHealthWorkoutRouteImportPreservesDenseRouteSamples</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.013805031776428223</real>
 				</dict>
 				<key>testHistoricalDeduplicationKeepsDuplicateStayThatFitsSurroundingMoves</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.009387969970703125</real>
+					<real>0.010145902633666992</real>
 				</dict>
 				<key>testHistoricalDeduplicationKeepsLongerDuplicateStayWithoutMoveContext</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.004841923713684082</real>
+					<real>0.0050710439682006836</real>
 				</dict>
 				<key>testHistoricalDeduplicationRepairsMissingStayBetweenIncomingAndOutgoingMove</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0074279308319091797</real>
+					<real>0.0078099966049194336</real>
 				</dict>
 				<key>testHistoricalDeduplicationSweepMergesExistingDuplicatePlacesAndMoves</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0069489479064941406</real>
+					<real>0.0081939697265625</real>
 				</dict>
 				<key>testLocationSamplesAreDeduplicatedAcrossSourcesForTheSameFix</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0057280063629150391</real>
+					<real>0.0040739774703979492</real>
 				</dict>
 				<key>testMoveRouteCacheSignatureIsStableForTheSameCoordinates</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00045502185821533203</real>
+					<real>0.00040900707244873047</real>
 				</dict>
 				<key>testMoveSegmentFlagsHighAccuracyRoutesWhenRouteTrackingSamplesArePresent</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00045001506805419922</real>
+					<real>0.00064289569854736328</real>
 				</dict>
 				<key>testMoveSegmentRouteCacheRoundTripsAndHonorsSignatureChanges</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0016000270843505859</real>
+					<real>0.0014250278472900391</real>
 				</dict>
 				<key>testMoveUpsertIsIdempotentForSameEndpointsAndTimeWindow</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0066969394683837891</real>
+					<real>0.0051319599151611328</real>
 				</dict>
 				<key>testMoveUpsertUpdatesExistingSegmentForSamePlacePairWhenWindowChanges</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0056649446487426758</real>
+					<real>0.0047140121459960938</real>
 				</dict>
 				<key>testNearbyLocationSamplesWithinTheDedupWindowCollapseToOneRecord</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0041359663009643555</real>
+					<real>0.0034459829330444336</real>
 				</dict>
 				<key>testPlaneArcBendsAboveShadowInNorthernHemisphere</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00043404102325439453</real>
+					<real>0.00055301189422607422</real>
 				</dict>
 				<key>testPlaneArcBendsBelowShadowInSouthernHemisphere</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00040304660797119141</real>
+					<real>0.00032901763916015625</real>
 				</dict>
 				<key>testRoadRouteAnchorsKeepIntermediatePointsForShortRoutes</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00038099288940429688</real>
+					<real>0.00032508373260498047</real>
 				</dict>
 				<key>testRouteDisplayPrefersRouteTrackingSamplesWhenAvailable</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00039803981781005859</real>
+					<real>0.00031900405883789062</real>
 				</dict>
 				<key>testRouteTrackingSamplesOverrideWeakerSourcesWhenTheyDeduplicate</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0033620595932006836</real>
+					<real>0.0035829544067382812</real>
 				</dict>
 				<key>testTemporaryRouteTrackingEndOfDayFallsBackToTheStartOfTomorrow</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00034606456756591797</real>
+					<real>0.00043392181396484375</real>
 				</dict>
 				<key>testUndoSnapshotRestoresPreviousTimelineState</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.010249018669128418</real>
+					<real>0.0093680620193481445</real>
 				</dict>
 				<key>testUpsertMoveDeduplicatesSimilarMovesAcrossEquivalentEndpoints</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.0068379640579223633</real>
+					<real>0.0067120790481567383</real>
 				</dict>
 			</dict>
 		</dict>

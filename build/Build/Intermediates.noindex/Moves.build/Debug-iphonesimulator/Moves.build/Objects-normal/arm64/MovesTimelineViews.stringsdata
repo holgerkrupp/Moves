@@ -7,7 +7,7 @@
         "key": "No segments for this day yet.",
         "location": {
           "startingColumn": 30,
-          "startingLine": 210
+          "startingLine": 233
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "%lld location sample%@ captured. Waiting for the next visit or move.",
         "location": {
           "startingColumn": 34,
-          "startingLine": 214
+          "startingLine": 237
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Grant location access above to start recording visits and movement.",
         "location": {
           "startingColumn": 34,
-          "startingLine": 218
+          "startingLine": 241
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Day Summary",
         "location": {
           "startingColumn": 18,
-          "startingLine": 446
+          "startingLine": 480
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "No movement summary available yet.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 450
+          "startingLine": 484
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "Total",
         "location": {
           "startingColumn": 26,
-          "startingLine": 461
+          "startingLine": 495
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "Captured location",
         "location": {
           "startingColumn": 28,
-          "startingLine": 626
+          "startingLine": 684
         }
       }
     ]

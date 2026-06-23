@@ -166,6 +166,7 @@ final class VisitPlace {
     var horizontalAccuracy: Double = 0
     var userLabel: String? = nil
     var autoLabel: String? = nil
+    var comment: String? = nil
     var createdAt: Date = Date.now
 
     var dayTimeline: DayTimeline?
@@ -193,7 +194,8 @@ final class VisitPlace {
         longitude: Double,
         horizontalAccuracy: Double,
         userLabel: String? = nil,
-        autoLabel: String? = nil
+        autoLabel: String? = nil,
+        comment: String? = nil
     ) {
         self.id = UUID()
         self.arrivalDate = arrivalDate
@@ -203,6 +205,7 @@ final class VisitPlace {
         self.horizontalAccuracy = horizontalAccuracy
         self.userLabel = userLabel
         self.autoLabel = autoLabel
+        self.comment = comment
         self.createdAt = .now
     }
 
@@ -242,6 +245,7 @@ final class MoveSegment {
     var transportModeRawValue: String = TransportMode.unknown.rawValue
     var distanceMeters: Double = 0
     var stepCount: Int? = nil
+    var comment: String? = nil
     var createdAt: Date = Date.now
 
     var startPlace: VisitPlace?
@@ -265,7 +269,8 @@ final class MoveSegment {
         endDate: Date,
         transportMode: TransportMode,
         distanceMeters: Double,
-        stepCount: Int?
+        stepCount: Int?,
+        comment: String? = nil
     ) {
         self.id = UUID()
         self.dedupeKey = dedupeKey
@@ -274,6 +279,7 @@ final class MoveSegment {
         self.transportModeRawValue = transportMode.rawValue
         self.distanceMeters = distanceMeters
         self.stepCount = stepCount
+        self.comment = comment
         self.createdAt = .now
     }
 
@@ -419,6 +425,7 @@ struct VisitPlaceSnapshot: Codable {
     let horizontalAccuracy: Double
     let userLabel: String?
     let autoLabel: String?
+    let comment: String?
     let createdAt: Date
     let dayKey: String?
 }
@@ -431,6 +438,7 @@ struct MoveSegmentSnapshot: Codable {
     let transportModeRawValue: String
     let distanceMeters: Double
     let stepCount: Int?
+    let comment: String?
     let createdAt: Date
     let startPlaceID: UUID?
     let endPlaceID: UUID?
@@ -567,6 +575,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     horizontalAccuracy: place.horizontalAccuracy,
                     userLabel: place.userLabel,
                     autoLabel: place.autoLabel,
+                    comment: place.comment,
                     createdAt: place.createdAt,
                     dayKey: place.dayTimeline?.dayKey
                 )
@@ -580,6 +589,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     transportModeRawValue: move.transportModeRawValue,
                     distanceMeters: move.distanceMeters,
                     stepCount: move.stepCount,
+                    comment: move.comment,
                     createdAt: move.createdAt,
                     startPlaceID: move.startPlace?.id,
                     endPlaceID: move.endPlace?.id,
@@ -636,7 +646,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 longitude: placeSnapshot.longitude,
                 horizontalAccuracy: placeSnapshot.horizontalAccuracy,
                 userLabel: placeSnapshot.userLabel,
-                autoLabel: placeSnapshot.autoLabel
+                autoLabel: placeSnapshot.autoLabel,
+                comment: placeSnapshot.comment
             )
             place.id = placeSnapshot.id
             place.createdAt = placeSnapshot.createdAt
@@ -657,7 +668,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 endDate: moveSnapshot.endDate,
                 transportMode: TransportMode(rawValue: moveSnapshot.transportModeRawValue) ?? .unknown,
                 distanceMeters: moveSnapshot.distanceMeters,
-                stepCount: moveSnapshot.stepCount
+                stepCount: moveSnapshot.stepCount,
+                comment: moveSnapshot.comment
             )
             move.id = moveSnapshot.id
             move.createdAt = moveSnapshot.createdAt

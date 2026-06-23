@@ -526,9 +526,18 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
     private var settingsObserver: NSObjectProtocol?
     private var isImporting = false
     private var pendingAutomaticImportTask: Task<Void, Never>?
+    private var foregroundCatchUpTask: Task<Void, Never>?
     private var historicalImportTask: Task<Void, Never>?
     private var historicalImporter: HealthWorkoutRouteImporter?
     private var historicalImportID = UUID()
+    private let startupImportDaysBack = 30
+    private let automaticImportDaysBack = 3
+    private let automaticImportDelay: Duration = .seconds(1)
+    private let delayedRouteFollowUpDelay: Duration = .seconds(20)
+    private let foregroundCatchUpDelays: [Duration] = [
+        .seconds(30),
+        .seconds(120)
+    ]
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -548,6 +557,7 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
             NotificationCenter.default.removeObserver(settingsObserver)
         }
         pendingAutomaticImportTask?.cancel()
+        foregroundCatchUpTask?.cancel()
         historicalImportTask?.cancel()
     }
 
@@ -629,8 +639,9 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
             return
         }
 
-        await importConfiguredSpan()
+        await importConfiguredSpan(daysBack: startupImportDaysBack)
         startObservingWorkoutChanges()
+        scheduleForegroundCatchUpImports()
     }
 
     private func refreshAfterSettingsChange() async {
@@ -642,14 +653,14 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
         await startIfNeeded()
     }
 
-    private func importConfiguredSpan() async {
+    private func importConfiguredSpan(daysBack: Int) async {
         guard !isImporting else { return }
 
         isImporting = true
         defer { isImporting = false }
 
         let importer = HealthWorkoutRouteImporter(modelContainer: modelContainer)
-        await importer.importRecentWorkoutRoutes()
+        await importer.importRecentWorkoutRoutes(daysBack: daysBack)
 
         lastAutomaticImportAt = .now
 
@@ -693,16 +704,38 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
 
     private func scheduleAutomaticImport() {
         pendingAutomaticImportTask?.cancel()
+        let automaticImportDelay = automaticImportDelay
+        let delayedRouteFollowUpDelay = delayedRouteFollowUpDelay
+        let automaticImportDaysBack = automaticImportDaysBack
         pendingAutomaticImportTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            try? await Task.sleep(for: automaticImportDelay)
             guard !Task.isCancelled else { return }
-            await self?.importConfiguredSpan()
+            await self?.importConfiguredSpan(daysBack: automaticImportDaysBack)
+
+            try? await Task.sleep(for: delayedRouteFollowUpDelay)
+            guard !Task.isCancelled else { return }
+            await self?.importConfiguredSpan(daysBack: automaticImportDaysBack)
+        }
+    }
+
+    private func scheduleForegroundCatchUpImports() {
+        foregroundCatchUpTask?.cancel()
+        let foregroundCatchUpDelays = foregroundCatchUpDelays
+        let automaticImportDaysBack = automaticImportDaysBack
+        foregroundCatchUpTask = Task { [weak self] in
+            for delay in foregroundCatchUpDelays {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                await self?.importConfiguredSpan(daysBack: automaticImportDaysBack)
+            }
         }
     }
 
     private func stopObserving() {
         pendingAutomaticImportTask?.cancel()
         pendingAutomaticImportTask = nil
+        foregroundCatchUpTask?.cancel()
+        foregroundCatchUpTask = nil
 
         for observerQuery in observerQueries {
             healthStore.stop(observerQuery)

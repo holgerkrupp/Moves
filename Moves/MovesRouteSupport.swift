@@ -563,6 +563,42 @@ enum PlaneRouteGeometry {
 
 @MainActor
 enum ManualRouteGeometry {
+    static func waypoints(
+        for route: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) -> [CLLocationCoordinate2D] {
+        guard route.count > 1 else { return route }
+
+        if transportMode == .boat {
+            return RouteCoordinateOps.sampleAnchors(from: route, maximumCount: 8)
+        }
+
+        return RoadRouteMatcher.routeAnchors(for: route, transportMode: transportMode)
+    }
+
+    static func editAnchors(
+        currentRoute: [CLLocationCoordinate2D],
+        draggedCoordinate: CLLocationCoordinate2D,
+        transportMode: TransportMode,
+        closestIndex: Int
+    ) -> [CLLocationCoordinate2D] {
+        guard currentRoute.count > 1 else {
+            return currentRoute
+        }
+
+        var anchors = waypoints(for: currentRoute, transportMode: transportMode)
+        let insertionIndex = nearestInsertionIndex(
+            in: anchors,
+            originalRoute: currentRoute,
+            closestIndex: closestIndex
+        )
+        anchors.insert(draggedCoordinate, at: insertionIndex)
+        return RouteCoordinateOps.dedupeSequentialCoordinates(
+            anchors,
+            minimumDistanceMeters: transportMode == .boat ? 3 : 6
+        )
+    }
+
     static func previewAnchors(
         currentRoute: [CLLocationCoordinate2D],
         draggedCoordinate: CLLocationCoordinate2D,
@@ -573,25 +609,18 @@ enum ManualRouteGeometry {
             return currentRoute
         }
 
+        let anchors = editAnchors(
+            currentRoute: currentRoute,
+            draggedCoordinate: draggedCoordinate,
+            transportMode: transportMode,
+            closestIndex: closestIndex
+        )
+
         if transportMode == .boat {
-            var anchors = RouteCoordinateOps.sampleAnchors(from: currentRoute, maximumCount: 8)
-            let insertionIndex = nearestInsertionIndex(
-                in: anchors,
-                originalRoute: currentRoute,
-                closestIndex: closestIndex
-            )
-            anchors.insert(draggedCoordinate, at: insertionIndex)
             return splineCoordinates(for: anchors)
         }
 
-        var anchors = RoadRouteMatcher.routeAnchors(for: currentRoute, transportMode: transportMode)
-        let insertionIndex = nearestInsertionIndex(
-            in: anchors,
-            originalRoute: currentRoute,
-            closestIndex: closestIndex
-        )
-        anchors.insert(draggedCoordinate, at: insertionIndex)
-        return RouteCoordinateOps.dedupeSequentialCoordinates(anchors, minimumDistanceMeters: 6)
+        return anchors
     }
 
     static func committedCoordinates(
@@ -613,7 +642,7 @@ enum ManualRouteGeometry {
             )
         }
 
-        let anchors = previewAnchors(
+        let anchors = editAnchors(
             currentRoute: currentRoute,
             draggedCoordinate: draggedCoordinate,
             transportMode: transportMode,
@@ -787,14 +816,16 @@ enum RoadRouteMatcher {
         )
         let result = await resolveCoordinates(
             fallback: coordinates,
-            transportMode: transportMode
+            transportMode: transportMode,
+            anchorsOverride: coordinates
         )
         return result.coordinates
     }
 
     private static func resolveCoordinates(
         fallback: [CLLocationCoordinate2D],
-        transportMode: TransportMode
+        transportMode: TransportMode,
+        anchorsOverride: [CLLocationCoordinate2D]? = nil
     ) async -> (coordinates: [CLLocationCoordinate2D], cacheable: Bool) {
         guard fallback.count > 1 else {
             return (fallback, true)
@@ -813,7 +844,7 @@ enum RoadRouteMatcher {
             return (fallback, true)
         }
 
-        let anchors = routeAnchors(for: fallback, transportMode: transportMode)
+        let anchors = anchorsOverride ?? routeAnchors(for: fallback, transportMode: transportMode)
         guard anchors.count > 1 else {
             return (fallback, true)
         }

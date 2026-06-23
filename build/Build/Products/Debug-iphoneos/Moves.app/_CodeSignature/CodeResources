@@ -18,11 +18,11 @@
 		</data>
 		<key>Info.plist</key>
 		<data>
-		kA7Jf+72hnUJpFxYOMiYS2RVCXA=
+		l39wumtNjZAxIKv06bezJWbyoFY=
 		</data>
 		<key>Moves.debug.dylib</key>
 		<data>
-		fn1i9qaOlgw/05g1kP4ae/m0dfo=
+		n5wUDCYzhLOwA1+u319ud9bExxE=
 		</data>
 		<key>PkgInfo</key>
 		<data>
@@ -38,19 +38,19 @@
 		</data>
 		<key>PlugIns/Moves Widgets.appex/Moves Widgets</key>
 		<data>
-		nHnLi8BDibCKQDBRq1pnDENLJQc=
+		CglLP3ELLHqSGyGzkgMMpYV5AEM=
 		</data>
 		<key>PlugIns/Moves Widgets.appex/Moves Widgets.debug.dylib</key>
 		<data>
-		0vX/1B4/yKU1YK6GvmzlfCExeQI=
+		0ZNxWBnFja/LEils23nx0grMcV0=
 		</data>
 		<key>PlugIns/Moves Widgets.appex/_CodeSignature/CodeResources</key>
 		<data>
-		IFmrTYC0LSfZag/J+YFLExmhEMY=
+		Lasy2Ev8BDVzgDcYR8cKZhfU8XU=
 		</data>
 		<key>PlugIns/Moves Widgets.appex/__preview.dylib</key>
 		<data>
-		SFcR8fr15slmTJQG553eZ/+IMzQ=
+		+GtfmAV0GFPd2Lsh3kbgOtAIX1o=
 		</data>
 		<key>PlugIns/Moves Widgets.appex/embedded.mobileprovision</key>
 		<data>
@@ -66,11 +66,11 @@
 		</data>
 		<key>Watch/Moves Watch App.app/Moves Watch App</key>
 		<data>
-		Qe6FQ5DpFYmcsGvQc9t7TSrdBX8=
+		o8vWchCJak3KWQtTVy/1KJuzSIQ=
 		</data>
 		<key>Watch/Moves Watch App.app/Moves Watch App.debug.dylib</key>
 		<data>
-		VT2rKRWoFZzPGf4KE0eH0RYkQnY=
+		hugu7yjYKYYi2FpHP5lT5a7Flck=
 		</data>
 		<key>Watch/Moves Watch App.app/PkgInfo</key>
 		<data>
@@ -86,19 +86,19 @@
 		</data>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets</key>
 		<data>
-		wjYxFNSDUA+1+bIELNrAQ9owbOM=
+		OrYcT2APsn8vfrXCnGO74l5qy+I=
 		</data>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets.debug.dylib</key>
 		<data>
-		FAXAOcUeDgElDTYgDlBbvE1Z1Hc=
+		oOdP/VVMccCUEXCozoYvPiolnko=
 		</data>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/_CodeSignature/CodeResources</key>
 		<data>
-		AlsR4X7OA21zYaGSgCNEHZWp4oc=
+		DeRHi6KW2d2/xbokvXpJ2P9NgL4=
 		</data>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/__preview.dylib</key>
 		<data>
-		apgqqzVVtGdkCbpyLpAqCUP2Pxw=
+		RH7XvIztCvPrOhiny6Tt7uaNObI=
 		</data>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/embedded.mobileprovision</key>
 		<data>
@@ -106,11 +106,11 @@
 		</data>
 		<key>Watch/Moves Watch App.app/_CodeSignature/CodeResources</key>
 		<data>
-		KHyzFUzMnQfE+BFXq3/XUmtoFZs=
+		b6Sat8RMbMNOQTDiW2dmTBc880w=
 		</data>
 		<key>Watch/Moves Watch App.app/__preview.dylib</key>
 		<data>
-		B4g7Knnt+yFZzfKHDwx7tOZe8dA=
+		wowqnlzQdbo6dDEWQbWOLJWrvEM=
 		</data>
 		<key>Watch/Moves Watch App.app/embedded.mobileprovision</key>
 		<data>
@@ -118,7 +118,7 @@
 		</data>
 		<key>__preview.dylib</key>
 		<data>
-		iUWqNNQAMLU7wfbl4/A1fTJgGzA=
+		dJVcj4I53lQ55goO0S8WQxnk9k0=
 		</data>
 		<key>embedded.mobileprovision</key>
 		<data>
@@ -152,7 +152,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			awLT+rV0GI47reUjMfDs1qCOr8jvuSPFupwag1ZXavw=
+			u3aB088SKtFDzbbH849Y/xNVWqvo48ZYnqk3VnBC+WE=
 			</data>
 		</dict>
 		<key>PlugIns/Moves Widgets.appex/Assets.car</key>
@@ -173,28 +173,28 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			/PagA5MXFGHRYTTJn/qH2SlR2pTEhwglFrbBrub+Dlw=
+			3YZuKwP5UT1ZFqsFN8VLrGN8oN5OQYpKhIhd+FU01Cs=
 			</data>
 		</dict>
 		<key>PlugIns/Moves Widgets.appex/Moves Widgets.debug.dylib</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			LlEdVdavtaga6iURVWh71ulzUMeAJUnFRpquhjtRWhQ=
+			O9tqppLXqMMurGs7WnQfi4Rqaa+fPTtxR+L+psKCwTk=
 			</data>
 		</dict>
 		<key>PlugIns/Moves Widgets.appex/_CodeSignature/CodeResources</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			uHNgVF18lUS/nk6hW/dEa5oWbbQMghjfVVyOjTRg53o=
+			VzLYXohRCPPK9OmzHtKgy89nDszFyB1EWgjX8TuTCZw=
 			</data>
 		</dict>
 		<key>PlugIns/Moves Widgets.appex/__preview.dylib</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			L4P6Jrw449oFZT6mBtGgDM4UsDji+YrXa6UICGD7+to=
+			y3s1Ds7kpPCxx3gcASeGybNkiuZYQDHglspjZWlbXHU=
 			</data>
 		</dict>
 		<key>PlugIns/Moves Widgets.appex/embedded.mobileprovision</key>
@@ -222,14 +222,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			PlGGCchzrazdRnrnKEjkGfUCc02BAnr621PsykTKfno=
+			Zia27Pp9Pl2SnK1yX+hzlVN+ddy6JzbMTF68JNW/wdY=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/Moves Watch App.debug.dylib</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			A66EYtFyuVf2zGnonrZrYHDn8W/OMV2149lNQLEaKJo=
+			fQEXYVNEmi3mOPp2S9DWRBKppaeshZEZf1VM3fjP6vo=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/PkgInfo</key>
@@ -257,28 +257,28 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			+WFCLs5NayTNUxnBAAWj5k4EZPhC5v7bhrKyJZdJqBo=
+			Vs2qHSLz2diTrL2fhyeSQmncvXRJYThI98+0PXsYR+8=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/Moves Watch Widgets.debug.dylib</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			vEHtVQ94kDACRU5BqumI8q2QZOyVKTngLe/0KJhBA08=
+			UREJbDUCv+SwO3iTPoGqIN+MQku0agkgC7QBVy1FM+g=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/_CodeSignature/CodeResources</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			HnVUvVy+UKVarpZsZ4a5ty1s60OVze7KM1BmTOHmP+c=
+			s+k2SK0DsUIm99M9dDTv1IS1xI7OqD6z68ZVXZPvGNc=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/__preview.dylib</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			vvfVKygj0NoGuP8h3K/iQzUsIe+CgdAsm9GE8IS4lPU=
+			L2DUAA9f8rP7/VFPGBGy+KPT8akzHlnjQIYBTzkTMiU=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/PlugIns/Moves Watch Widgets.appex/embedded.mobileprovision</key>
@@ -292,14 +292,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			aAzr/FIWLXC0zMZJlk0KHTvHm6MQf7HsM9PGIX45aVM=
+			y9xdbKj/o0cPsHHBe/BmALsvJm1AXr5Jjvb07bggG0A=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/__preview.dylib</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			3SD4DHyzVXjaD3kkZj/wVlbs3Wgn56YuO5SaVEz+pM8=
+			+Z/qY4uUOgIDQLrozZC+GqVQqqSHMoR+P1ni2W9rptg=
 			</data>
 		</dict>
 		<key>Watch/Moves Watch App.app/embedded.mobileprovision</key>
@@ -313,7 +313,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			uUOR0ApmRKt9P/X+IpJz2Q5glOvTztDHvCA86hUosLo=
+			fLYeTAevZ1nmKMiJYH32RisvBb3F/w+0BtXmYBFlveg=
 			</data>
 		</dict>
 		<key>embedded.mobileprovision</key>

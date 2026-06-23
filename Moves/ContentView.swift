@@ -1212,6 +1212,9 @@ enum TimelineExporter {
                 if let autoLabel = place.autoLabel, !autoLabel.isEmpty {
                     properties["auto_label"] = autoLabel
                 }
+                if let comment = place.comment, !comment.isEmpty {
+                    properties["comment"] = comment
+                }
 
                 let geometry: [String: Any] = [
                     "type": "Point",
@@ -1244,6 +1247,9 @@ enum TimelineExporter {
                 if let stepCount = move.stepCount {
                     properties["step_count"] = stepCount
                 }
+                if let comment = move.comment, !comment.isEmpty {
+                    properties["comment"] = comment
+                }
 
                 let geometry: [String: Any] = [
                     "type": "LineString",
@@ -1271,7 +1277,7 @@ enum TimelineExporter {
 
     private static func csvData(for days: [DayTimeline]) -> Data? {
         var rows: [String] = []
-        rows.append("record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude")
+        rows.append("record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude,comment")
 
         for day in days {
             for place in day.places.sorted(by: { $0.arrivalDate < $1.arrivalDate }) {
@@ -1287,6 +1293,7 @@ enum TimelineExporter {
                         "",
                         coordinateString(place.latitude),
                         coordinateString(place.longitude),
+                        csvEscaped(place.comment ?? ""),
                     ].joined(separator: ",")
                 )
             }
@@ -1305,6 +1312,7 @@ enum TimelineExporter {
                         move.stepCount.map(String.init) ?? "",
                         "",
                         "",
+                        csvEscaped(move.comment ?? ""),
                     ].joined(separator: ",")
                 )
             }

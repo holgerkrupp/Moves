@@ -19,6 +19,7 @@ struct PlaceMapDetailView: View {
 
     @State private var camera: MapCameraPosition
     @State private var draftLabel: String
+    @State private var draftComment: String
     @State private var isConfirmingDeletion = false
     @State private var isDeleting = false
     @State private var deleteErrorMessage = ""
@@ -27,6 +28,7 @@ struct PlaceMapDetailView: View {
     init(place: VisitPlace) {
         self.place = place
         _draftLabel = State(initialValue: place.userLabel ?? place.autoLabel ?? "")
+        _draftComment = State(initialValue: place.comment ?? "")
         _camera = State(initialValue: .region(
             MKCoordinateRegion(
                 center: place.coordinate,
@@ -125,6 +127,24 @@ struct PlaceMapDetailView: View {
                         saveLabel()
                     }
                 }
+
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Remarks", text: $draftComment, axis: .vertical)
+                        .textInputAutocapitalization(.sentences)
+                        .lineLimit(2...5)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(MovesPalette.textFieldBackground.opacity(0.92))
+                        )
+                        .accessibilityLabel("Place remarks")
+
+                    Button("Save") {
+                        saveComment()
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
@@ -146,6 +166,19 @@ struct PlaceMapDetailView: View {
             try modelContext.save()
         } catch {
             print("Failed to save place label: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveComment() {
+        let trimmed = draftComment.trimmingCharacters(in: .whitespacesAndNewlines)
+        place.comment = trimmed.isEmpty ? nil : trimmed
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            draftComment = place.comment ?? ""
+            print("Failed to save place remarks: \(error.localizedDescription)")
         }
     }
 
@@ -194,10 +227,13 @@ struct MoveMapDetailView: View {
 
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
+    @State private var draftComment: String
     @State private var isShowingTransportPicker = false
     @State private var isEditingManualRoute = false
     @State private var manualRouteDrag: ManualRouteDragState?
     @State private var routeBeforeManualDrag: [CLLocationCoordinate2D] = []
+    @State private var manualRouteWaypointCoordinates: [CLLocationCoordinate2D] = []
+    @State private var activeManualRouteWaypointIndex: Int?
     @State private var liveManualRouteMatchTask: Task<Void, Never>?
     @State private var manualRouteDragRevision = 0
     @State private var isIgnoringCurrentManualRouteGesture = false
@@ -245,6 +281,7 @@ struct MoveMapDetailView: View {
 
         _camera = State(initialValue: .region(MapRegionFactory.region(for: initialRoute)))
         _routeCoordinates = State(initialValue: initialRoute)
+        _draftComment = State(initialValue: segment.comment ?? "")
     }
 
     var body: some View {
@@ -278,6 +315,14 @@ struct MoveMapDetailView: View {
                     } else {
                         Annotation("End", coordinate: end, anchor: .center) {
                             MapLocationDot(tint: .red)
+                        }
+                    }
+                }
+
+                if isEditingManualRoute {
+                    ForEach(Array(manualRouteWaypointCoordinates.enumerated()), id: \.offset) { index, coordinate in
+                        Annotation("Waypoint", coordinate: coordinate, anchor: .center) {
+                            ManualRouteWaypointMarker(isActive: index == activeManualRouteWaypointIndex)
                         }
                     }
                 }
@@ -317,11 +362,7 @@ struct MoveMapDetailView: View {
                     }
 
                     Button {
-                        isEditingManualRoute.toggle()
-                        manualRouteDrag = nil
-                        isIgnoringCurrentManualRouteGesture = false
-                        liveManualRouteMatchTask?.cancel()
-                        liveManualRouteMatchTask = nil
+                        setManualRouteEditing(!isEditingManualRoute)
                     } label: {
                         Image(systemName: isEditingManualRoute ? "hand.draw.fill" : "hand.draw")
                     }
@@ -397,6 +438,24 @@ struct MoveMapDetailView: View {
                 Text("\(DurationFormatter.text(for: segment.timelineDuration))   \(Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.primary.opacity(0.75))
+
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Remarks", text: $draftComment, axis: .vertical)
+                        .textInputAutocapitalization(.sentences)
+                        .lineLimit(2...5)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(MovesPalette.textFieldBackground.opacity(0.92))
+                        )
+                        .accessibilityLabel("Move remarks")
+
+                    Button("Save") {
+                        saveComment()
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
@@ -424,6 +483,19 @@ struct MoveMapDetailView: View {
         isEditingManualRoute && manualRouteDrag != nil ? [.zoom] : [.pan, .zoom]
     }
 
+    private func saveComment() {
+        let trimmed = draftComment.trimmingCharacters(in: .whitespacesAndNewlines)
+        segment.comment = trimmed.isEmpty ? nil : trimmed
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            draftComment = segment.comment ?? ""
+            print("Failed to save move remarks: \(error.localizedDescription)")
+        }
+    }
+
     private func manualRouteEditGesture(proxy: MapProxy) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
@@ -432,6 +504,19 @@ struct MoveMapDetailView: View {
             .onEnded { value in
                 finishManualRouteDrag(at: value.location, proxy: proxy)
             }
+    }
+
+    private func setManualRouteEditing(_ isEditing: Bool) {
+        isEditingManualRoute = isEditing
+        manualRouteDrag = nil
+        isIgnoringCurrentManualRouteGesture = false
+        activeManualRouteWaypointIndex = nil
+        liveManualRouteMatchTask?.cancel()
+        liveManualRouteMatchTask = nil
+
+        manualRouteWaypointCoordinates = isEditing
+            ? ManualRouteGeometry.waypoints(for: routeCoordinates, transportMode: segment.transportMode)
+            : []
     }
 
     private var transportModePickerContent: some View {
@@ -487,6 +572,9 @@ struct MoveMapDetailView: View {
         segment.clearCachedRouteCoordinates()
         segment.clearManualRouteCoordinates()
         routeCoordinates = MoveRouteGeometry.rawCoordinates(for: segment)
+        manualRouteWaypointCoordinates = isEditingManualRoute
+            ? ManualRouteGeometry.waypoints(for: routeCoordinates, transportMode: newMode)
+            : []
 
         do {
             try modelContext.save()
@@ -505,6 +593,12 @@ struct MoveMapDetailView: View {
     @MainActor
     private func refreshRouteCoordinates() async {
         routeCoordinates = await RoadRouteMatcher.matchedCoordinates(for: segment)
+        if isEditingManualRoute, manualRouteDrag == nil {
+            manualRouteWaypointCoordinates = ManualRouteGeometry.waypoints(
+                for: routeCoordinates,
+                transportMode: segment.transportMode
+            )
+        }
         if modelContext.hasChanges {
             do {
                 try modelContext.save()
@@ -533,6 +627,14 @@ struct MoveMapDetailView: View {
             return
         }
 
+        let anchors = ManualRouteGeometry.editAnchors(
+            currentRoute: routeBeforeManualDrag,
+            draggedCoordinate: draggedCoordinate,
+            transportMode: segment.transportMode,
+            closestIndex: drag.closestRouteIndex
+        )
+        manualRouteWaypointCoordinates = anchors
+        activeManualRouteWaypointIndex = nearestCoordinateIndex(to: draggedCoordinate, in: anchors)
         routeCoordinates = ManualRouteGeometry.previewAnchors(
             currentRoute: routeBeforeManualDrag,
             draggedCoordinate: draggedCoordinate,
@@ -554,6 +656,7 @@ struct MoveMapDetailView: View {
             }
             manualRouteDrag = nil
             routeBeforeManualDrag = []
+            activeManualRouteWaypointIndex = nil
             isIgnoringCurrentManualRouteGesture = false
             liveManualRouteMatchTask?.cancel()
             liveManualRouteMatchTask = nil
@@ -563,6 +666,7 @@ struct MoveMapDetailView: View {
         let baseRoute = routeBeforeManualDrag
         manualRouteDrag = nil
         routeBeforeManualDrag = []
+        activeManualRouteWaypointIndex = nil
         isIgnoringCurrentManualRouteGesture = false
         manualRouteDragRevision += 1
         liveManualRouteMatchTask?.cancel()
@@ -584,6 +688,12 @@ struct MoveMapDetailView: View {
 
             segment.storeManualRouteCoordinates(committed)
             routeCoordinates = committed
+            if isEditingManualRoute {
+                manualRouteWaypointCoordinates = ManualRouteGeometry.waypoints(
+                    for: committed,
+                    transportMode: segment.transportMode
+                )
+            }
 
             do {
                 try modelContext.save()
@@ -634,6 +744,16 @@ struct MoveMapDetailView: View {
         }
     }
 
+    private func nearestCoordinateIndex(
+        to coordinate: CLLocationCoordinate2D,
+        in coordinates: [CLLocationCoordinate2D]
+    ) -> Int? {
+        coordinates.enumerated().min { lhs, rhs in
+            RouteCoordinateOps.distanceMeters(from: lhs.element, to: coordinate)
+                < RouteCoordinateOps.distanceMeters(from: rhs.element, to: coordinate)
+        }?.offset
+    }
+
     private func nearestRoutePoint(to point: CGPoint, proxy: MapProxy) -> (index: Int, distance: CGFloat)? {
         var nearest: (index: Int, distance: CGFloat)?
 
@@ -657,6 +777,12 @@ struct MoveMapDetailView: View {
             try modelContext.save()
             Task { @MainActor in
                 await refreshRouteCoordinates()
+                if isEditingManualRoute {
+                    manualRouteWaypointCoordinates = ManualRouteGeometry.waypoints(
+                        for: routeCoordinates,
+                        transportMode: segment.transportMode
+                    )
+                }
                 isSavingManualRoute = false
             }
         } catch {
@@ -695,6 +821,21 @@ private struct ManualRouteDragState {
     let closestRouteIndex: Int
 }
 
+private struct ManualRouteWaypointMarker: View {
+    let isActive: Bool
+
+    var body: some View {
+        Circle()
+            .fill(isActive ? Color.accentColor : Color(uiColor: .systemBackground))
+            .frame(width: isActive ? 14 : 10, height: isActive ? 14 : 10)
+            .overlay {
+                Circle()
+                    .stroke(Color.accentColor, lineWidth: isActive ? 3 : 2)
+            }
+            .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+    }
+}
+
 private struct DeletedPlaceUndoPayload {
     let id: UUID
     let arrivalDate: Date
@@ -704,6 +845,7 @@ private struct DeletedPlaceUndoPayload {
     let horizontalAccuracy: Double
     let userLabel: String?
     let autoLabel: String?
+    let comment: String?
     let createdAt: Date
     let dayTimeline: DayTimeline?
     let outgoingMoves: [MoveSegment]
@@ -718,6 +860,7 @@ private struct DeletedPlaceUndoPayload {
         horizontalAccuracy = place.horizontalAccuracy
         userLabel = place.userLabel
         autoLabel = place.autoLabel
+        comment = place.comment
         createdAt = place.createdAt
         dayTimeline = place.dayTimeline
         outgoingMoves = place.outgoingMoves
@@ -735,7 +878,8 @@ private struct DeletedPlaceUndoPayload {
             longitude: longitude,
             horizontalAccuracy: horizontalAccuracy,
             userLabel: userLabel,
-            autoLabel: autoLabel
+            autoLabel: autoLabel,
+            comment: comment
         )
         restored.id = id
         restored.createdAt = createdAt
@@ -768,6 +912,7 @@ private struct DeletedMoveUndoPayload {
     let transportMode: TransportMode
     let distanceMeters: Double
     let stepCount: Int?
+    let comment: String?
     let createdAt: Date
     let startPlace: VisitPlace?
     let endPlace: VisitPlace?
@@ -785,6 +930,7 @@ private struct DeletedMoveUndoPayload {
         transportMode = segment.transportMode
         distanceMeters = segment.distanceMeters
         stepCount = segment.stepCount
+        comment = segment.comment
         createdAt = segment.createdAt
         startPlace = segment.startPlace
         endPlace = segment.endPlace
@@ -805,7 +951,8 @@ private struct DeletedMoveUndoPayload {
             endDate: endDate,
             transportMode: transportMode,
             distanceMeters: distanceMeters,
-            stepCount: stepCount
+            stepCount: stepCount,
+            comment: comment
         )
         restored.id = id
         restored.createdAt = createdAt
