@@ -24,10 +24,22 @@ private enum HealthWorkoutRouteImportError: LocalizedError {
 
 enum HealthWorkoutRouteImportSettings {
     static let isEnabledKey = "Moves.healthWorkoutRouteImport.isEnabled"
+    static let lastAutomaticImportAtKey = "Moves.healthWorkoutRouteImport.lastAutomaticImportAt"
     static let didChangeNotification = Notification.Name("Moves.healthWorkoutRouteImport.didChange")
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: isEnabledKey)
+    }
+
+    static var lastAutomaticImportAt: Date? {
+        get { UserDefaults.standard.object(forKey: lastAutomaticImportAtKey) as? Date }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: lastAutomaticImportAtKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: lastAutomaticImportAtKey)
+            }
+        }
     }
 }
 
@@ -204,7 +216,6 @@ private actor HealthWorkoutRouteImportWorker {
     ) async throws -> HealthWorkoutRouteImportReport {
         try await requestAuthorizationIfNeeded()
 
-        let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
         let persistedState = resumesInterruptedImport
             ? HealthWorkoutRouteImporter.persistedState(matching: scope, startDate: startDate)
             : nil
@@ -231,7 +242,7 @@ private actor HealthWorkoutRouteImportWorker {
                     let locations = try await locations(for: route)
                     guard locations.count >= 2 else { continue }
 
-                    _ = try repository.importRouteTrack(
+                    try importRouteTrack(
                         locations: locations,
                         source: .healthWorkoutRoute,
                         transportMode: transportMode(for: workout.workoutActivityType)
@@ -242,7 +253,6 @@ private actor HealthWorkoutRouteImportWorker {
 
                 importedWorkoutCount += 1
                 cursorEndDate = nextCursorEndDate(after: workout)
-                try repository.saveIfNeeded()
                 if resumesInterruptedImport {
                     HealthWorkoutRouteImporter.persistState(
                         scope: scope,
@@ -258,7 +268,6 @@ private actor HealthWorkoutRouteImportWorker {
             }
         }
 
-        try repository.saveIfNeeded()
         if resumesInterruptedImport {
             HealthWorkoutRouteImporter.clearPersistedState(scope: scope, startDate: startDate)
         }
@@ -268,6 +277,21 @@ private actor HealthWorkoutRouteImportWorker {
             sampleCount: importedSampleCount,
             didResumeInterruptedImport: persistedState != nil
         )
+    }
+
+    private func importRouteTrack(
+        locations: [CLLocation],
+        source: LocationSampleSource,
+        transportMode: TransportMode
+    ) throws {
+        try autoreleasepool {
+            let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
+            _ = try repository.importRouteTrack(
+                locations: locations,
+                source: source,
+                transportMode: transportMode
+            )
+        }
     }
 
     private func throwIfImportShouldStop() async throws {
@@ -526,21 +550,22 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
     private var settingsObserver: NSObjectProtocol?
     private var isImporting = false
     private var pendingAutomaticImportTask: Task<Void, Never>?
-    private var foregroundCatchUpTask: Task<Void, Never>?
+    private var foregroundAutomaticImportTask: Task<Void, Never>?
     private var historicalImportTask: Task<Void, Never>?
     private var historicalImporter: HealthWorkoutRouteImporter?
     private var historicalImportID = UUID()
-    private let startupImportDaysBack = 30
+    private var observerStartDate: Date?
     private let automaticImportDaysBack = 3
     private let automaticImportDelay: Duration = .seconds(1)
     private let delayedRouteFollowUpDelay: Duration = .seconds(20)
-    private let foregroundCatchUpDelays: [Duration] = [
-        .seconds(30),
-        .seconds(120)
-    ]
+    private let foregroundAutomaticImportDelay: Duration = .seconds(15)
+    private let automaticImportMinimumInterval: TimeInterval = 30 * 60
+    private let foregroundAutomaticImportMinimumInterval: TimeInterval = 12 * 60 * 60
+    private let observerStartupGracePeriod: TimeInterval = 10
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
+        lastAutomaticImportAt = HealthWorkoutRouteImportSettings.lastAutomaticImportAt
         settingsObserver = NotificationCenter.default.addObserver(
             forName: HealthWorkoutRouteImportSettings.didChangeNotification,
             object: nil,
@@ -557,13 +582,15 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
             NotificationCenter.default.removeObserver(settingsObserver)
         }
         pendingAutomaticImportTask?.cancel()
-        foregroundCatchUpTask?.cancel()
+        foregroundAutomaticImportTask?.cancel()
         historicalImportTask?.cancel()
     }
 
-    func resumeInterruptedHistoricalImportIfNeeded() {
+    func refreshInterruptedHistoricalImportState() {
         guard HealthWorkoutRouteImporter.hasInterruptedHistoricalImport else { return }
-        startHistoricalImportIfNeeded()
+        let message = "A previous Health route import was paused. Open Apple Health Routes settings to resume it."
+        lastHistoricalImportErrorMessage = message
+        lastAutomaticImportMessage = message
     }
 
     func startHistoricalImportIfNeeded() {
@@ -600,7 +627,7 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
                 historicalImporter = nil
                 isHistoricalImporting = false
                 historicalImportProgressText = ""
-                lastAutomaticImportAt = .now
+                recordAutomaticImportCheck()
 
                 if let report = importer.lastReport {
                     lastHistoricalImportReport = report
@@ -639,9 +666,8 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
             return
         }
 
-        await importConfiguredSpan(daysBack: startupImportDaysBack)
         startObservingWorkoutChanges()
-        scheduleForegroundCatchUpImports()
+        scheduleForegroundAutomaticImportIfNeeded()
     }
 
     private func refreshAfterSettingsChange() async {
@@ -653,8 +679,9 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
         await startIfNeeded()
     }
 
-    private func importConfiguredSpan(daysBack: Int) async {
-        guard !isImporting else { return }
+    @discardableResult
+    private func importConfiguredSpan(daysBack: Int) async -> Bool {
+        guard !isImporting else { return false }
 
         isImporting = true
         defer { isImporting = false }
@@ -662,19 +689,22 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
         let importer = HealthWorkoutRouteImporter(modelContainer: modelContainer)
         await importer.importRecentWorkoutRoutes(daysBack: daysBack)
 
-        lastAutomaticImportAt = .now
+        recordAutomaticImportCheck()
 
         if let report = importer.lastReport {
             lastAutomaticImportMessage = "Automatically imported \(report.routeCount) Health route(s)."
         } else {
             lastAutomaticImportMessage = importer.lastErrorMessage
         }
+
+        return true
     }
 
     private func startObservingWorkoutChanges() {
         guard observerQueries.isEmpty else { return }
         guard HKHealthStore.isHealthDataAvailable() else { return }
 
+        observerStartDate = .now
         let sampleTypes: [HKSampleType] = [
             HKObjectType.workoutType(),
             HKSeriesType.workoutRoute()
@@ -703,14 +733,22 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
     }
 
     private func scheduleAutomaticImport() {
+        guard !isWithinObserverStartupGracePeriod else {
+            return
+        }
+
         pendingAutomaticImportTask?.cancel()
+        foregroundAutomaticImportTask?.cancel()
+        foregroundAutomaticImportTask = nil
         let automaticImportDelay = automaticImportDelay
         let delayedRouteFollowUpDelay = delayedRouteFollowUpDelay
         let automaticImportDaysBack = automaticImportDaysBack
         pendingAutomaticImportTask = Task { [weak self] in
             try? await Task.sleep(for: automaticImportDelay)
             guard !Task.isCancelled else { return }
-            await self?.importConfiguredSpan(daysBack: automaticImportDaysBack)
+            guard await self?.runAutomaticImportIfDue(daysBack: automaticImportDaysBack) == true else {
+                return
+            }
 
             try? await Task.sleep(for: delayedRouteFollowUpDelay)
             guard !Task.isCancelled else { return }
@@ -718,24 +756,59 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
         }
     }
 
-    private func scheduleForegroundCatchUpImports() {
-        foregroundCatchUpTask?.cancel()
-        let foregroundCatchUpDelays = foregroundCatchUpDelays
+    private func scheduleForegroundAutomaticImportIfNeeded() {
+        guard shouldRunForegroundAutomaticImport else { return }
+
+        foregroundAutomaticImportTask?.cancel()
+        let foregroundAutomaticImportDelay = foregroundAutomaticImportDelay
         let automaticImportDaysBack = automaticImportDaysBack
-        foregroundCatchUpTask = Task { [weak self] in
-            for delay in foregroundCatchUpDelays {
-                try? await Task.sleep(for: delay)
-                guard !Task.isCancelled else { return }
-                await self?.importConfiguredSpan(daysBack: automaticImportDaysBack)
+        foregroundAutomaticImportTask = Task { [weak self] in
+            try? await Task.sleep(for: foregroundAutomaticImportDelay)
+            guard !Task.isCancelled else { return }
+            _ = await self?.runAutomaticImportIfDue(daysBack: automaticImportDaysBack)
+            await MainActor.run {
+                self?.foregroundAutomaticImportTask = nil
             }
         }
+    }
+
+    private func runAutomaticImportIfDue(daysBack: Int) async -> Bool {
+        guard shouldRunAutomaticImport else {
+            lastAutomaticImportMessage = "Health route import checked recently."
+            return false
+        }
+
+        return await importConfiguredSpan(daysBack: daysBack)
+    }
+
+    private var shouldRunAutomaticImport: Bool {
+        guard let lastAutomaticImportAt else { return true }
+        return Date.now.timeIntervalSince(lastAutomaticImportAt) >= automaticImportMinimumInterval
+    }
+
+    private var shouldRunForegroundAutomaticImport: Bool {
+        guard foregroundAutomaticImportTask == nil else { return false }
+        guard let lastAutomaticImportAt else { return true }
+        return Date.now.timeIntervalSince(lastAutomaticImportAt) >= foregroundAutomaticImportMinimumInterval
+    }
+
+    private var isWithinObserverStartupGracePeriod: Bool {
+        guard let observerStartDate else { return false }
+        return Date.now.timeIntervalSince(observerStartDate) < observerStartupGracePeriod
+    }
+
+    private func recordAutomaticImportCheck() {
+        let now = Date.now
+        lastAutomaticImportAt = now
+        HealthWorkoutRouteImportSettings.lastAutomaticImportAt = now
     }
 
     private func stopObserving() {
         pendingAutomaticImportTask?.cancel()
         pendingAutomaticImportTask = nil
-        foregroundCatchUpTask?.cancel()
-        foregroundCatchUpTask = nil
+        foregroundAutomaticImportTask?.cancel()
+        foregroundAutomaticImportTask = nil
+        observerStartDate = nil
 
         for observerQuery in observerQueries {
             healthStore.stop(observerQuery)

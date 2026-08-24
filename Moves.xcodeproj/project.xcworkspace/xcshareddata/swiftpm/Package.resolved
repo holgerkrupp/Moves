@@ -1,0 +1,15 @@
+{
+  "originHash" : "5c615c8df8332a9b6a79cd3f38cee4415ff8d973ecbf430b52e2b098a95d8797",
+  "pins" : [
+    {
+      "identity" : "clouddatapresence",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/holgerkrupp/CloudDataPresence",
+      "state" : {
+        "branch" : "main",
+        "revision" : "822dbe3ccaaed19c09d9a54b22347a5c06ca8efe"
+      }
+    }
+  ],
+  "version" : 3
+}

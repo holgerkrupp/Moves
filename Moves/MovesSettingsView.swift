@@ -18,6 +18,9 @@ struct MovesSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
+    @AppStorage(DailyTimelineBackup.isEnabledKey) private var dailyBackupIsEnabled = false
+    @AppStorage(DailyTimelineBackup.formatKey) private var dailyBackupFormat = DailyTimelineBackupFormat.gpx.rawValue
+    @AppStorage(DailyTimelineBackup.usesMonthlyFoldersKey) private var dailyBackupUsesMonthlyFolders = false
 
     let dayTimelines: [DayTimeline]
     let selectedDayKey: String
@@ -35,6 +38,9 @@ struct MovesSettingsView: View {
     @State private var isUndoingHistoricalDeduplication = false
     @State private var maintenanceMessage = ""
     @State private var isShowingMaintenanceMessage = false
+    @State private var dailyBackupMessage = ""
+    @State private var isShowingDailyBackupMessage = false
+    @State private var isRunningDailyBackup = false
 
     init(
         dayTimelines: [DayTimeline],
@@ -48,6 +54,43 @@ struct MovesSettingsView: View {
 
     private var selectedDay: DayTimeline? {
         dayTimelines.first(where: { $0.dayKey == selectedDayKey })
+    }
+
+    private var dailyICloudBackupSettings: some View {
+        SettingsCard(title: "Daily iCloud Drive Backup") {
+            Toggle("Back up yesterday every night", isOn: $dailyBackupIsEnabled)
+
+            if dailyBackupIsEnabled {
+                Picker("Format", selection: $dailyBackupFormat) {
+                    Text("GPX (.gpx)").tag("gpx")
+                    Text("GeoJSON (.geojson)").tag("geoJSON")
+                    Text("CSV (.csv)").tag("csv")
+                }
+
+                Toggle("Organize in year/month folders", isOn: $dailyBackupUsesMonthlyFolders)
+
+                SettingsActionRow(
+                    title: "Back up yesterday now",
+                    systemImage: "icloud.and.arrow.up",
+                    isDisabled: isRunningDailyBackup
+                ) {
+                    backUpYesterday()
+                }
+            }
+
+            Text(dailyBackupDescription)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var dailyBackupDescription: String {
+        let fileExtension = DailyTimelineBackupFormat(rawValue: dailyBackupFormat)?
+            .timelineExportFormat.fileExtension ?? "gpx"
+        if dailyBackupUsesMonthlyFolders {
+            return "Files are saved to iCloud Drive/Moves/YYYY/MM/Moves-YYYY-MM-DD.\(fileExtension)"
+        }
+        return "Files are saved to iCloud Drive/Moves/Moves-YYYY-MM-DD.\(fileExtension). iOS runs the backup after midnight when it can."
     }
 
     var body: some View {
@@ -107,6 +150,8 @@ struct MovesSettingsView: View {
                             export(.csv, scope: .allDays)
                         }
                     }
+
+                    dailyICloudBackupSettings
 
                     SettingsCard(title: "Import") {
                         NavigationLink {
@@ -209,6 +254,19 @@ struct MovesSettingsView: View {
         }
         .onAppear {
             hasDedupeUndoSnapshot = TimelineDeduplicationSnapshotStore.hasSnapshot
+            DailyTimelineBackup.scheduleNextRun()
+        }
+        .onChange(of: dailyBackupIsEnabled) { _, _ in
+            if let error = DailyTimelineBackup.scheduleNextRun() {
+                dailyBackupMessage = error.localizedDescription
+                isShowingDailyBackupMessage = true
+            }
+        }
+        .onChange(of: dailyBackupFormat) { _, _ in
+            DailyTimelineBackup.scheduleNextRun()
+        }
+        .onChange(of: dailyBackupUsesMonthlyFolders) { _, _ in
+            DailyTimelineBackup.scheduleNextRun()
         }
         .confirmationDialog(
             "Deduplicate Existing Data?",
@@ -232,6 +290,11 @@ struct MovesSettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(maintenanceMessage)
+        }
+        .alert("Daily iCloud Backup", isPresented: $isShowingDailyBackupMessage) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(dailyBackupMessage)
         }
     }
 
@@ -274,6 +337,23 @@ struct MovesSettingsView: View {
         exportContentType = payload.contentType
         exportFilename = payload.filename
         isExporting = true
+    }
+
+    private func backUpYesterday() {
+        guard !isRunningDailyBackup else { return }
+        isRunningDailyBackup = true
+
+        let container = modelContext.container
+        Task { @MainActor in
+            defer { isRunningDailyBackup = false }
+            do {
+                let url = try await DailyTimelineBackup.saveYesterday(in: container)
+                dailyBackupMessage = "Saved \(url.lastPathComponent) to iCloud Drive/Moves. It may take a moment to appear in the Files app."
+            } catch {
+                dailyBackupMessage = "Backup failed: \(error.localizedDescription)"
+            }
+            isShowingDailyBackupMessage = true
+        }
     }
 
     @MainActor
@@ -497,14 +577,14 @@ private struct HealthWorkoutRouteImportSettingsView: View {
 
     private var importAllHelpText: String {
         if isImporting {
-            return "The import keeps running if you leave this screen. If iOS pauses the app in the background, progress is saved and the next launch resumes automatically."
+            return "The import keeps running if you leave this screen. If iOS pauses the app in the background, progress is saved and you can resume it here."
         }
 
         if HealthWorkoutRouteImporter.hasInterruptedHistoricalImport {
             return "A previous historical import was interrupted. Resume continues from the last checked workout instead of starting over."
         }
 
-        return "Import all asks Apple Health for every supported workout route it can return. If iOS pauses the app, progress is saved and the next import resumes from there."
+        return "Import all asks Apple Health for every supported workout route it can return. If iOS pauses the app, progress is saved and you can resume from there."
     }
 
     private func notifySettingsChanged() {

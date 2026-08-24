@@ -319,6 +319,7 @@ struct ContentView: View {
 
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @EnvironmentObject private var undoController: AppUndoController
+    @EnvironmentObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -354,6 +355,12 @@ struct ContentView: View {
 
     private var latestSelectableDayStart: Date {
         Calendar.autoupdatingCurrent.startOfDay(for: .now)
+    }
+
+    private var cloudDataPresenceCountSignature: String {
+        let placeCount = dayTimelines.reduce(0) { $0 + $1.places.count }
+        let moveCount = dayTimelines.reduce(0) { $0 + $1.moves.count }
+        return "\(placeCount)|\(moveCount)"
     }
 
     private var mostActiveDays: [DayTimeline] {
@@ -475,6 +482,7 @@ struct ContentView: View {
             openCurrentDay()
             modelContext.undoManager = undoController.manager
             publishWidgetSnapshot()
+            cloudDataPresencePublisher.publishSoon()
         }
         .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
             syncSelectedDayIfNeeded()
@@ -487,10 +495,14 @@ struct ContentView: View {
         .onChange(of: selectedDay?.places.count ?? 0) { _, _ in
             publishWidgetSnapshot()
         }
+        .onChange(of: cloudDataPresenceCountSignature) { _, _ in
+            cloudDataPresencePublisher.publishSoon()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             openCurrentDay()
             publishWidgetSnapshot()
+            cloudDataPresencePublisher.publishSoon()
         }
         .onChange(of: selectedPageIndex) { _, newIndex in
             guard dayTimelines.indices.contains(newIndex) else { return }
@@ -666,15 +678,41 @@ struct ContentView: View {
     private func openCurrentDay() {
         guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
 
-        let todayKey = DayTimeline.makeDayKey(for: .now)
-        if !dayTimelines.contains(where: { $0.dayKey == todayKey }) {
-            let today = DayTimeline(dayStart: .now)
-            modelContext.insert(today)
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: .now)
+        let todayKey = DayTimeline.makeDayKey(for: todayStart)
+        var existingKeys = Set(dayTimelines.map(\.dayKey))
+        var didInsertDay = false
 
+        if !existingKeys.contains(todayKey) {
+            modelContext.insert(DayTimeline(dayStart: todayStart))
+            existingKeys.insert(todayKey)
+            didInsertDay = true
+        }
+
+        // Days without any recorded location have no timeline of their own, which made paging
+        // skip them entirely. Fill the gaps so every day since the first recording is reachable.
+        if let earliestDayStart = dayTimelines.first?.dayStart {
+            var dayStart = calendar.startOfDay(for: earliestDayStart)
+
+            while dayStart < todayStart {
+                let dayKey = DayTimeline.makeDayKey(for: dayStart)
+                if !existingKeys.contains(dayKey) {
+                    modelContext.insert(DayTimeline(dayStart: dayStart))
+                    existingKeys.insert(dayKey)
+                    didInsertDay = true
+                }
+
+                guard let nextDayStart = calendar.date(byAdding: .day, value: 1, to: dayStart) else { break }
+                dayStart = nextDayStart
+            }
+        }
+
+        if didInsertDay {
             do {
                 try modelContext.save()
             } catch {
-                print("Failed to create current day timeline: \(error.localizedDescription)")
+                print("Failed to create day timelines: \(error.localizedDescription)")
             }
         }
 
@@ -1776,5 +1814,6 @@ struct ContentView_Previews: PreviewProvider {
             .modelContainer(container)
             .environmentObject(MovesLocationCaptureManager(modelContainer: container))
             .environmentObject(AppUndoController())
+            .environmentObject(MovesCloudDataPresencePublisher(modelContainer: container))
     }
 }

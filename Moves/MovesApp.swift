@@ -17,6 +17,7 @@ final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
     ) -> Bool {
         application.applicationSupportsShakeToEdit = true
         UNUserNotificationCenter.current().delegate = self
+        DailyTimelineBackup.registerBackgroundTask()
         return true
     }
 
@@ -45,6 +46,7 @@ struct MovesApp: App {
     @StateObject private var captureManager: MovesLocationCaptureManager
     @StateObject private var watchRouteInbox: WatchRouteInbox
     @StateObject private var healthWorkoutRouteAutoImporter: HealthWorkoutRouteAutoImportManager
+    @StateObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
 
     init() {
         do {
@@ -59,12 +61,15 @@ struct MovesApp: App {
             _healthWorkoutRouteAutoImporter = StateObject(
                 wrappedValue: HealthWorkoutRouteAutoImportManager(modelContainer: container)
             )
+            _cloudDataPresencePublisher = StateObject(
+                wrappedValue: MovesCloudDataPresencePublisher(modelContainer: container)
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
     }
 
-    private static func makeModelContainer() throws -> ModelContainer {
+    static func makeModelContainer() throws -> ModelContainer {
         let schema = Schema([
             DayTimeline.self,
             VisitPlace.self,
@@ -104,15 +109,18 @@ struct MovesApp: App {
                 .environmentObject(captureManager)
                 .environmentObject(undoController)
                 .environmentObject(healthWorkoutRouteAutoImporter)
+                .environmentObject(cloudDataPresencePublisher)
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                DailyTimelineBackup.scheduleNextRun()
                 Task {
                     await captureManager.start()
                     await captureManager.refreshHistoricalBackfill()
-                    healthWorkoutRouteAutoImporter.resumeInterruptedHistoricalImportIfNeeded()
+                    healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()
                     await healthWorkoutRouteAutoImporter.startIfNeeded()
+                    await cloudDataPresencePublisher.publishNow()
                 }
             }
         }

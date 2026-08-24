@@ -64,6 +64,9 @@
     "Auto-off %@." : {
 
     },
+    "Back up yesterday every night" : {
+
+    },
     "Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking." : {
 
     },
@@ -86,6 +89,12 @@
 
     },
     "Created in Buxtehude by" : {
+
+    },
+    "CSV (.csv)" : {
+
+    },
+    "Daily iCloud Backup" : {
 
     },
     "Data Maintenance" : {
@@ -139,10 +148,22 @@
     "End" : {
 
     },
+    "Expand map" : {
+
+    },
     "Export" : {
 
     },
     "File Route Import" : {
+
+    },
+    "Format" : {
+
+    },
+    "GeoJSON (.geojson)" : {
+
+    },
+    "GPX (.gpx)" : {
 
     },
     "GPX route exported from Moves." : {
@@ -223,6 +244,9 @@
     "Open Settings" : {
 
     },
+    "Organize in year/month folders" : {
+
+    },
     "Place" : {
 
     },
@@ -257,6 +281,9 @@
 
     },
     "Show big map markers" : {
+
+    },
+    "Shrink map" : {
 
     },
     "Start" : {

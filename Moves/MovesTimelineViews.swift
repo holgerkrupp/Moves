@@ -9,6 +9,7 @@ import Foundation
 import MapKit
 import SwiftData
 import SwiftUI
+import UIKit
 
 enum MapMarkerDisplaySettings {
     static let showsBigMarkersKey = "showBigMapMarkers"
@@ -40,15 +41,21 @@ struct DayTimelinePage: View {
 
     var body: some View {
         Group {
-            if let dayTimeline {
+            if isActive, let dayTimeline {
                 DayTimelinePageContent(dayTimeline: dayTimeline, isActive: isActive)
-            } else {
+            } else if isActive {
                 loadingState
+            } else {
+                inactiveState
             }
         }
-        .task(id: dayKey) {
-            await loadDayTimeline()
+        .task(id: pageLoadKey) {
+            await syncDayTimelineForActivation()
         }
+    }
+
+    private var pageLoadKey: String {
+        "\(dayKey)|\(isActive ? "active" : "inactive")"
     }
 
     private var loadingState: some View {
@@ -62,6 +69,30 @@ struct DayTimelinePage: View {
         }
         .frame(maxWidth: .infinity, minHeight: 420)
         .panelSurface()
+    }
+
+    private var inactiveState: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: 420)
+            .onAppear {
+                releaseLoadedDay()
+            }
+    }
+
+    @MainActor
+    private func syncDayTimelineForActivation() async {
+        guard isActive else {
+            releaseLoadedDay()
+            return
+        }
+
+        await loadDayTimeline()
+    }
+
+    @MainActor
+    private func releaseLoadedDay() {
+        dayTimeline = nil
+        loadErrorMessage = nil
     }
 
     @MainActor
@@ -153,6 +184,10 @@ struct DayTimelinePageContent: View {
                     entries.insert(startEntry, at: 0)
                 }
             }
+        }
+
+        if entries.isEmpty, let carriedOverPlace = dayTimeline.carriedOverPlace {
+            entries.append(.start(place: carriedOverPlace, timestamp: dayTimeline.dayStart))
         }
 
         return DayTimelinePresentationCache(
@@ -595,10 +630,17 @@ struct DayMapStrip: View {
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     let dayTimeline: DayTimeline
     let isActive: Bool
+    private static let collapsedMapHeight: CGFloat = 180
+    private static let collapsedMapCornerRadius: CGFloat = 14
+    private static let fullScreenMapAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
+    private static let expandedMapVerticalMargin: CGFloat = 150
 
     @State private var camera: MapCameraPosition
+    @State private var mapRegion: MKCoordinateRegion
     @State private var historicalRoutes: [RenderedRoute]
     @State private var presentationCache: DayMapPresentationCache
+    @State private var isShowingFullScreenMap = false
+    @State private var collapsedSnapshotImage: UIImage?
 
     private var placeMarkers: [PlaceMarker] {
         presentationCache.placeMarkers
@@ -640,73 +682,372 @@ struct DayMapStrip: View {
         let cameraCoordinates = allCoordinates.isEmpty
             ? cache.latestSampleCoordinate.map { [$0] } ?? []
             : allCoordinates
-        _camera = State(initialValue: .region(MapRegionFactory.region(for: cameraCoordinates)))
+        let initialRegion = MapRegionFactory.region(for: cameraCoordinates)
+        _camera = State(initialValue: .region(initialRegion))
+        _mapRegion = State(initialValue: initialRegion)
         _historicalRoutes = State(initialValue: renderedRoutes)
         _presentationCache = State(initialValue: cache)
     }
 
     var body: some View {
+        activeMapView
+            .frame(height: isShowingFullScreenMap ? Self.expandedMapHeight : Self.collapsedMapHeight)
+            .clipShape(RoundedRectangle(cornerRadius: Self.collapsedMapCornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Self.collapsedMapCornerRadius, style: .continuous)
+                    .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                fullScreenToggleButton(isFullScreen: isShowingFullScreenMap)
+                    .padding(isShowingFullScreenMap ? 18 : 10)
+            }
+            .shadow(color: .black.opacity(isShowingFullScreenMap ? 0.12 : 0), radius: 18, x: 0, y: 8)
+            .animation(Self.fullScreenMapAnimation, value: isShowingFullScreenMap)
+            .task(id: "\(historicalRouteRefreshKey)|\(isActive ? 1 : 0)") {
+                guard isActive else { return }
+                await refreshHistoricalRouteCoordinates()
+            }
+            .task(id: cameraRefreshKey) {
+                refreshCamera()
+            }
+            .onChange(of: dayTimeline.dayKey) { _, _ in
+                presentationCache = Self.makePresentationCache(for: dayTimeline)
+            }
+    }
+
+    @ViewBuilder
+    private var activeMapView: some View {
+        if isShowingFullScreenMap {
+            mapView
+        } else {
+            collapsedMapSnapshotView
+        }
+    }
+
+    private var mapView: some View {
         Map(position: $camera, interactionModes: [.pan, .zoom]) {
-            ForEach(historicalRoutes) { route in
-                if route.shadowCoordinates.count > 1 {
-                    MapPolyline(coordinates: route.shadowCoordinates)
-                        .stroke(route.shadowTint, lineWidth: route.shadowLineWidth)
-                }
+            mapContent
+        }
+        .mapStyle(.standard(elevation: .flat, emphasis: .muted))
+    }
 
-                if route.coordinates.count > 1 {
-                    MapPolyline(coordinates: route.coordinates)
-                        .stroke(route.tint.opacity(0.95), lineWidth: route.lineWidth)
-                }
-            }
+    private var collapsedMapSnapshotView: some View {
+        GeometryReader { proxy in
+            let size = CGSize(
+                width: max(proxy.size.width, 1),
+                height: Self.collapsedMapHeight
+            )
 
-            if let liveRouteSnapshot,
-               liveRouteSnapshot.coordinates.count > 1 {
-                MapPolyline(coordinates: liveRouteSnapshot.coordinates)
-                    .stroke(MovesPalette.routeTracking.opacity(0.95), lineWidth: 5)
-            }
-
-            ForEach(placeMarkers) { marker in
-                if showsBigMarkers {
-                    Marker(marker.title, coordinate: marker.coordinate)
-                        .tint(MovesPalette.place)
+            ZStack {
+                if let collapsedSnapshotImage {
+                    Image(uiImage: collapsedSnapshotImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size.width, height: size.height)
+                        .clipped()
                 } else {
-                    Annotation(marker.title, coordinate: marker.coordinate, anchor: .center) {
-                        MapLocationDot(tint: MovesPalette.place)
-                    }
+                    Rectangle()
+                        .fill(MovesPalette.card.opacity(0.72))
+
+                    ProgressView()
+                        .tint(MovesPalette.routeTracking)
                 }
+            }
+            .task(id: collapsedSnapshotRefreshKey(for: size)) {
+                await refreshCollapsedSnapshot(size: size)
+            }
+        }
+    }
+
+    @MapContentBuilder
+    private var mapContent: some MapContent {
+        ForEach(historicalRoutes) { route in
+            if route.shadowCoordinates.count > 1 {
+                MapPolyline(coordinates: route.shadowCoordinates)
+                    .stroke(route.shadowTint, lineWidth: route.shadowLineWidth)
+            }
+
+            if route.coordinates.count > 1 {
+                MapPolyline(coordinates: route.coordinates)
+                    .stroke(route.tint.opacity(0.95), lineWidth: route.lineWidth)
+            }
+        }
+
+        if let liveRouteSnapshot,
+           liveRouteSnapshot.coordinates.count > 1 {
+            MapPolyline(coordinates: liveRouteSnapshot.coordinates)
+                .stroke(MovesPalette.routeTracking.opacity(0.95), lineWidth: 5)
+        }
+
+        ForEach(placeMarkers) { marker in
+            if showsBigMarkers {
+                Marker(marker.title, coordinate: marker.coordinate)
+                    .tint(MovesPalette.place)
+            } else {
+                Annotation(marker.title, coordinate: marker.coordinate, anchor: .center) {
+                    MapLocationDot(tint: MovesPalette.place)
+                }
+            }
+        }
+
+        if placeMarkers.isEmpty,
+           historicalRouteCoordinates.isEmpty,
+           (liveRouteSnapshot?.coordinates.isEmpty ?? true),
+           let latestSampleCoordinate {
+            if showsBigMarkers {
+                Marker("Captured location", coordinate: latestSampleCoordinate)
+                    .tint(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
+            } else {
+                Annotation("Captured location", coordinate: latestSampleCoordinate, anchor: .center) {
+                    MapLocationDot(tint: liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
+                }
+            }
+        }
+    }
+
+    private func fullScreenToggleButton(isFullScreen: Bool) -> some View {
+        Button {
+            withAnimation(Self.fullScreenMapAnimation) {
+                isShowingFullScreenMap = !isFullScreen
+            }
+        } label: {
+            Image(systemName: isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .frame(width: 40, height: 40)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frostedCircle(enabled: true)
+        .accessibilityLabel(isFullScreen ? "Shrink map" : "Expand map")
+        .help(isFullScreen ? "Shrink map" : "Expand map")
+    }
+
+    private static var expandedMapHeight: CGFloat {
+        max(360, screenBounds.height - expandedMapVerticalMargin)
+    }
+
+    private var collapsedSnapshotRouteKey: String {
+        historicalRoutes.map { route in
+            let first = route.coordinates.first
+            let last = route.coordinates.last
+            let firstKey = first.map { "\(Int(($0.latitude * 10_000).rounded())):\(Int(($0.longitude * 10_000).rounded()))" } ?? "none"
+            let lastKey = last.map { "\(Int(($0.latitude * 10_000).rounded())):\(Int(($0.longitude * 10_000).rounded()))" } ?? "none"
+
+            return "\(route.id)|\(route.coordinates.count)|\(route.shadowCoordinates.count)|\(firstKey)|\(lastKey)"
+        }
+        .joined(separator: ",")
+    }
+
+    private func collapsedSnapshotRefreshKey(for size: CGSize) -> String {
+        [
+            "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))@\(Int(Self.screenScale.rounded()))",
+            presentationCache.routeRefreshKey,
+            presentationCache.placeRefreshKey,
+            presentationCache.latestSampleKey,
+            liveRouteSnapshot?.id ?? "none",
+            showsBigMarkers ? "big" : "small",
+            collapsedSnapshotRouteKey
+        ]
+        .joined(separator: "|")
+    }
+
+    @MainActor
+    private func refreshCollapsedSnapshot(size: CGSize) async {
+        guard !isShowingFullScreenMap, size.width > 1, size.height > 1 else { return }
+
+        do {
+            let image = try await Self.makeCollapsedSnapshot(
+                region: mapRegion,
+                size: size,
+                scale: Self.screenScale,
+                routes: historicalRoutes,
+                liveRouteSnapshot: liveRouteSnapshot,
+                placeMarkers: placeMarkers,
+                latestSampleCoordinate: latestSampleCoordinate,
+                showsBigMarkers: showsBigMarkers
+            )
+
+            guard !Task.isCancelled else { return }
+            collapsedSnapshotImage = image
+        } catch {
+            guard !Task.isCancelled else { return }
+            collapsedSnapshotImage = nil
+        }
+    }
+
+    private static func makeCollapsedSnapshot(
+        region: MKCoordinateRegion,
+        size: CGSize,
+        scale: CGFloat,
+        routes: [RenderedRoute],
+        liveRouteSnapshot: LiveRouteTrackingSnapshot?,
+        placeMarkers: [PlaceMarker],
+        latestSampleCoordinate: CLLocationCoordinate2D?,
+        showsBigMarkers: Bool
+    ) async throws -> UIImage {
+        let options = MKMapSnapshotter.Options()
+        options.region = region
+        options.size = size
+        options.scale = scale
+
+        let snapshotter = MKMapSnapshotter(options: options)
+        let snapshot = try await withCheckedThrowingContinuation { continuation in
+            snapshotter.start { snapshot, error in
+                if let snapshot {
+                    continuation.resume(returning: snapshot)
+                } else {
+                    continuation.resume(throwing: error ?? CancellationError())
+                }
+            }
+        }
+
+        return renderCollapsedSnapshotOverlay(
+            snapshot: snapshot,
+            routes: routes,
+            liveRouteSnapshot: liveRouteSnapshot,
+            placeMarkers: placeMarkers,
+            latestSampleCoordinate: latestSampleCoordinate,
+            showsBigMarkers: showsBigMarkers
+        )
+    }
+
+    private static func renderCollapsedSnapshotOverlay(
+        snapshot: MKMapSnapshotter.Snapshot,
+        routes: [RenderedRoute],
+        liveRouteSnapshot: LiveRouteTrackingSnapshot?,
+        placeMarkers: [PlaceMarker],
+        latestSampleCoordinate: CLLocationCoordinate2D?,
+        showsBigMarkers: Bool
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = snapshot.image.scale
+        format.opaque = true
+
+        return UIGraphicsImageRenderer(size: snapshot.image.size, format: format).image { _ in
+            snapshot.image.draw(at: .zero)
+
+            for route in routes {
+                strokeRoute(
+                    route.shadowCoordinates,
+                    in: snapshot,
+                    color: UIColor(route.shadowTint),
+                    lineWidth: route.shadowLineWidth
+                )
+                strokeRoute(
+                    route.coordinates,
+                    in: snapshot,
+                    color: UIColor(route.tint).withAlphaComponent(0.95),
+                    lineWidth: route.lineWidth
+                )
+            }
+
+            if let liveRouteSnapshot {
+                strokeRoute(
+                    liveRouteSnapshot.coordinates,
+                    in: snapshot,
+                    color: UIColor(MovesPalette.routeTracking).withAlphaComponent(0.95),
+                    lineWidth: 5
+                )
+            }
+
+            for marker in placeMarkers {
+                drawMarker(
+                    at: snapshot.point(for: marker.coordinate),
+                    in: snapshot.image.size,
+                    tint: UIColor(MovesPalette.place),
+                    isLarge: showsBigMarkers
+                )
             }
 
             if placeMarkers.isEmpty,
-               historicalRouteCoordinates.isEmpty,
+               routes.flatMap(\.coordinates).isEmpty,
                (liveRouteSnapshot?.coordinates.isEmpty ?? true),
                let latestSampleCoordinate {
-                if showsBigMarkers {
-                    Marker("Captured location", coordinate: latestSampleCoordinate)
-                        .tint(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
-                } else {
-                    Annotation("Captured location", coordinate: latestSampleCoordinate, anchor: .center) {
-                        MapLocationDot(tint: liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking)
-                    }
-                }
+                drawMarker(
+                    at: snapshot.point(for: latestSampleCoordinate),
+                    in: snapshot.image.size,
+                    tint: UIColor(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking),
+                    isLarge: showsBigMarkers
+                )
             }
         }
-        .mapStyle(.standard(elevation: .flat, emphasis: .muted))
-        .frame(height: 180)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
+    }
+
+    private static func strokeRoute(
+        _ coordinates: [CLLocationCoordinate2D],
+        in snapshot: MKMapSnapshotter.Snapshot,
+        color: UIColor,
+        lineWidth: CGFloat
+    ) {
+        guard coordinates.count > 1 else { return }
+
+        let path = UIBezierPath()
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.lineWidth = lineWidth
+
+        for (index, coordinate) in coordinates.enumerated() {
+            let point = snapshot.point(for: coordinate)
+            if index == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
         }
-        .task(id: "\(historicalRouteRefreshKey)|\(isActive ? 1 : 0)") {
-            guard isActive else { return }
-            await refreshHistoricalRouteCoordinates()
+
+        color.setStroke()
+        path.stroke()
+    }
+
+    private static func drawMarker(
+        at point: CGPoint,
+        in size: CGSize,
+        tint: UIColor,
+        isLarge: Bool
+    ) {
+        let diameter: CGFloat = isLarge ? 14 : 8
+        let radius = diameter / 2
+        let drawingBounds = CGRect(
+            x: -diameter,
+            y: -diameter,
+            width: size.width + diameter * 2,
+            height: size.height + diameter * 2
+        )
+        guard drawingBounds.contains(point) else { return }
+
+        let rect = CGRect(
+            x: point.x - radius,
+            y: point.y - radius,
+            width: diameter,
+            height: diameter
+        )
+        let path = UIBezierPath(ovalIn: rect)
+        tint.setFill()
+        path.fill()
+
+        UIColor.white.setStroke()
+        path.lineWidth = isLarge ? 2 : 1.5
+        path.stroke()
+    }
+
+    private static var screenBounds: CGRect {
+        let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+
+        if let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive }) {
+            return windowScene.screen.bounds
         }
-        .task(id: cameraRefreshKey) {
-            refreshCamera()
+
+        return windowScenes.first?.screen.bounds ?? CGRect(x: 0, y: 0, width: 393, height: 852)
+    }
+
+    private static var screenScale: CGFloat {
+        let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+
+        if let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive }) {
+            return windowScene.screen.scale
         }
-        .onChange(of: dayTimeline.dayKey) { _, _ in
-            presentationCache = Self.makePresentationCache(for: dayTimeline)
-        }
+
+        return windowScenes.first?.screen.scale ?? 2
     }
 
     @MainActor
@@ -759,7 +1100,9 @@ struct DayMapStrip: View {
             : allCoordinates
 
         if !cameraCoordinates.isEmpty {
-            camera = .region(MapRegionFactory.region(for: cameraCoordinates))
+            let region = MapRegionFactory.region(for: cameraCoordinates)
+            mapRegion = region
+            camera = .region(region)
         }
     }
 
@@ -791,7 +1134,7 @@ struct DayMapStrip: View {
         routeCoordinates: [CLLocationCoordinate2D],
         liveRouteCoordinates: [CLLocationCoordinate2D]
     ) -> [CLLocationCoordinate2D] {
-        let placeCoordinates = dayTimeline.places.map(\.coordinate)
+        let placeCoordinates = dayTimeline.displayPlaces.map(\.coordinate)
         return routeCoordinates + liveRouteCoordinates + placeCoordinates
     }
 
@@ -803,7 +1146,7 @@ struct DayMapStrip: View {
     }
 
     private static func makePresentationCache(for dayTimeline: DayTimeline) -> DayMapPresentationCache {
-        let sortedPlaces = dayTimeline.places.sorted(by: { $0.arrivalDate < $1.arrivalDate })
+        let sortedPlaces = dayTimeline.displayPlaces.sorted(by: { $0.arrivalDate < $1.arrivalDate })
         let placeMarkers = sortedPlaces.map {
             PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate)
         }

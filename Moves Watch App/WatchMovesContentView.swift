@@ -69,59 +69,60 @@ struct WatchMovesContentView: View {
             }
             .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text(tracker.daySummary.dayTitle)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                Text(tracker.statusText)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-                    
-           
+            VStack(spacing: 0) {
+                HStack(alignment: .top) {
+                    Button {
+                        tracker.toggleTracking()
+                    } label: {
+                        Label(
+                            tracker.isTracking ? "Stop GPS" : "Start GPS",
+                            systemImage: tracker.isTracking ? "location.viewfinder" : "location.fill.viewfinder"
+                        )
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .frame(width: 40, height: 40)
+                    }
+                    .padding(8)
+                    .buttonStyle(.plain)
+                    .tint(tracker.isTracking ? .red : Color("MovesRouteTracking"))
+                    .background(tracker.isTracking ? Color.red : Color("MovesRouteTracking"), in: Circle())
+                    .foregroundStyle(.white)
+                    .accessibilityLabel(tracker.isTracking ? "Stop GPS" : "Start GPS")
 
-            VStack(alignment: .trailing, spacing: 8) {
-                
-                Button {
-                    tracker.toggleTracking()
-                } label: {
-                    Label(
-                        tracker.isTracking ? "Stop GPS" : "Start GPS",
-                        systemImage: tracker.isTracking ? "location.viewfinder" : "location.fill.viewfinder"
-                    )
-                    .labelStyle(.iconOnly)
-                    .font(.system(size: 25, weight: .bold, design: .rounded))
-                    .frame(width: 40, height: 40)
+                    Spacer(minLength: 0)
                 }
-                .padding(8)
-                .buttonStyle(.plain)
-                .tint(tracker.isTracking ? .red : Color("MovesRouteTracking"))
-                .background(tracker.isTracking ? Color.red : Color("MovesRouteTracking"), in: Circle())
-                .foregroundStyle(.white)
-                .accessibilityLabel(tracker.isTracking ? "Stop GPS" : "Start GPS")
-             
-                Spacer()
-                VStack{
-                    HStack {
-                        Text(totalDistanceText)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                        Spacer(minLength: 8)
-                        Text("\(tracker.daySummary.visitedLocationCount) places")
+
+                Spacer(minLength: 0)
+
+                HStack(alignment: .bottom, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(tracker.daySummary.dayTitle)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Text(tracker.statusText)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack {
+                        HStack {
+                            Text(totalDistanceText)
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                            Spacer(minLength: 8)
+                            Text("\(tracker.daySummary.visitedLocationCount) places")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("\(tracker.daySummary.moveCount) moves today")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
-                    
-                    Text("\(tracker.daySummary.moveCount) moves today")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5))
                 }
-                .padding(6)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5))
-
-
-                
             }
-           
-
             .padding(8)
         }
         .ignoresSafeArea()
@@ -137,6 +138,4 @@ struct WatchMovesContentView: View {
         }
     }
 }
-
-
 

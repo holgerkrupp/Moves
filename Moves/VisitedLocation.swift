@@ -156,6 +156,34 @@ final class DayTimeline {
     }()
 }
 
+extension DayTimeline {
+    var hasRecordedActivity: Bool {
+        !places.isEmpty || !moves.isEmpty || !samples.isEmpty
+    }
+
+    /// The last known place from an earlier day, used when nothing was recorded on this day
+    /// (for example when the user never left home) so the day still shows where they were.
+    var carriedOverPlace: VisitPlace? {
+        guard !hasRecordedActivity, let modelContext else { return nil }
+
+        let start = dayStart
+        var descriptor = FetchDescriptor<VisitPlace>(
+            predicate: #Predicate { place in
+                place.arrivalDate < start
+            },
+            sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    /// Places to render for this day, falling back to the carried over place on quiet days.
+    var displayPlaces: [VisitPlace] {
+        places.isEmpty ? [carriedOverPlace].compactMap { $0 } : places
+    }
+}
+
 @Model
 final class VisitPlace {
     var id: UUID = UUID()
