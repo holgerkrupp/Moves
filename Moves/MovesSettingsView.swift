@@ -41,6 +41,7 @@ struct MovesSettingsView: View {
     @State private var dailyBackupMessage = ""
     @State private var isShowingDailyBackupMessage = false
     @State private var isRunningDailyBackup = false
+    @State private var dailyBackupDidFail = false
 
     init(
         dayTimelines: [DayTimeline],
@@ -70,12 +71,21 @@ struct MovesSettingsView: View {
                 Toggle("Organize in year/month folders", isOn: $dailyBackupUsesMonthlyFolders)
 
                 SettingsActionRow(
-                    title: "Back up yesterday now",
+                    title: isRunningDailyBackup ? "Backing up\u{2026}" : "Back up yesterday now",
                     systemImage: "icloud.and.arrow.up",
                     isDisabled: isRunningDailyBackup
                 ) {
                     backUpYesterday()
                 }
+            }
+
+            // Shown inline as well as in the alert, so a result is never lost if
+            // the alert cannot present.
+            if !dailyBackupMessage.isEmpty {
+                Text(dailyBackupMessage)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(dailyBackupDidFail ? Color.red : Color.green)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Text(dailyBackupDescription)
@@ -348,9 +358,12 @@ struct MovesSettingsView: View {
             defer { isRunningDailyBackup = false }
             do {
                 let url = try await DailyTimelineBackup.saveYesterday(in: container)
+                dailyBackupDidFail = false
                 dailyBackupMessage = "Saved \(url.lastPathComponent) to iCloud Drive/Moves. It may take a moment to appear in the Files app."
             } catch {
+                dailyBackupDidFail = true
                 dailyBackupMessage = "Backup failed: \(error.localizedDescription)"
+                DailyTimelineBackup.log.error("Manual backup failed: \(String(describing: error), privacy: .public)")
             }
             isShowingDailyBackupMessage = true
         }

@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import OSLog
 import SwiftData
 
 enum DailyTimelineBackupFormat: String, CaseIterable, Identifiable {
@@ -59,6 +60,8 @@ enum DailyTimelineBackup {
     static let usesMonthlyFoldersKey = "Moves.dailyTimelineBackup.usesMonthlyFolders"
     static let cloudContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
 
+    static let log = Logger(subsystem: "de.holgerkrupp.Moves", category: "DailyTimelineBackup")
+
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.bool(forKey: isEnabledKey)
     }
@@ -86,15 +89,18 @@ enum DailyTimelineBackup {
         let calendar = Calendar.current
         let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
         let dayKey = DayTimeline.makeDayKey(for: yesterday)
+        log.info("Starting backup for \(dayKey, privacy: .public)")
         let destinationDirectory = try ensureDestinationDirectory(
             for: yesterday,
             userDefaults: userDefaults
         )
+        log.info("Destination directory: \(destinationDirectory.path, privacy: .public)")
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<DayTimeline>(
             predicate: #Predicate { $0.dayKey == dayKey }
         )
         guard let day = try context.fetch(descriptor).first else {
+            log.error("No DayTimeline stored for \(dayKey, privacy: .public)")
             throw DailyTimelineBackupError.noTimeline(for: yesterday)
         }
 
@@ -112,8 +118,10 @@ enum DailyTimelineBackup {
         let destination = destinationDirectory.appendingPathComponent(payload.filename)
         try writeCoordinated(payload.data, to: destination)
         guard FileManager.default.fileExists(atPath: destination.path) else {
+            log.error("Write reported success but no file at \(destination.path, privacy: .public)")
             throw DailyTimelineBackupError.fileWasNotWritten
         }
+        log.info("Wrote \(payload.data.count) bytes to \(destination.path, privacy: .public)")
         return destination
     }
 
@@ -153,6 +161,7 @@ enum DailyTimelineBackup {
         guard let containerURL = fileManager.url(
             forUbiquityContainerIdentifier: cloudContainerIdentifier
         ) else {
+            log.error("url(forUbiquityContainerIdentifier:) returned nil for \(cloudContainerIdentifier, privacy: .public)")
             throw DailyTimelineBackupError.iCloudDriveUnavailable
         }
 
