@@ -331,6 +331,7 @@ struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @EnvironmentObject private var undoController: AppUndoController
     @EnvironmentObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
+    @EnvironmentObject private var multiDevicePresenceManager: MultiDevicePresenceManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -410,8 +411,22 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingDatePicker) {
             datePickerSheet
         }
+        .alert(
+            "Use location on this device?",
+            isPresented: $multiDevicePresenceManager.shouldChooseLocationRole
+        ) {
+            Button("Listen for location changes") {
+                multiDevicePresenceManager.choose(.tracking, captureManager: captureManager)
+            }
+            Button("Read-only / management") {
+                multiDevicePresenceManager.choose(.management, captureManager: captureManager)
+            }
+        } message: {
+            Text(multiDevicePresenceManager.promptMessage)
+        }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
+            multiDevicePresenceManager.refreshPresence()
             await captureManager.start()
         }
         .onAppear {
@@ -439,6 +454,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            multiDevicePresenceManager.refreshPresence()
             openCurrentDay()
             publishWidgetSnapshot()
             refreshSpotlightIndex()
@@ -1703,6 +1719,7 @@ struct ContentView_Previews: PreviewProvider {
             KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
+            MovesDeviceProfile.self,
             configurations: configuration
         )
 
@@ -1711,5 +1728,6 @@ struct ContentView_Previews: PreviewProvider {
             .environmentObject(MovesLocationCaptureManager(modelContainer: container))
             .environmentObject(AppUndoController())
             .environmentObject(MovesCloudDataPresencePublisher(modelContainer: container))
+            .environmentObject(MultiDevicePresenceManager(modelContainer: container))
     }
 }

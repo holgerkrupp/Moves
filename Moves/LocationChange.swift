@@ -678,6 +678,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func start() async {
         guard !shouldSkipLiveTracking else { return }
+        guard MultiDeviceLocationRoleStore.allowsLocationCapture else {
+            stop()
+            return
+        }
 
         let status = manager.authorizationStatus
         handleAuthorization(status)
@@ -694,6 +698,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func requestTrackingAuthorization() {
         guard !shouldSkipLiveTracking else { return }
+        guard MultiDeviceLocationRoleStore.allowsLocationCapture else {
+            stop()
+            return
+        }
 
         let status = manager.authorizationStatus
         authorizationStatus = status
@@ -734,6 +742,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func setBackgroundLocationListeningEnabled(_ isEnabled: Bool) {
+        guard MultiDeviceLocationRoleStore.allowsLocationCapture || !isEnabled else { return }
         isBackgroundLocationListeningEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: BackgroundLocationListeningSettings.isEnabledKey)
 
@@ -744,6 +753,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func refreshHistoricalBackfill() async {
         guard !shouldSkipLiveTracking else { return }
+        guard MultiDeviceLocationRoleStore.allowsLocationCapture else { return }
 
         guard isAuthorizedForTracking else { return }
 
@@ -754,6 +764,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func enableTemporaryRouteTracking(duration: TemporaryRouteTrackingDuration) {
         guard !shouldSkipLiveTracking else { return }
+        guard MultiDeviceLocationRoleStore.allowsLocationCapture else { return }
         guard isAuthorizedForTracking else {
             if authorizationStatus == .notDetermined {
                 pendingTemporaryRouteTrackingDuration = duration
@@ -846,6 +857,23 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         applyTrackingConfiguration()
         Task {
             await routeTrackingLiveActivity.end()
+        }
+    }
+
+    func applyMultiDeviceLocationRole(_ role: MultiDeviceLocationRole) {
+        switch role {
+        case .tracking:
+            setBackgroundLocationListeningEnabled(true)
+            Task { await start() }
+        case .management:
+            pendingTemporaryRouteTrackingDuration = nil
+            cancelTemporaryRouteTrackingExpiryTask()
+            temporaryRouteTrackingStartedAt = nil
+            temporaryRouteTrackingEndsAt = nil
+            persistTemporaryRouteTrackingState()
+            setBackgroundLocationListeningEnabled(false)
+            stop()
+            Task { await routeTrackingLiveActivity.end() }
         }
     }
 

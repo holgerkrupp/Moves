@@ -1643,6 +1643,25 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(phoneBSamples.map(\.deviceIdentifier), ["phone-b"])
     }
 
+    func testManagementRoleDisablesLocationCapture() {
+        let defaults = UserDefaults.standard
+        let key = "Moves.multiDevice.locationRole"
+        let originalValue = defaults.object(forKey: key)
+        defer {
+            if let originalValue {
+                defaults.set(originalValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        MultiDeviceLocationRoleStore.set(.management)
+        XCTAssertFalse(MultiDeviceLocationRoleStore.allowsLocationCapture)
+
+        MultiDeviceLocationRoleStore.set(.tracking)
+        XCTAssertTrue(MultiDeviceLocationRoleStore.allowsLocationCapture)
+    }
+
     private func multiDeviceSamples(
         device: String,
         coordinates: [(CLLocationDegrees, CLLocationDegrees)]

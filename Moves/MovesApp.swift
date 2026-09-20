@@ -50,6 +50,7 @@ struct MovesApp: App {
     @StateObject private var healthWorkoutRouteAutoImporter: HealthWorkoutRouteAutoImportManager
     @StateObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @StateObject private var locationServiceSyncManager: LocationServiceSyncManager
+    @StateObject private var multiDevicePresenceManager: MultiDevicePresenceManager
 
     init() {
         do {
@@ -71,6 +72,9 @@ struct MovesApp: App {
             _locationServiceSyncManager = StateObject(
                 wrappedValue: LocationServiceSyncManager(modelContainer: container)
             )
+            _multiDevicePresenceManager = StateObject(
+                wrappedValue: MultiDevicePresenceManager(modelContainer: container)
+            )
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
                 captureManager: captureManager
@@ -88,6 +92,7 @@ struct MovesApp: App {
             KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
+            MovesDeviceProfile.self,
         ])
         let cacheSchema = Schema([ShareMapAggregate.self])
         let schema = Schema([
@@ -96,6 +101,7 @@ struct MovesApp: App {
             KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
+            MovesDeviceProfile.self,
             ShareMapAggregate.self,
         ])
 
@@ -145,6 +151,7 @@ struct MovesApp: App {
                 .environmentObject(healthWorkoutRouteAutoImporter)
                 .environmentObject(cloudDataPresencePublisher)
                 .environmentObject(locationServiceSyncManager)
+                .environmentObject(multiDevicePresenceManager)
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { _, newPhase in
@@ -152,6 +159,7 @@ struct MovesApp: App {
                 DailyTimelineBackup.scheduleNextRun()
                 ShareMapAggregateBackgroundTask.scheduleNextRun()
                 Task {
+                    multiDevicePresenceManager.refreshPresence()
                     await captureManager.start()
                     await captureManager.refreshHistoricalBackfill()
                     healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()

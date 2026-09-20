@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import CoreLocation
 import MapKit
 import Security
@@ -156,6 +157,22 @@ final class DayTimeline {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+}
+
+/// A lightweight CloudKit-synced presence record for a Moves installation.
+/// It contains no location data and lets another iPhone discover that this is
+/// a multi-device account before either device starts recording a trip.
+@Model
+final class MovesDeviceProfile {
+    var deviceIdentifier: String = ""
+    var displayName: String = ""
+    var lastSeenAt: Date = Date.now
+
+    init(deviceIdentifier: String, displayName: String) {
+        self.deviceIdentifier = deviceIdentifier
+        self.displayName = displayName
+        self.lastSeenAt = .now
+    }
 }
 
 extension DayTimeline {
@@ -2000,6 +2017,86 @@ enum DeviceIdentityStore {
             attributes.forEach { addQuery[$0.key] = $0.value }
             _ = SecItemAdd(addQuery as CFDictionary, nil)
         }
+    }
+}
+
+enum MultiDeviceLocationRole: String {
+    case tracking
+    case management
+}
+
+enum MultiDeviceLocationRoleStore {
+    private static let roleKey = "Moves.multiDevice.locationRole"
+
+    static var current: MultiDeviceLocationRole? {
+        UserDefaults.standard.string(forKey: roleKey).flatMap(MultiDeviceLocationRole.init(rawValue:))
+    }
+
+    static var allowsLocationCapture: Bool {
+        current != .management
+    }
+
+    static func set(_ role: MultiDeviceLocationRole) {
+        UserDefaults.standard.set(role.rawValue, forKey: roleKey)
+    }
+}
+
+@MainActor
+final class MultiDevicePresenceManager: ObservableObject {
+    @Published var shouldChooseLocationRole = false
+    @Published private(set) var otherDeviceNames: [String] = []
+
+    private let modelContainer: ModelContainer
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
+    var promptMessage: String {
+        let names = otherDeviceNames.joined(separator: ", ")
+        let subject = names.isEmpty ? "another iPhone" : names
+        return "Moves found \(subject) in this iCloud account. Should this device record location changes, or only manage and view the shared timeline?"
+    }
+
+    func refreshPresence() {
+        let context = ModelContext(modelContainer)
+        let currentIdentifier = DeviceIdentityStore.currentIdentifier
+
+        do {
+            let profiles = try context.fetch(FetchDescriptor<MovesDeviceProfile>())
+            if let currentProfile = profiles.first(where: { $0.deviceIdentifier == currentIdentifier }) {
+                currentProfile.displayName = DeviceIdentityStore.displayName
+                currentProfile.lastSeenAt = .now
+            } else {
+                context.insert(MovesDeviceProfile(
+                    deviceIdentifier: currentIdentifier,
+                    displayName: DeviceIdentityStore.displayName
+                ))
+            }
+            try context.save()
+
+            let refreshedProfiles = try context.fetch(FetchDescriptor<MovesDeviceProfile>())
+            otherDeviceNames = refreshedProfiles
+                .filter { $0.deviceIdentifier != currentIdentifier }
+                .map { profile in
+                    profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "Another device"
+                        : profile.displayName
+                }
+                .sorted()
+
+            if !otherDeviceNames.isEmpty, MultiDeviceLocationRoleStore.current == nil {
+                shouldChooseLocationRole = true
+            }
+        } catch {
+            print("Failed to publish multi-device presence: \(error.localizedDescription)")
+        }
+    }
+
+    func choose(_ role: MultiDeviceLocationRole, captureManager: MovesLocationCaptureManager) {
+        MultiDeviceLocationRoleStore.set(role)
+        shouldChooseLocationRole = false
+        captureManager.applyMultiDeviceLocationRole(role)
     }
 }
 
