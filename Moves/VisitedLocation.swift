@@ -265,6 +265,46 @@ fileprivate extension VisitPlace {
 }
 
 @Model
+final class KnownLocation {
+    var id: UUID = UUID()
+    var name: String = ""
+    var latitude: Double = 0
+    var longitude: Double = 0
+    var radiusMeters: Double = 120
+    var createdAt: Date = Date.now
+    var updatedAt: Date = Date.now
+
+    init(
+        name: String,
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Double = 120
+    ) {
+        self.id = UUID()
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.radiusMeters = radiusMeters
+        self.createdAt = .now
+        self.updatedAt = .now
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    func distance(from coordinate: CLLocationCoordinate2D) -> CLLocationDistance {
+        CLLocation(latitude: latitude, longitude: longitude).distance(
+            from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        )
+    }
+
+    func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        distance(from: coordinate) <= max(radiusMeters, 0)
+    }
+}
+
+@Model
 final class MoveSegment {
     var id: UUID = UUID()
     var dedupeKey: String = ""
@@ -274,6 +314,7 @@ final class MoveSegment {
     var distanceMeters: Double = 0
     var stepCount: Int? = nil
     var comment: String? = nil
+    var isExcludedFromConnectionStatistics: Bool = false
     var createdAt: Date = Date.now
 
     var startPlace: VisitPlace?
@@ -467,6 +508,7 @@ struct MoveSegmentSnapshot: Codable {
     let distanceMeters: Double
     let stepCount: Int?
     let comment: String?
+    let isExcludedFromConnectionStatistics: Bool?
     let createdAt: Date
     let startPlaceID: UUID?
     let endPlaceID: UUID?
@@ -618,6 +660,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     distanceMeters: move.distanceMeters,
                     stepCount: move.stepCount,
                     comment: move.comment,
+                    isExcludedFromConnectionStatistics: move.isExcludedFromConnectionStatistics,
                     createdAt: move.createdAt,
                     startPlaceID: move.startPlace?.id,
                     endPlaceID: move.endPlace?.id,
@@ -701,6 +744,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             )
             move.id = moveSnapshot.id
             move.createdAt = moveSnapshot.createdAt
+            move.isExcludedFromConnectionStatistics = moveSnapshot.isExcludedFromConnectionStatistics ?? false
             move.transportModeRawValue = moveSnapshot.transportModeRawValue
             move.routeCacheSignature = moveSnapshot.routeCacheSignature
             move.routeCacheCoordinatesData = moveSnapshot.routeCacheCoordinatesData
@@ -1518,6 +1562,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         destination.startDate = min(destination.startDate, source.startDate)
         destination.endDate = max(destination.endDate, source.endDate)
         destination.distanceMeters = max(destination.distanceMeters, source.distanceMeters)
+        destination.isExcludedFromConnectionStatistics = destination.isExcludedFromConnectionStatistics
+            || source.isExcludedFromConnectionStatistics
 
         if destination.stepCount == nil {
             destination.stepCount = source.stepCount
@@ -1780,6 +1826,17 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 
     private func inferredUserLabel(near coordinate: CLLocationCoordinate2D) throws -> String? {
+        if let knownLocations = try? modelContext.fetch(FetchDescriptor<KnownLocation>()),
+           let match = knownLocations
+            .map({ ($0, $0.distance(from: coordinate)) })
+            .filter({ $0.1 <= max($0.0.radiusMeters, 0) })
+            .min(by: { $0.1 < $1.1 }) {
+            let name = match.0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+        }
+
         let descriptor = FetchDescriptor<VisitPlace>(
             predicate: #Predicate { place in
                 place.userLabel != nil

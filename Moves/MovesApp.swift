@@ -85,6 +85,7 @@ struct MovesApp: App {
         let timelineSchema = Schema([
             DayTimeline.self,
             VisitPlace.self,
+            KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
         ])
@@ -92,6 +93,7 @@ struct MovesApp: App {
         let schema = Schema([
             DayTimeline.self,
             VisitPlace.self,
+            KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
             ShareMapAggregate.self,

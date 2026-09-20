@@ -1,7 +1,83 @@
 import XCTest
+import CoreLocation
+import SwiftData
 @testable import Moves
 
 final class MovesStatisticsSearchTests: XCTestCase {
+    func testKnownLocationUsesItsIndividualRadius() {
+        let location = KnownLocation(
+            name: "Office",
+            latitude: 53.5500,
+            longitude: 9.9900,
+            radiusMeters: 100
+        )
+
+        XCTAssertTrue(location.contains(CLLocationCoordinate2D(latitude: 53.5504, longitude: 9.9900)))
+        XCTAssertFalse(location.contains(CLLocationCoordinate2D(latitude: 53.5520, longitude: 9.9900)))
+
+        location.radiusMeters = 300
+        XCTAssertTrue(location.contains(CLLocationCoordinate2D(latitude: 53.5520, longitude: 9.9900)))
+    }
+
+    func testRenamingKnownLocationUpdatesMatchingLabelsWithoutOverwritingCustomLabels() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let matchingOldLabel = makePlace(title: "Office", arrival: start, departure: nil)
+        let matchingCustomLabel = makePlace(title: "Customer Meeting", arrival: start, departure: nil)
+        let location = KnownLocation(
+            name: "Work",
+            latitude: 53.0,
+            longitude: 10.0,
+            radiusMeters: 150
+        )
+
+        KnownLocationLabeler.apply(
+            location: location,
+            previousName: "Office",
+            to: [matchingOldLabel, matchingCustomLabel]
+        )
+
+        XCTAssertEqual(matchingOldLabel.userLabel, "Work")
+        XCTAssertEqual(matchingCustomLabel.userLabel, "Customer Meeting")
+    }
+
+    @MainActor
+    func testNewVisitUsesKnownLocationNameAndRadius() throws {
+        let schema = Schema([
+            DayTimeline.self,
+            VisitPlace.self,
+            KnownLocation.self,
+            MoveSegment.self,
+            LocationSample.self,
+        ])
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let context = ModelContext(container)
+        context.insert(KnownLocation(
+            name: "Home",
+            latitude: 53.5500,
+            longitude: 9.9900,
+            radiusMeters: 200
+        ))
+        try context.save()
+
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let visit = MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5505, longitude: 9.9900),
+            horizontalAccuracy: 15,
+            arrivalDate: start,
+            departureDate: start.addingTimeInterval(1_800)
+        )
+
+        let savedPlace = try repository.addOrUpdateVisit(from: visit)
+
+        XCTAssertEqual(savedPlace.userLabel, "Home")
+    }
+
     func testMostVisitedLocationsAggregateRepeatedLabelsAndDurations() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let firstHomeVisit = makePlace(
@@ -136,6 +212,16 @@ final class MovesStatisticsSearchTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(statistics.minimumDuration), 1_200, accuracy: 0.1)
         XCTAssertEqual(try XCTUnwrap(statistics.averageDuration), 1_800, accuracy: 0.1)
         XCTAssertEqual(try XCTUnwrap(statistics.maximumDuration), 2_400, accuracy: 0.1)
+        XCTAssertEqual(statistics.minimumJourney?.legs.first?.id, quickCommute.id)
+        XCTAssertEqual(statistics.maximumJourney?.legs.first?.id, slowCommute.id)
+
+        slowCommute.isExcludedFromConnectionStatistics = true
+        let statisticsWithoutOutlier = MovesConnectionStatistics(journeys: journeys)
+
+        XCTAssertEqual(statisticsWithoutOutlier.journeys.count, 1)
+        XCTAssertEqual(try XCTUnwrap(statisticsWithoutOutlier.minimumDuration), 1_200, accuracy: 0.1)
+        XCTAssertEqual(try XCTUnwrap(statisticsWithoutOutlier.averageDuration), 1_200, accuracy: 0.1)
+        XCTAssertEqual(try XCTUnwrap(statisticsWithoutOutlier.maximumDuration), 1_200, accuracy: 0.1)
     }
 
     private func makePlace(

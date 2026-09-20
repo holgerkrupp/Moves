@@ -885,8 +885,13 @@ struct DayMapStrip: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if !fillsAvailableSpace {
-                    fullScreenToggleButton(isFullScreen: isShowingFullScreenMap)
-                        .padding(isShowingFullScreenMap ? 18 : 10)
+                    if isShowingFullScreenMap {
+                        fullScreenToggleButton(isFullScreen: true)
+                            .safeAreaPadding([.bottom, .trailing], 18)
+                    } else {
+                        fullScreenToggleButton(isFullScreen: false)
+                            .padding(10)
+                    }
                 }
             }
             .shadow(color: .black.opacity(isShowingFullScreenMap ? 0.12 : 0), radius: 18, x: 0, y: 8)

@@ -1558,6 +1558,7 @@ final class TimelineAssemblerTests: XCTestCase {
         let schema = Schema([
             DayTimeline.self,
             VisitPlace.self,
+            KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
         ])

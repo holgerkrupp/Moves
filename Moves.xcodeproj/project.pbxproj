@@ -108,6 +108,7 @@
 		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; };
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; };
+		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -276,6 +277,7 @@
 		D10000013010000100000002 /* DawarichSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DawarichSyncTests.swift; sourceTree = "<group>"; };
 		E10000013020000100000000 /* MovesStatisticsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchView.swift; sourceTree = "<group>"; };
 		E20000013020000100000000 /* MovesStatisticsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchTests.swift; sourceTree = "<group>"; };
+		E30000013030000100000000 /* MovesKnownLocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesKnownLocationsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -366,6 +368,7 @@
 				A10000012F00000100000005 /* MovesDetailViews.swift */,
 				A10000012F00000100000007 /* MovesSettingsView.swift */,
 				E10000013020000100000000 /* MovesStatisticsSearchView.swift */,
+				E30000013030000100000000 /* MovesKnownLocationsView.swift */,
 				A10000012F00000100000107 /* AppIconPicker.swift */,
 				A10000012F00000100000207 /* GeneratedAppIcons.swift */,
 				A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */,
@@ -775,6 +778,7 @@
 				A10000012F00000100000006 /* MovesDetailViews.swift in Sources */,
 				A10000012F00000100000008 /* MovesSettingsView.swift in Sources */,
 				E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */,
+				E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */,
 				A10000012F00000100000108 /* AppIconPicker.swift in Sources */,
 				A10000012F00000100000208 /* GeneratedAppIcons.swift in Sources */,
 				489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */,

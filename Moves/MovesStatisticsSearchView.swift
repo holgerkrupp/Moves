@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftData
 import SwiftUI
 
 struct MovesLocationSummary: Identifiable {
@@ -28,6 +29,9 @@ struct MovesConnectionJourney: Identifiable {
     var duration: TimeInterval { max(endDate.timeIntervalSince(startDate), 0) }
     var distanceMeters: Double { legs.reduce(0) { $0 + max($1.distanceMeters, 0) } }
     var isDirect: Bool { legs.count == 1 }
+    var isExcludedFromStatistics: Bool {
+        legs.first?.isExcludedFromConnectionStatistics == true
+    }
     var originTitle: String { legs.first?.startPlace?.displayTitle ?? "Unknown place" }
     var destinationTitle: String { legs.last?.endPlace?.displayTitle ?? "Unknown place" }
 }
@@ -35,8 +39,20 @@ struct MovesConnectionJourney: Identifiable {
 struct MovesConnectionStatistics {
     let journeys: [MovesConnectionJourney]
 
-    var minimumDuration: TimeInterval? { journeys.map(\.duration).min() }
-    var maximumDuration: TimeInterval? { journeys.map(\.duration).max() }
+    init(journeys: [MovesConnectionJourney]) {
+        self.journeys = journeys.filter { !$0.isExcludedFromStatistics }
+    }
+
+    var minimumJourney: MovesConnectionJourney? {
+        journeys.min { $0.duration < $1.duration }
+    }
+
+    var maximumJourney: MovesConnectionJourney? {
+        journeys.max { $0.duration < $1.duration }
+    }
+
+    var minimumDuration: TimeInterval? { minimumJourney?.duration }
+    var maximumDuration: TimeInterval? { maximumJourney?.duration }
     var averageDuration: TimeInterval? {
         guard !journeys.isEmpty else { return nil }
         return journeys.reduce(0) { $0 + $1.duration } / Double(journeys.count)
@@ -212,6 +228,8 @@ struct MovesStatisticsSearchView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \KnownLocation.name, order: .forward)
+    private var knownLocations: [KnownLocation]
 
     private let dayTimelines: [DayTimeline]
     private let initialDate: Date
@@ -332,7 +350,11 @@ struct MovesStatisticsSearchView: View {
                     } else {
                         ForEach(Array(snapshot.locations.prefix(20).enumerated()), id: \.element.id) { index, location in
                             NavigationLink {
-                                LocationHistoryDetailView(location: location)
+                                KnownLocationEditorView(
+                                    knownLocation: knownLocation(for: location),
+                                    suggestedLocation: location,
+                                    allVisits: snapshot.visits
+                                )
                             } label: {
                                 LocationSummaryRow(location: location, rank: index + 1)
                             }
@@ -372,7 +394,11 @@ struct MovesStatisticsSearchView: View {
                         SettingsCard(title: "Locations") {
                             ForEach(locations.prefix(20)) { location in
                                 NavigationLink {
-                                    LocationHistoryDetailView(location: location)
+                                    KnownLocationEditorView(
+                                        knownLocation: knownLocation(for: location),
+                                        suggestedLocation: location,
+                                        allVisits: snapshot.visits
+                                    )
                                 } label: {
                                     LocationSummaryRow(location: location, rank: nil)
                                 }
@@ -450,6 +476,26 @@ struct MovesStatisticsSearchView: View {
         }
     }
 
+    private func knownLocation(for summary: MovesLocationSummary) -> KnownLocation? {
+        let candidates = knownLocations.compactMap {
+            knownLocation -> (location: KnownLocation, matchingVisitCount: Int, nearestDistance: Double)? in
+            let matchingVisits = summary.visits.filter { knownLocation.contains($0.coordinate) }
+            guard !matchingVisits.isEmpty else { return nil }
+
+            let nearestDistance = matchingVisits
+                .map { knownLocation.distance(from: $0.coordinate) }
+                .min() ?? .greatestFiniteMagnitude
+            return (knownLocation, matchingVisits.count, nearestDistance)
+        }
+
+        return candidates.max { lhs, rhs in
+            if lhs.matchingVisitCount != rhs.matchingVisitCount {
+                return lhs.matchingVisitCount < rhs.matchingVisitCount
+            }
+            return lhs.nearestDistance > rhs.nearestDistance
+        }?.location
+    }
+
     @ViewBuilder
     private var connectionResults: some View {
         if let originKey, let destinationKey, originKey != destinationKey {
@@ -465,10 +511,12 @@ struct MovesStatisticsSearchView: View {
                     includingIndirect: includesIndirectConnections
                 )
                 : []
-            let journeys = (forward + reverse).sorted { $0.startDate > $1.startDate }
-            let statistics = MovesConnectionStatistics(journeys: journeys)
+            let allJourneys = (forward + reverse).sorted { $0.startDate > $1.startDate }
+            let statistics = MovesConnectionStatistics(journeys: allJourneys)
+            let journeys = statistics.journeys
+            let excludedJourneys = allJourneys.filter(\.isExcludedFromStatistics)
 
-            if journeys.isEmpty {
+            if allJourneys.isEmpty {
                 ContentUnavailableView(
                     "No Connections Found",
                     systemImage: "point.bottomleft.forward.to.point.topright.scurvepath",
@@ -476,35 +524,60 @@ struct MovesStatisticsSearchView: View {
                 )
                 .panelSurface()
             } else {
-                SettingsCard(title: "Journey Times") {
-                    Text("\(journeys.count) journey\(journeys.count == 1 ? "" : "s")")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                if journeys.isEmpty {
+                    SettingsCard(title: "Journey Times") {
+                        Label("All matching journeys are excluded", systemImage: "chart.bar.xaxis")
+                            .foregroundStyle(.secondary)
+                        Text("Include a journey below to use it in the minimum, average, and maximum calculations again.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    SettingsCard(title: "Journey Times") {
+                        Text("\(journeys.count) included journey\(journeys.count == 1 ? "" : "s")")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
 
-                    HStack(spacing: 10) {
-                        StatisticsMetric(
-                            title: "Minimum",
-                            value: MovesStatisticsFormatting.duration(statistics.minimumDuration)
-                        )
-                        StatisticsMetric(
-                            title: "Average",
-                            value: MovesStatisticsFormatting.duration(statistics.averageDuration)
-                        )
-                        StatisticsMetric(
-                            title: "Maximum",
-                            value: MovesStatisticsFormatting.duration(statistics.maximumDuration)
-                        )
+                        HStack(spacing: 10) {
+                            if let minimumJourney = statistics.minimumJourney {
+                                JourneyStatisticLink(title: "Minimum", journey: minimumJourney)
+                            }
+                            StatisticsMetric(
+                                title: "Average",
+                                value: MovesStatisticsFormatting.duration(statistics.averageDuration)
+                            )
+                            if let maximumJourney = statistics.maximumJourney {
+                                JourneyStatisticLink(title: "Maximum", journey: maximumJourney)
+                            }
+                        }
+                    }
+
+                    SettingsCard(title: "Matching Journeys") {
+                        ForEach(journeys) { journey in
+                            NavigationLink {
+                                ConnectionJourneyDetailView(journey: journey)
+                            } label: {
+                                ConnectionJourneyRow(journey: journey)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
 
-                SettingsCard(title: "Matching Journeys") {
-                    ForEach(journeys) { journey in
-                        NavigationLink {
-                            ConnectionJourneyDetailView(journey: journey)
-                        } label: {
-                            ConnectionJourneyRow(journey: journey)
+                if !excludedJourneys.isEmpty {
+                    SettingsCard(title: "Excluded Journeys") {
+                        Text("These journeys remain in your timeline but do not affect commute statistics.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(excludedJourneys) { journey in
+                            NavigationLink {
+                                ConnectionJourneyDetailView(journey: journey)
+                            } label: {
+                                ConnectionJourneyRow(journey: journey, isExcluded: true)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -554,6 +627,30 @@ private struct StatisticsMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct JourneyStatisticLink: View {
+    let title: String
+    let journey: MovesConnectionJourney
+
+    var body: some View {
+        NavigationLink {
+            ConnectionJourneyDetailView(journey: journey)
+        } label: {
+            StatisticsMetric(
+                title: title,
+                value: MovesStatisticsFormatting.duration(journey.duration)
+            )
+            .foregroundStyle(.primary)
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -660,6 +757,7 @@ private struct ConnectionEndpointButton: View {
 
 private struct ConnectionJourneyRow: View {
     let journey: MovesConnectionJourney
+    var isExcluded = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -681,6 +779,11 @@ private struct ConnectionJourneyRow: View {
             }
 
             Spacer(minLength: 8)
+            if isExcluded {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -743,57 +846,17 @@ private struct LocationSelectionView: View {
     }
 }
 
-private struct LocationHistoryDetailView: View {
-    let location: MovesLocationSummary
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 14) {
-                SettingsCard(title: "Location Summary") {
-                    Text(location.title)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-
-                    HStack(spacing: 10) {
-                        StatisticsMetric(title: "Visits", value: location.visitCount.formatted())
-                        StatisticsMetric(
-                            title: "Total Time",
-                            value: MovesStatisticsFormatting.duration(location.totalDuration)
-                        )
-                        StatisticsMetric(
-                            title: "Average Stay",
-                            value: MovesStatisticsFormatting.duration(location.averageDuration)
-                        )
-                    }
-                }
-
-                SettingsCard(title: "Visit History") {
-                    ForEach(location.visits) { visit in
-                        NavigationLink {
-                            PlaceMapDetailView(place: visit)
-                        } label: {
-                            VisitSearchResultRow(place: visit)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .padding(14)
-        }
-        .background {
-            LinearGradient(
-                colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-        }
-        .navigationTitle(location.title)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 private struct ConnectionJourneyDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+
     let journey: MovesConnectionJourney
+
+    @State private var errorMessage = ""
+    @State private var isShowingError = false
+
+    private var isExcluded: Bool {
+        journey.isExcludedFromStatistics
+    }
 
     var body: some View {
         ScrollView {
@@ -838,6 +901,31 @@ private struct ConnectionJourneyDetailView: View {
                         .buttonStyle(.plain)
                     }
                 }
+
+                SettingsCard(title: "Statistics") {
+                    if isExcluded {
+                        Label("Excluded from commute calculations", systemImage: "chart.bar.xaxis")
+                            .foregroundStyle(.secondary)
+                        Text("This journey still appears in your timeline and can be included again at any time.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("If this journey is an inaccurate outlier, exclude it from minimum, average, and maximum commute times without deleting it.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        setExcluded(!isExcluded)
+                    } label: {
+                        Label(
+                            isExcluded ? "Include in Calculations" : "Exclude from Calculations",
+                            systemImage: isExcluded ? "chart.bar.fill" : "chart.bar.xaxis"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isExcluded ? MovesPalette.move : .red)
+                }
             }
             .padding(14)
         }
@@ -851,6 +939,24 @@ private struct ConnectionJourneyDetailView: View {
         }
         .navigationTitle("Connection")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Could Not Update Statistics", isPresented: $isShowingError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private func setExcluded(_ excluded: Bool) {
+        guard let firstLeg = journey.legs.first else { return }
+        firstLeg.isExcludedFromConnectionStatistics = excluded
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
     }
 }
 

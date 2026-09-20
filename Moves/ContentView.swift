@@ -1608,6 +1608,7 @@ struct ContentView_Previews: PreviewProvider {
         let container = try! ModelContainer(
             for: DayTimeline.self,
             VisitPlace.self,
+            KnownLocation.self,
             MoveSegment.self,
             LocationSample.self,
             configurations: configuration

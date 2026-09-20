@@ -96,12 +96,42 @@
         }
       }
     },
+    "%lld recorded visit%@ inside this area" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld recorded visit%2$@ inside this area"
+          }
+        }
+      }
+    },
+    "%lld saved location%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld saved location%2$@"
+          }
+        }
+      }
+    },
     "%lld visit%@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$lld visit%2$@"
+          }
+        }
+      }
+    },
+    "%lld visit%@ · %@ radius" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld visit%2$@ · %3$@ radius"
           }
         }
       }
@@ -115,6 +145,9 @@
           }
         }
       }
+    },
+    "%lld visits" : {
+
     },
     "1 hour" : {
 
@@ -203,6 +236,21 @@
     "Could Not Open Apple Health" : {
 
     },
+    "Could Not Save Location" : {
+
+    },
+    "Create" : {
+
+    },
+    "Create Location" : {
+
+    },
+    "Create locations from frequent visits" : {
+
+    },
+    "Create one from a frequent visit below. Moves will use its name and proximity radius for future visits." : {
+
+    },
     "Create visual summaries and export GPX tracks" : {
 
     },
@@ -237,6 +285,9 @@
 
     },
     "Delete" : {
+
+    },
+    "Delete Known Location?" : {
 
     },
     "Delete Move" : {
@@ -374,6 +425,9 @@
     "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
 
     },
+    "Known Locations" : {
+
+    },
     "Label (Home, Work...)" : {
 
     },
@@ -384,6 +438,9 @@
 
     },
     "Listen for location changes" : {
+
+    },
+    "Location name" : {
 
     },
     "Location, note, or date" : {
@@ -440,6 +497,9 @@
     "No GPX data in this time span" : {
 
     },
+    "No known locations yet" : {
+
+    },
     "No matching days for this filter yet." : {
 
     },
@@ -447,6 +507,12 @@
 
     },
     "No movement summary available yet." : {
+
+    },
+    "No new suggestions" : {
+
+    },
+    "No recorded visits fall inside the current proximity circle." : {
 
     },
     "No segments for this day yet." : {
@@ -512,6 +578,9 @@
     "Preparing GPX export…" : {
 
     },
+    "Proximity radius" : {
+
+    },
     "Put controls on left" : {
 
     },
@@ -525,6 +594,9 @@
 
     },
     "Real route tracking, %@ remaining" : {
+
+    },
+    "Recorded visits remain in your timeline. Only the saved name and proximity area are removed." : {
 
     },
     "Remarks" : {
@@ -549,7 +621,13 @@
     "Revert" : {
 
     },
+    "Review visits on a map, rename places, and adjust each location’s recognized area." : {
+
+    },
     "Save" : {
+
+    },
+    "Save Changes" : {
 
     },
     "Search by place, note, or date" : {
@@ -568,6 +646,9 @@
 
     },
     "Settings" : {
+
+    },
+    "Shaded circle is the recognized area" : {
 
     },
     "Share %@" : {
@@ -709,6 +790,9 @@
 
     },
     "Try a location such as Hamburg, a note, or a date from your history." : {
+
+    },
+    "Turn a frequently visited place into a known location. You can name it and choose its proximity radius before saving." : {
 
     },
     "Turn off" : {

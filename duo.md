@@ -4,6 +4,8 @@ Analysis date: 2026-09-14. This plan applies Apple’s iPhone Duo HIG to the cur
 
 Revision 2026-09-14 (second pass): re-read the published HIG page and added layout options per surface, control ownership, bar-free map surfaces, an explicit open/close transition contract, and the conditional reserved regions — including the Dynamic Island expansion that the route-tracking Live Activity causes. Nothing from the first pass was removed.
 
+Revision 2026-09-19: added implementation details from Apple’s new preparation technology overview, including container-specific bar behavior, toolbar APIs, arrangement-hosting cautions, and pose-by-pose validation.
+
 ## Recommendation in one sentence
 
 Keep the timeline’s single-screen continuity on the outer display, and replace the current phone-landscape heuristics with fold-aware map/content arrangements that naturally become side by side in book poses and map-above-controls in tabletop poses.
@@ -250,8 +252,17 @@ Three of the four regions are conditional, so a correct layout can become wrong 
 - Verify the detail toolbar’s actions are individually prioritised and appear by name in the overflow menu.
 - Check the map re-fits to the new usable region without a long camera animation, and without centring a route endpoint under the fold.
 
+## Technology-overview refinements (2026-09-19)
+
+Apple’s preparation overview clarifies where vertical bars actually appear. A detail bar in a multi-column split view can be vertical, while sidebar/content bars remain horizontal; inspector bars are horizontal. On the outer display, detail sheets default to vertical bars. On the inner display, centered and leading sheets have horizontal bars, but trailing sheets have vertical ones. Check every route/place sheet and popover in its actual placement. Use `toolbarVerticalEdge` for any custom map-control offset, not a width or orientation guess; use `presentationPlacement(_:)` or `toolbarVerticalBehavior(_:)` only when a particular sheet needs a deliberate placement or opt-out.
+
+The current `HStack` of Health, Share, Edit Route, and Delete is especially important to replace: Apple says a custom-view toolbar item cannot appear vertically, just as a title-only item cannot. Give each action an icon and title, use `axisBehavior(_:)` and `visibilityPriority(_:)`, put infrequent/destructive actions in `ToolbarOverflowMenu`, and reserve `.topBarPinnedTrailing` for a prominent Done. Let the map itself extend under a vertical bar with `backgroundExtensionEffect()` if useful, but keep tracking status, route labels, compass, and recenter controls inside the safe area.
+
+Do not place the proposed map/timeline or map/control `ArrangementView` inside the timeline `ScrollView`, a `List`, or a nested split view: the overview warns that this can make one child inaccessible. Arrange peer content at the detail root below `NavigationStack`, with scrolling inside a child pane. Split style yields side-by-side in wide space and top/bottom in tall space; overlay style keeps the control card above the map when flat and separates them at an active fold. If the host clips either child, retain the existing responsive HStack/VStack plus reserved-region handling. Rotate the phone in closed, flat-open, book, tabletop, and tent poses while testing route detail sheets, popovers, and an active tracking Live Activity.
+
 ## Sources
 
+- [Preparing your app for iPhone Duo — Technology Overview](https://developer.apple.com/documentation/technologyoverviews/preparing-your-app-for-iphone-duo)
 - [Designing for iPhone Duo — Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo)
 - [iPhone Duo technical specifications](https://www.apple.com/iphone-duo/specs/)
 - [Prepare your app for iPhone Duo](https://developer.apple.com/videos/play/tech-talks/111461/)
