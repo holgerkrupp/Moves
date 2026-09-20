@@ -678,7 +678,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func start() async {
         guard !shouldSkipLiveTracking else { return }
-        guard MultiDeviceLocationRoleStore.allowsLocationCapture else {
+        guard isBackgroundLocationListeningEnabled else {
             stop()
             return
         }
@@ -698,7 +698,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func requestTrackingAuthorization() {
         guard !shouldSkipLiveTracking else { return }
-        guard MultiDeviceLocationRoleStore.allowsLocationCapture else {
+        guard isBackgroundLocationListeningEnabled else {
             stop()
             return
         }
@@ -742,7 +742,6 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func setBackgroundLocationListeningEnabled(_ isEnabled: Bool) {
-        guard MultiDeviceLocationRoleStore.allowsLocationCapture || !isEnabled else { return }
         isBackgroundLocationListeningEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: BackgroundLocationListeningSettings.isEnabledKey)
 
@@ -753,7 +752,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func refreshHistoricalBackfill() async {
         guard !shouldSkipLiveTracking else { return }
-        guard MultiDeviceLocationRoleStore.allowsLocationCapture else { return }
+        guard isBackgroundLocationListeningEnabled else { return }
 
         guard isAuthorizedForTracking else { return }
 
@@ -764,7 +763,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func enableTemporaryRouteTracking(duration: TemporaryRouteTrackingDuration) {
         guard !shouldSkipLiveTracking else { return }
-        guard MultiDeviceLocationRoleStore.allowsLocationCapture else { return }
+        guard isBackgroundLocationListeningEnabled else { return }
         guard isAuthorizedForTracking else {
             if authorizationStatus == .notDetermined {
                 pendingTemporaryRouteTrackingDuration = duration

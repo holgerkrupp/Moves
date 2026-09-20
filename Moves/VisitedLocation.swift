@@ -2025,22 +2025,6 @@ enum MultiDeviceLocationRole: String {
     case management
 }
 
-enum MultiDeviceLocationRoleStore {
-    private static let roleKey = "Moves.multiDevice.locationRole"
-
-    static var current: MultiDeviceLocationRole? {
-        UserDefaults.standard.string(forKey: roleKey).flatMap(MultiDeviceLocationRole.init(rawValue:))
-    }
-
-    static var allowsLocationCapture: Bool {
-        current != .management
-    }
-
-    static func set(_ role: MultiDeviceLocationRole) {
-        UserDefaults.standard.set(role.rawValue, forKey: roleKey)
-    }
-}
-
 @MainActor
 final class MultiDevicePresenceManager: ObservableObject {
     @Published var shouldChooseLocationRole = false
@@ -2085,7 +2069,10 @@ final class MultiDevicePresenceManager: ObservableObject {
                 }
                 .sorted()
 
-            if !otherDeviceNames.isEmpty, MultiDeviceLocationRoleStore.current == nil {
+            if !otherDeviceNames.isEmpty,
+               UserDefaults.standard.object(
+                forKey: MovesLocationCaptureManager.BackgroundLocationListeningSettings.isEnabledKey
+               ) == nil {
                 shouldChooseLocationRole = true
             }
         } catch {
@@ -2094,7 +2081,6 @@ final class MultiDevicePresenceManager: ObservableObject {
     }
 
     func choose(_ role: MultiDeviceLocationRole, captureManager: MovesLocationCaptureManager) {
-        MultiDeviceLocationRoleStore.set(role)
         shouldChooseLocationRole = false
         captureManager.applyMultiDeviceLocationRole(role)
     }
