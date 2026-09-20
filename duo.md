@@ -83,6 +83,17 @@ The HIG allows a full-width layout for visual interfaces where bars are not nece
 - Every interactive or readable overlay — annotations, route handles, the selection callout, tracking banners, recentre and compass controls — stays inside the safe area, clear of the vertical bar, the camera regions, and the active fold.
 - A dedicated full-screen map mode with no bars is legitimate for viewing a route at a distance in a tabletop or tent pose, provided the same actions remain reachable elsewhere, since functionality must be equal across poses.
 
+### Navigation workspaces
+
+Use a standard two-column `NavigationSplitView` for the app-level hierarchy whenever the scene has a regular horizontal size class. This is separate from the map/timeline arrangement inside the detail column: standard navigation owns date or statistics selection, while the detail retains its map and content layout.
+
+- Timeline sidebar: show the 60 most recent dates in descending order. Each `List` row has a full date plus a concise, text-first summary: places, moves, and total distance; a day without activity says so plainly. Selecting a row binds to `selectedDayKey`, which remains authoritative for the compact pager and the detail column.
+- Timeline detail: retain the existing day header, map/timeline view, route controls, and navigation destinations. The sidebar date picker is the standard path to older dates.
+- Statistics & Search sidebar: replace the compact segmented picker with standard rows for Statistics, Search Visits, and Connections. Keep the chosen section's existing cards, visit search field, and connection controls in the detail column; do not add a third nested split solely for search results.
+- Compact scenes retain the page-style day pager and the statistics segmented picker. This makes the new navigation additive rather than a different iPhone app.
+
+Do not place the fold-aware `ArrangementView` inside either `NavigationSplitView` or a sidebar `List`. It belongs at the root of the selected day/detail content, with scrolling hosted by its child panes.
+
 ## Concrete changes
 
 ### 1. Replace `isLandscapePhone` with a layout policy

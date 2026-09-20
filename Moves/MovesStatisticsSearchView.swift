@@ -212,7 +212,7 @@ struct MovesStatisticsSnapshot {
 }
 
 struct MovesStatisticsSearchView: View {
-    private enum Section: String, CaseIterable, Identifiable {
+    private enum Section: String, CaseIterable, Identifiable, Hashable {
         case overview = "Statistics"
         case visits = "Visits"
         case connections = "Connections"
@@ -228,6 +228,7 @@ struct MovesStatisticsSearchView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query(sort: \KnownLocation.name, order: .forward)
     private var knownLocations: [KnownLocation]
 
@@ -242,6 +243,7 @@ struct MovesStatisticsSearchView: View {
     @State private var includesIndirectConnections = true
     @State private var includesReturnTrips = false
     @State private var endpointBeingSelected: ConnectionEndpoint?
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     init(dayTimelines: [DayTimeline], initialDate: Date = .now) {
         self.dayTimelines = dayTimelines
@@ -250,15 +252,71 @@ struct MovesStatisticsSearchView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("View", selection: $selectedSection) {
-                ForEach(Section.allCases) { section in
-                    Text(section.rawValue).tag(section)
+        Group {
+            if usesSplitNavigation {
+                statisticsSplitWorkspace
+            } else {
+                NavigationStack {
+                    statisticsContent(showsSectionPicker: true)
                 }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+        }
+        .sheet(item: $endpointBeingSelected) { endpoint in
+            LocationSelectionView(
+                title: endpoint == .origin ? "Choose Start" : "Choose Destination",
+                locations: snapshot.locations,
+                selection: endpoint == .origin ? $originKey : $destinationKey
+            )
+        }
+        .onAppear(perform: selectCommuteDefaultsIfAvailable)
+    }
+
+    private var usesSplitNavigation: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    private var statisticsSplitWorkspace: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            statisticsSidebar
+        } detail: {
+            statisticsContent(showsSectionPicker: false)
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var statisticsSidebar: some View {
+        List(selection: sectionSelection) {
+            SwiftUI.Section("Explore") {
+                Label("Statistics", systemImage: "chart.bar.xaxis")
+                    .tag(Section.overview)
+                Label("Search Visits", systemImage: "magnifyingglass")
+                    .tag(Section.visits)
+                Label("Connections", systemImage: "arrow.triangle.branch")
+                    .tag(Section.connections)
+            }
+        }
+        .navigationTitle("Statistics & Search")
+    }
+
+    private var sectionSelection: Binding<Section?> {
+        Binding(
+            get: { selectedSection },
+            set: { selectedSection = $0 ?? selectedSection }
+        )
+    }
+
+    private func statisticsContent(showsSectionPicker: Bool) -> some View {
+        VStack(spacing: 0) {
+            if showsSectionPicker {
+                Picker("View", selection: $selectedSection) {
+                    ForEach(Section.allCases) { section in
+                        Text(section.rawValue).tag(section)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
 
             Group {
                 switch selectedSection {
@@ -286,14 +344,6 @@ struct MovesStatisticsSearchView: View {
                 Button("Done") { dismiss() }
             }
         }
-        .sheet(item: $endpointBeingSelected) { endpoint in
-            LocationSelectionView(
-                title: endpoint == .origin ? "Choose Start" : "Choose Destination",
-                locations: snapshot.locations,
-                selection: endpoint == .origin ? $originKey : $destinationKey
-            )
-        }
-        .onAppear(perform: selectCommuteDefaultsIfAvailable)
     }
 
     private var statisticsView: some View {

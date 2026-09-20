@@ -56,6 +56,7 @@ struct DayTimelinePage: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayKey: String
     let isActive: Bool
+    @Binding var mapSelection: TimelineMapSelection?
 
     @State private var dayTimeline: DayTimeline?
     @State private var loadErrorMessage: String?
@@ -63,7 +64,11 @@ struct DayTimelinePage: View {
     var body: some View {
         Group {
             if isActive, let dayTimeline {
-                DayTimelinePageContent(dayTimeline: dayTimeline, isActive: isActive)
+                DayTimelinePageContent(
+                    dayTimeline: dayTimeline,
+                    isActive: isActive,
+                    mapSelection: $mapSelection
+                )
             } else if isActive {
                 loadingState
             } else {
@@ -145,11 +150,16 @@ struct DayTimelinePageContent: View {
     @State private var provisionalSampleResolvedTitle: String?
     @State private var provisionalSampleResolvedKey: String?
     @State private var presentationCache: DayTimelinePresentationCache
-    @State private var mapSelection: TimelineMapSelection?
+    @Binding private var mapSelection: TimelineMapSelection?
 
-    init(dayTimeline: DayTimeline, isActive: Bool) {
+    init(
+        dayTimeline: DayTimeline,
+        isActive: Bool,
+        mapSelection: Binding<TimelineMapSelection?> = .constant(nil)
+    ) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
+        _mapSelection = mapSelection
         _presentationCache = State(initialValue: Self.makePresentationCache(for: dayTimeline))
     }
 

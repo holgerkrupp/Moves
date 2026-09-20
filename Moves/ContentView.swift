@@ -334,6 +334,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Query(sort: \DayTimeline.dayStart, order: .forward)
     private var dayTimelines: [DayTimeline]
@@ -344,6 +345,8 @@ struct ContentView: View {
     @State private var isShowingStatisticsSearch = false
     @State private var isShowingRouteTrackingSettings = false
     @State private var isShowingDatePicker = false
+    @State private var timelineColumnVisibility = NavigationSplitViewVisibility.all
+    @State private var timelineMapSelection: TimelineMapSelection?
 
     private var selectedDay: DayTimeline? {
         guard dayTimelines.indices.contains(selectedPageIndex) else { return nil }
@@ -379,98 +382,13 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                background
-
-                VStack(spacing: 12) {
-                    if let trackingPermissionPrompt {
-                        trackingPermissionBanner(trackingPermissionPrompt)
-                            .safeAreaPadding(.horizontal, 14)
-                    }
-
-                    if let bannerData = trackingStatusBannerData(
-                        for: captureManager,
-                        context: .timeline
-                    ) {
-                        TrackingStatusBanner(
-                            data: bannerData,
-                            buttonAction: {
-                                captureManager.disableTemporaryRouteTracking()
-                            }
-                        )
-                        .safeAreaPadding(.horizontal, 14)
-                    }
-
-                    if dayTimelines.isEmpty {
-                        emptyState
-                            .safeAreaPadding(.horizontal, 14)
-                    } else {
-                        dayHeader
-                            .safeAreaPadding(.horizontal, 14)
-                            .padding(.top, 10)
-
-                        TabView(selection: $selectedPageIndex) {
-                            ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
-                                DayTimelinePage(
-                                    dayKey: day.dayKey,
-                                    isActive: index == selectedPageIndex
-                                )
-                                    .tag(index)
-                                    
-                            }
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .ignoresSafeArea(.container, edges: .bottom)
-                    }
+        Group {
+            if usesSplitNavigation {
+                timelineSplitWorkspace
+            } else {
+                NavigationStack {
+                    compactTimelineContent
                 }
-                
-            }
-            
-            .navigationTitle("Moves")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .help("Settings")
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isShowingStatisticsSearch = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .help("Statistics & Search")
-                    .accessibilityLabel("Statistics & Search")
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    
-                      
-                            RouteTrackingToolbarButton(
-                                endsAt: captureManager.temporaryRouteTrackingEndsAt,
-                                authorizationStatus: captureManager.authorizationStatus,
-                                tapAction: {
-                                    isShowingRouteTrackingSettings = true
-                                },
-                                longPressAction: {
-                                    captureManager.enableTemporaryRouteTracking(
-                                        duration: captureManager.temporaryRouteTrackingDuration
-                                    )
-                                }
-                            )
-                           
-                            
-                            
-                        
-                    
-                }
-               
             }
         }
         .sheet(isPresented: $isShowingSettings) {
@@ -481,12 +399,10 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $isShowingStatisticsSearch) {
-            NavigationStack {
-                MovesStatisticsSearchView(
-                    dayTimelines: dayTimelines,
-                    initialDate: selectedDay?.dayStart ?? .now
-                )
-            }
+            MovesStatisticsSearchView(
+                dayTimelines: dayTimelines,
+                initialDate: selectedDay?.dayStart ?? .now
+            )
         }
         .sheet(isPresented: $isShowingRouteTrackingSettings) {
             RouteTrackingSettingsSheet(captureManager: captureManager)
@@ -533,6 +449,12 @@ struct ContentView: View {
             guard dayTimelines.indices.contains(newIndex) else { return }
             selectedDayKey = dayTimelines[newIndex].dayKey
         }
+        .onChange(of: selectedDayKey) { _, newKey in
+            timelineMapSelection = nil
+            guard let index = dayTimelines.firstIndex(where: { $0.dayKey == newKey }),
+                  index != selectedPageIndex else { return }
+            selectedPageIndex = index
+        }
         .overlay {
             ShakeToUndoDetector(undoManager: undoController.manager) {
                 handleShakeToUndo()
@@ -540,6 +462,135 @@ struct ContentView: View {
             .frame(width: 1, height: 1)
             .opacity(0.01)
             .accessibilityHidden(true)
+        }
+    }
+
+    private var usesSplitNavigation: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    private var timelineSplitWorkspace: some View {
+        NavigationSplitView(columnVisibility: $timelineColumnVisibility) {
+            recentDatesSidebar
+        } detail: {
+            compactTimelineContent
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var recentDatesSidebar: some View {
+        List(selection: daySidebarSelection) {
+            Section("Recent Dates") {
+                ForEach(recentDayTimelines) { day in
+                    DaySidebarRow(day: day)
+                        .tag(day.dayKey)
+                }
+            }
+        }
+        .navigationTitle("Moves")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingDatePicker = true
+                } label: {
+                    Label("Choose Date", systemImage: "calendar")
+                }
+            }
+        }
+    }
+
+    private var recentDayTimelines: [DayTimeline] {
+        Array(dayTimelines.suffix(60).reversed())
+    }
+
+    private var daySidebarSelection: Binding<String?> {
+        Binding(
+            get: { selectedDayKey.isEmpty ? nil : selectedDayKey },
+            set: { selectedDayKey = $0 ?? selectedDayKey }
+        )
+    }
+
+    private var compactTimelineContent: some View {
+        ZStack {
+            background
+
+            VStack(spacing: 12) {
+                if let trackingPermissionPrompt {
+                    trackingPermissionBanner(trackingPermissionPrompt)
+                        .safeAreaPadding(.horizontal, 14)
+                }
+
+                if let bannerData = trackingStatusBannerData(
+                    for: captureManager,
+                    context: .timeline
+                ) {
+                    TrackingStatusBanner(
+                        data: bannerData,
+                        buttonAction: {
+                            captureManager.disableTemporaryRouteTracking()
+                        }
+                    )
+                    .safeAreaPadding(.horizontal, 14)
+                }
+
+                if dayTimelines.isEmpty {
+                    emptyState
+                        .safeAreaPadding(.horizontal, 14)
+                } else {
+                    dayHeader
+                        .safeAreaPadding(.horizontal, 14)
+                        .padding(.top, 10)
+
+                    TabView(selection: $selectedPageIndex) {
+                        ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
+                            DayTimelinePage(
+                                dayKey: day.dayKey,
+                                isActive: index == selectedPageIndex,
+                                mapSelection: $timelineMapSelection
+                            )
+                            .tag(index)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .ignoresSafeArea(.container, edges: .bottom)
+                }
+            }
+        }
+        .navigationTitle("Moves")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Settings")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingStatisticsSearch = true
+                } label: {
+                    Label("Statistics & Search", systemImage: "magnifyingglass")
+                }
+                .help("Statistics & Search")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                RouteTrackingToolbarButton(
+                    endsAt: captureManager.temporaryRouteTrackingEndsAt,
+                    authorizationStatus: captureManager.authorizationStatus,
+                    tapAction: {
+                        isShowingRouteTrackingSettings = true
+                    },
+                    longPressAction: {
+                        captureManager.enableTemporaryRouteTracking(
+                            duration: captureManager.temporaryRouteTrackingDuration
+                        )
+                    }
+                )
+            }
         }
     }
 
@@ -858,6 +909,47 @@ struct ContentView: View {
                 print("Failed to save undo changes: \(error.localizedDescription)")
             }
         }
+    }
+}
+
+private struct DaySidebarRow: View {
+    let day: DayTimeline
+
+    private var totalDistance: CLLocationDistance {
+        day.moves.reduce(0) { $0 + max($1.distanceMeters, 0) }
+    }
+
+    private var summary: String {
+        guard day.hasRecordedActivity else { return "No recorded activity" }
+
+        var parts = [
+            "\(day.uniqueLocationCount) place\(day.uniqueLocationCount == 1 ? "" : "s")",
+            "\(day.moves.count) move\(day.moves.count == 1 ? "" : "s")",
+        ]
+
+        if totalDistance > 0 {
+            parts.append(
+                Measurement(value: totalDistance, unit: UnitLength.meters)
+                    .formatted(.measurement(width: .abbreviated, usage: .road))
+            )
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(day.dayStart, format: .dateTime.weekday(.wide).day().month(.abbreviated))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+
+            Text(summary)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 
