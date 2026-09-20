@@ -464,11 +464,11 @@ private struct MultiDeviceSettingsCard: View {
     @AppStorage("Moves.multiDevice.displayName") private var deviceName = ""
 
     var body: some View {
-        SettingsCard(title: "Multiple iPhones") {
-            TextField("This iPhone's name", text: $deviceName)
+        SettingsCard(title: "Multiple device") {
+            TextField("Custom device name (optional)", text: $deviceName)
                 .textInputAutocapitalization(.words)
 
-            Text("Moves silently combines matching trips from your iPhones. If phones travel separately, each phone shows only its own journey so routes are never joined together.")
+            Text("Moves uses the system name for this iPhone unless you set a custom name. Matching trips are combined silently; separately travelling phones keep separate journeys.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
 
