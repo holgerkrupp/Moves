@@ -1,7 +1,9 @@
 import Foundation
 import CoreLocation
 import MapKit
+import Security
 import SwiftData
+import UIKit
 
 enum TransportMode: String, Codable, CaseIterable, Identifiable {
     case stationary
@@ -187,6 +189,9 @@ extension DayTimeline {
 @Model
 final class VisitPlace {
     var id: UUID = UUID()
+    /// The installation that first captured this visit. Empty means a record
+    /// created before multi-device support was introduced.
+    var deviceIdentifier: String = ""
     var arrivalDate: Date = Date.now
     var departureDate: Date? = nil
     var latitude: Double = 0
@@ -307,6 +312,9 @@ final class KnownLocation {
 @Model
 final class MoveSegment {
     var id: UUID = UUID()
+    /// The installation that assembled this move. This lets presentation keep
+    /// simultaneous, unrelated trips from being joined into one route.
+    var deviceIdentifier: String = ""
     var dedupeKey: String = ""
     var startDate: Date = Date.now
     var endDate: Date = Date.now
@@ -397,6 +405,10 @@ final class MoveSegment {
 @Model
 final class LocationSample {
     var dedupeKey: String = ""
+    /// A private, per-installation identifier. It is deliberately not an
+    /// Apple hardware identifier and is only used to resolve our own iCloud
+    /// records after two phones have captured at the same time.
+    var deviceIdentifier: String = ""
     var timestamp: Date = Date.now
     var latitude: Double = 0
     var longitude: Double = 0
@@ -409,8 +421,14 @@ final class LocationSample {
     var dayTimeline: DayTimeline?
     var moveSegment: MoveSegment?
 
-    init(location: CLLocation, source: LocationSampleSource, dedupeKey: String) {
+    init(
+        location: CLLocation,
+        source: LocationSampleSource,
+        dedupeKey: String,
+        deviceIdentifier: String = DeviceIdentityStore.currentIdentifier
+    ) {
         self.dedupeKey = dedupeKey
+        self.deviceIdentifier = deviceIdentifier
         self.timestamp = location.timestamp
         self.latitude = location.coordinate.latitude
         self.longitude = location.coordinate.longitude
@@ -487,6 +505,7 @@ struct DayTimelineSnapshot: Codable {
 
 struct VisitPlaceSnapshot: Codable {
     let id: UUID
+    let deviceIdentifier: String?
     let arrivalDate: Date
     let departureDate: Date?
     let latitude: Double
@@ -501,6 +520,7 @@ struct VisitPlaceSnapshot: Codable {
 
 struct MoveSegmentSnapshot: Codable {
     let id: UUID
+    let deviceIdentifier: String?
     let dedupeKey: String
     let startDate: Date
     let endDate: Date
@@ -520,6 +540,7 @@ struct MoveSegmentSnapshot: Codable {
 
 struct LocationSampleSnapshot: Codable {
     let dedupeKey: String
+    let deviceIdentifier: String?
     let timestamp: Date
     let latitude: Double
     let longitude: Double
@@ -577,6 +598,7 @@ enum TimelineDeduplicationSnapshotStore {
 
 final class SwiftDataTimelineRepository: TimelineRepository {
     private let modelContext: ModelContext
+    private let deviceIdentifier: String
     private static let sampleDedupeTimeWindow: TimeInterval = 5 * 60
     private static let sampleDedupeDistanceThreshold: CLLocationDistance = 120
     private static let placeDedupeArrivalWindow: TimeInterval = 3 * 60
@@ -596,12 +618,26 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     private static let placeNeighborMoveInferenceSlack: TimeInterval = 20 * 60
     private static let placeNeighborMoveEndpointDistanceThreshold: CLLocationDistance = 180
 
-    init(modelContainer: ModelContainer) {
+    init(
+        modelContainer: ModelContainer,
+        deviceIdentifier: String = DeviceIdentityStore.currentIdentifier
+    ) {
         self.modelContext = ModelContext(modelContainer)
+        self.deviceIdentifier = deviceIdentifier
     }
 
-    init(modelContext: ModelContext) {
+    init(
+        modelContext: ModelContext,
+        deviceIdentifier: String = DeviceIdentityStore.currentIdentifier
+    ) {
         self.modelContext = modelContext
+        self.deviceIdentifier = deviceIdentifier
+    }
+
+    private func belongsToCurrentDevice(_ recordDeviceIdentifier: String) -> Bool {
+        // Legacy records predate device attribution and remain available during
+        // migration. New records must never be assembled across two phones.
+        recordDeviceIdentifier.isEmpty || recordDeviceIdentifier == deviceIdentifier
     }
 
     func createUndoSnapshot() throws -> TimelineDeduplicationUndoSnapshot {
@@ -638,6 +674,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             places: places.map { place in
                 VisitPlaceSnapshot(
                     id: place.id,
+                    deviceIdentifier: place.deviceIdentifier,
                     arrivalDate: place.arrivalDate,
                     departureDate: place.departureDate,
                     latitude: place.latitude,
@@ -653,6 +690,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             moves: moves.map { move in
                 MoveSegmentSnapshot(
                     id: move.id,
+                    deviceIdentifier: move.deviceIdentifier,
                     dedupeKey: move.dedupeKey,
                     startDate: move.startDate,
                     endDate: move.endDate,
@@ -673,6 +711,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             samples: samples.map { sample in
                 LocationSampleSnapshot(
                     dedupeKey: sample.dedupeKey,
+                    deviceIdentifier: sample.deviceIdentifier,
                     timestamp: sample.timestamp,
                     latitude: sample.latitude,
                     longitude: sample.longitude,
@@ -721,6 +760,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 comment: placeSnapshot.comment
             )
             place.id = placeSnapshot.id
+            place.deviceIdentifier = placeSnapshot.deviceIdentifier ?? ""
             place.createdAt = placeSnapshot.createdAt
             if let dayKey = placeSnapshot.dayKey {
                 place.dayTimeline = timelinesByDayKey[dayKey]
@@ -743,6 +783,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 comment: moveSnapshot.comment
             )
             move.id = moveSnapshot.id
+            move.deviceIdentifier = moveSnapshot.deviceIdentifier ?? ""
             move.createdAt = moveSnapshot.createdAt
             move.isExcludedFromConnectionStatistics = moveSnapshot.isExcludedFromConnectionStatistics ?? false
             move.transportModeRawValue = moveSnapshot.transportModeRawValue
@@ -774,7 +815,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             let sample = LocationSample(
                 location: location,
                 source: LocationSampleSource(rawValue: sampleSnapshot.sourceRawValue) ?? .significantChange,
-                dedupeKey: sampleSnapshot.dedupeKey
+                dedupeKey: sampleSnapshot.dedupeKey,
+                deviceIdentifier: sampleSnapshot.deviceIdentifier ?? ""
             )
             sample.timestamp = sampleSnapshot.timestamp
             sample.latitude = sampleSnapshot.latitude
@@ -862,6 +904,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             horizontalAccuracy: visit.horizontalAccuracy,
             userLabel: inferredUserLabel
         )
+        place.deviceIdentifier = deviceIdentifier
         place.dayTimeline = try timeline(for: arrival)
         modelContext.insert(place)
         let canonical = try collapseDuplicatePlaces(around: place)
@@ -885,7 +928,12 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 continue
             }
 
-            let sample = LocationSample(location: location, source: source, dedupeKey: dedupeKey)
+            let sample = LocationSample(
+                location: location,
+                source: source,
+                dedupeKey: dedupeKey,
+                deviceIdentifier: deviceIdentifier
+            )
             sample.dayTimeline = try timeline(for: location.timestamp)
             modelContext.insert(sample)
             inserted.append(sample)
@@ -958,7 +1006,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let candidates = try modelContext.fetch(descriptor)
         return candidates.first {
-            $0.id != placeID && ($0.departureDate ?? $0.arrivalDate) < date
+            belongsToCurrentDevice($0.deviceIdentifier)
+                && $0.id != placeID
+                && ($0.departureDate ?? $0.arrivalDate) < date
         }
     }
 
@@ -972,7 +1022,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             sortBy: [SortDescriptor(\LocationSample.timestamp, order: .forward)]
         )
 
-        return try modelContext.fetch(descriptor)
+        return try modelContext.fetch(descriptor).filter {
+            belongsToCurrentDevice($0.deviceIdentifier)
+        }
     }
 
     func upsertMove(
@@ -1021,6 +1073,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 distanceMeters: distanceMeters,
                 stepCount: stepCount
             )
+            move.deviceIdentifier = deviceIdentifier
             modelContext.insert(move)
         }
 
@@ -1110,6 +1163,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             horizontalAccuracy: max(location.horizontalAccuracy, 20),
             userLabel: try inferredUserLabel(near: location.coordinate)
         )
+        place.deviceIdentifier = deviceIdentifier
         place.dayTimeline = try timeline(for: arrivalDate)
         modelContext.insert(place)
         return try collapseDuplicatePlaces(around: place)
@@ -1129,7 +1183,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let candidates = try modelContext.fetch(descriptor)
         return candidates.first {
-            Self.distanceMeters(
+            belongsToCurrentDevice($0.deviceIdentifier)
+                && Self.distanceMeters(
                 from: coordinate,
                 to: CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
             ) <= Self.placeDedupeDistanceThreshold
@@ -1142,8 +1197,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 sample.dedupeKey == dedupeKey
             }
         )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
+        descriptor.fetchLimit = 16
+        return try modelContext.fetch(descriptor).first {
+            belongsToCurrentDevice($0.deviceIdentifier)
+        }
     }
 
     private func findNearbySample(matching location: CLLocation) throws -> LocationSample? {
@@ -1160,7 +1217,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let candidates = try modelContext.fetch(descriptor)
         return candidates.first {
-            Self.distanceMeters(
+            belongsToCurrentDevice($0.deviceIdentifier)
+                && Self.distanceMeters(
                 from: location.coordinate,
                 to: $0.coordinate
             ) <= Self.sampleDedupeDistanceThreshold
@@ -1173,8 +1231,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 move.dedupeKey == dedupeKey
             }
         )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
+        descriptor.fetchLimit = 16
+        return try modelContext.fetch(descriptor).first {
+            belongsToCurrentDevice($0.deviceIdentifier)
+        }
     }
 
     private func findMove(startPlaceID: UUID, endPlaceID: UUID) throws -> MoveSegment? {
@@ -1184,8 +1244,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             },
             sortBy: [SortDescriptor(\MoveSegment.createdAt, order: .forward)]
         )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
+        descriptor.fetchLimit = 16
+        return try modelContext.fetch(descriptor).first {
+            belongsToCurrentDevice($0.deviceIdentifier)
+        }
     }
 
     private func findPlace(byID placeID: UUID) throws -> VisitPlace? {
@@ -1243,7 +1305,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let candidates = try modelContext.fetch(descriptor)
         return candidates.first { candidate in
-            isDuplicateMove(
+            belongsToCurrentDevice(candidate.deviceIdentifier)
+                && isDuplicateMove(
                 candidate,
                 comparedToStartCoordinate: startCoordinate,
                 endCoordinate: endCoordinate,
@@ -1268,7 +1331,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let candidates = try modelContext.fetch(descriptor)
         let duplicateGroup = candidates.filter { candidate in
-            candidate.id == anchor.id || isDuplicatePlace(anchor, comparedTo: candidate)
+            belongsToCurrentDevice(candidate.deviceIdentifier)
+                && (candidate.id == anchor.id || isDuplicatePlace(anchor, comparedTo: candidate))
         }
 
         guard duplicateGroup.count > 1 else {
@@ -1523,7 +1587,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         var canonical = anchor
 
-        for candidate in candidates where candidate.id != canonical.id {
+        for candidate in candidates where candidate.id != canonical.id && belongsToCurrentDevice(candidate.deviceIdentifier) {
             guard let canonicalStartCoordinate = canonical.startPlace?.coordinate,
                   let canonicalEndCoordinate = canonical.endPlace?.coordinate else {
                 continue
@@ -1870,6 +1934,194 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 }
 
+/// Provides a private identifier for one Moves installation. It is intentionally
+/// not derived from an Apple device identifier, so it cannot be used outside the
+/// user's own iCloud timeline to recognise a handset.
+enum DeviceIdentityStore {
+    private static let service = "de.holgerkrupp.Moves"
+    private static let account = "multi-device-installation-id"
+    private static let fallbackDefaultsKey = "Moves.multiDevice.installationID"
+
+    static let currentIdentifier: String = loadOrCreateIdentifier()
+
+    static var displayName: String {
+        let stored = UserDefaults.standard.string(forKey: "Moves.multiDevice.displayName")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (stored?.isEmpty == false ? stored : nil) ?? UIDevice.current.name
+    }
+
+    private static func loadOrCreateIdentifier() -> String {
+        if let existing = readKeychainValue(), !existing.isEmpty {
+            return existing
+        }
+
+        if let existing = UserDefaults.standard.string(forKey: fallbackDefaultsKey), !existing.isEmpty {
+            saveKeychainValue(existing)
+            return existing
+        }
+
+        let identifier = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(identifier, forKey: fallbackDefaultsKey)
+        saveKeychainValue(identifier)
+        return identifier
+    }
+
+    private static func readKeychainValue() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func saveKeychainValue(_ value: String) {
+        let data = Data(value.utf8)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            attributes.forEach { addQuery[$0.key] = $0.value }
+            _ = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+}
+
+enum MultiDeviceActivityKind: Equatable {
+    case singleJourney
+    case coTravelling
+    case independentJourneys
+}
+
+struct MultiDeviceDayResolution: Equatable {
+    let kind: MultiDeviceActivityKind
+    let visibleDeviceIdentifier: String?
+    let otherMovingDeviceIdentifiers: [String]
+
+    func includes(_ deviceIdentifier: String) -> Bool {
+        // Pre-migration records remain visible. New records are resolved using
+        // their installation identity.
+        guard !deviceIdentifier.isEmpty else { return true }
+        return visibleDeviceIdentifier == nil || deviceIdentifier == visibleDeviceIdentifier
+    }
+}
+
+/// A deterministic, local projection of the synced sample stream. CloudKit
+/// continues to retain every observation; this resolver decides which device's
+/// records should form the personal timeline on this handset.
+enum MultiDeviceTimelineResolver {
+    private static let minimumMovingDistance: CLLocationDistance = 250
+    private static let matchingTimeWindow: TimeInterval = 5 * 60
+    private static let matchingDistance: CLLocationDistance = 250
+    private static let minimumCoTravelMatches = 3
+    private static let coTravelMatchRatio = 0.7
+
+    static func resolve(
+        samples: [LocationSample],
+        preferredDeviceIdentifier: String = DeviceIdentityStore.currentIdentifier
+    ) -> MultiDeviceDayResolution {
+        let groups = Dictionary(grouping: samples.filter { !$0.deviceIdentifier.isEmpty }) {
+            $0.deviceIdentifier
+        }
+        guard groups.count > 1 else {
+            return MultiDeviceDayResolution(
+                kind: .singleJourney,
+                visibleDeviceIdentifier: groups.keys.first,
+                otherMovingDeviceIdentifiers: []
+            )
+        }
+
+        let profiles = groups.map { DeviceProfile(identifier: $0.key, samples: $0.value) }
+        let moving = profiles.filter(\.isMoving)
+        guard moving.count > 1 else {
+            return MultiDeviceDayResolution(
+                kind: .singleJourney,
+                visibleDeviceIdentifier: moving.first?.identifier ?? preferredDeviceIdentifier,
+                otherMovingDeviceIdentifiers: []
+            )
+        }
+
+        let areAllCoTravelling = moving.dropFirst().allSatisfy {
+            areCoTravelling(moving[0].samples, $0.samples)
+        }
+        if areAllCoTravelling {
+            let representative = preferredRepresentative(from: moving)
+            return MultiDeviceDayResolution(
+                kind: .coTravelling,
+                visibleDeviceIdentifier: representative.identifier,
+                otherMovingDeviceIdentifiers: moving.map(\.identifier).filter { $0 != representative.identifier }
+            )
+        }
+
+        let selected = moving.first(where: { $0.identifier == preferredDeviceIdentifier })
+            ?? preferredRepresentative(from: moving)
+        return MultiDeviceDayResolution(
+            kind: .independentJourneys,
+            visibleDeviceIdentifier: selected.identifier,
+            otherMovingDeviceIdentifiers: moving.map(\.identifier).filter { $0 != selected.identifier }
+        )
+    }
+
+    private static func areCoTravelling(_ left: [LocationSample], _ right: [LocationSample]) -> Bool {
+        let orderedRight = right.sorted { $0.timestamp < $1.timestamp }
+        let matched = left.filter { sample in
+            orderedRight.contains { other in
+                abs(other.timestamp.timeIntervalSince(sample.timestamp)) <= matchingTimeWindow
+                    && sample.asLocation.distance(from: other.asLocation) <= matchingDistance
+            }
+        }
+        guard matched.count >= minimumCoTravelMatches else { return false }
+        return Double(matched.count) / Double(max(left.count, 1)) >= coTravelMatchRatio
+    }
+
+    private static func preferredRepresentative(from profiles: [DeviceProfile]) -> DeviceProfile {
+        profiles.sorted {
+            if $0.qualityScore == $1.qualityScore {
+                return $0.identifier < $1.identifier
+            }
+            return $0.qualityScore > $1.qualityScore
+        }.first!
+    }
+
+    private struct DeviceProfile {
+        let identifier: String
+        let samples: [LocationSample]
+        let travelledDistance: CLLocationDistance
+        let qualityScore: Double
+
+        init(identifier: String, samples: [LocationSample]) {
+            self.identifier = identifier
+            self.samples = samples.sorted { $0.timestamp < $1.timestamp }
+            self.travelledDistance = zip(self.samples, self.samples.dropFirst()).reduce(0) {
+                $0 + $1.0.asLocation.distance(from: $1.1.asLocation)
+            }
+            self.qualityScore = self.samples.reduce(0) { score, sample in
+                score + Double(sample.source.priority * 1_000) - min(max(sample.horizontalAccuracy, 0), 999)
+            }
+        }
+
+        var isMoving: Bool {
+            samples.count >= 2 && travelledDistance >= MultiDeviceTimelineResolver.minimumMovingDistance
+        }
+    }
+}
+
 #if targetEnvironment(simulator)
 enum SimulatorDemoDataSeeder {
     private static var roadCoordinatesCache: [String: [CLLocationCoordinate2D]] = [:]
@@ -2004,7 +2256,7 @@ enum SimulatorDemoDataSeeder {
         }
 
         for (moveIndex, pendingMove) in pendingMoves.enumerated() {
-            let move = MoveSegment(
+        let move = MoveSegment(
                 dedupeKey: moveDedupeKey(
                     routeIndex: routeIndex,
                     moveIndex: moveIndex,
@@ -2053,7 +2305,6 @@ enum SimulatorDemoDataSeeder {
             bendDirection: bendDirection,
             bendStrength: bendStrength
         )
-
         let coordinates = sampleCoordinates(
             from: pathCoordinates,
             maximumCount: sampleCount

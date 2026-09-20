@@ -187,17 +187,26 @@ struct DayTimelinePageContent: View {
         return entries
     }
 
+    private var deviceResolution: MultiDeviceDayResolution {
+        MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
+    }
+
     private static func makePresentationCache(for dayTimeline: DayTimeline) -> DayTimelinePresentationCache {
-        let places = dayTimeline.places
+        let resolution = MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
+        let visiblePlaces = dayTimeline.places.filter { resolution.includes($0.deviceIdentifier) }
+        let visibleMoves = dayTimeline.moves.filter { resolution.includes($0.deviceIdentifier) }
+        let places = visiblePlaces
             .filter { !shouldHidePlaceFromTimeline($0) }
             .map(TimelineEntry.place)
-        let moves = dayTimeline.moves.map(TimelineEntry.move)
-        let samples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        let moves = visibleMoves.map(TimelineEntry.move)
+        let samples = dayTimeline.samples
+            .filter { resolution.includes($0.deviceIdentifier) }
+            .sorted(by: { $0.timestamp < $1.timestamp })
         var entries = (places + moves).sorted { $0.startDate < $1.startDate }
 
-        if let firstMove = dayTimeline.moves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
+        if let firstMove = visibleMoves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
            let startPlace = firstMove.startPlace {
-            let hasDayStartPlaceAlready = dayTimeline.places.contains(where: { $0.id == startPlace.id })
+            let hasDayStartPlaceAlready = visiblePlaces.contains(where: { $0.id == startPlace.id })
 
             if !hasDayStartPlaceAlready {
                 let startEntry = TimelineEntry.start(
@@ -224,7 +233,7 @@ struct DayTimelinePageContent: View {
 
         return DayTimelinePresentationCache(
             timelineEntries: entries,
-            transportSummaryMetrics: transportSummaryMetrics(for: dayTimeline),
+            transportSummaryMetrics: transportSummaryMetrics(for: visibleMoves),
             sortedSamples: samples
         )
     }
@@ -271,11 +280,11 @@ struct DayTimelinePageContent: View {
             .joined(separator: ",")
     }
 
-    private static func transportSummaryMetrics(for dayTimeline: DayTimeline) -> [DayTransportSummaryMetric] {
+    private static func transportSummaryMetrics(for moves: [MoveSegment]) -> [DayTransportSummaryMetric] {
         var durationByBucket: [DayTransportBucket: TimeInterval] = [:]
         var distanceByBucket: [DayTransportBucket: CLLocationDistance] = [:]
 
-        for move in dayTimeline.moves {
+        for move in moves {
             guard let bucket = DayTransportBucket(move.transportMode) else { continue }
 
             durationByBucket[bucket, default: 0] += move.timelineDuration
@@ -331,6 +340,8 @@ struct DayTimelinePageContent: View {
                     selection: $mapSelection
                 )
 
+                MultiDeviceActivityBanner(resolution: deviceResolution)
+
                 timelinePanel(usesSelection: false)
 
                 DayTransportSummaryView(
@@ -367,6 +378,8 @@ struct DayTimelinePageContent: View {
                     .padding(.horizontal, 4)
 
                     timelinePanel(usesSelection: true)
+
+                    MultiDeviceActivityBanner(resolution: deviceResolution)
 
                     DayTransportSummaryView(
                         metrics: transportSummaryMetrics,
@@ -577,6 +590,26 @@ private struct DayTimelinePresentationCache {
 
     var latestSample: LocationSample? {
         sortedSamples.last
+    }
+}
+
+private struct MultiDeviceActivityBanner: View {
+    let resolution: MultiDeviceDayResolution
+
+    var body: some View {
+        if resolution.kind == .independentJourneys {
+            Label {
+                Text("Another iPhone recorded a separate trip today. This timeline is showing this phone's journey.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+            }
+            .foregroundStyle(MovesPalette.routeTracking)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .panelSurface()
+        }
     }
 }
 
@@ -815,6 +848,7 @@ struct DayMapStrip: View {
     let isActive: Bool
     @Binding var selection: TimelineMapSelection?
     let fillsAvailableSpace: Bool
+    private let deviceResolution: MultiDeviceDayResolution
     private static let collapsedMapHeight: CGFloat = 180
     private static let collapsedMapCornerRadius: CGFloat = 14
     private static let fullScreenMapAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
@@ -856,20 +890,23 @@ struct DayMapStrip: View {
         dayTimeline: DayTimeline,
         isActive: Bool,
         selection: Binding<TimelineMapSelection?> = .constant(nil),
-        fillsAvailableSpace: Bool = false
+        fillsAvailableSpace: Bool = false,
+        deviceResolution: MultiDeviceDayResolution? = nil
     ) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
         _selection = selection
         self.fillsAvailableSpace = fillsAvailableSpace
+        self.deviceResolution = deviceResolution ?? MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
 
-        let cache = Self.makePresentationCache(for: dayTimeline)
+        let cache = Self.makePresentationCache(for: dayTimeline, resolution: self.deviceResolution)
         let cachedRoutes = DayMapRouteCache.routes(for: cache.routeRefreshKey)
-        let renderedRoutes = cachedRoutes?.routes ?? Self.renderedRoutes(for: dayTimeline)
+        let renderedRoutes = cachedRoutes?.routes ?? Self.renderedRoutes(for: dayTimeline, resolution: self.deviceResolution)
         let allCoordinates = Self.allCoordinates(
             for: dayTimeline,
             routeCoordinates: renderedRoutes.flatMap { $0.coordinates },
-            liveRouteCoordinates: []
+            liveRouteCoordinates: [],
+            resolution: self.deviceResolution
         )
         let cameraCoordinates = allCoordinates.isEmpty
             ? cache.latestSampleCoordinate.map { [$0] } ?? []
@@ -917,7 +954,7 @@ struct DayMapStrip: View {
                 refreshCamera(for: newSelection)
             }
             .onChange(of: dayTimeline.dayKey) { _, _ in
-                presentationCache = Self.makePresentationCache(for: dayTimeline)
+                presentationCache = Self.makePresentationCache(for: dayTimeline, resolution: deviceResolution)
             }
     }
 
@@ -1304,7 +1341,9 @@ struct DayMapStrip: View {
             return
         }
 
-        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+        let sortedMoves = dayTimeline.moves
+            .filter { deviceResolution.includes($0.deviceIdentifier) }
+            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
         var renderedRoutes: [RenderedRoute] = []
         renderedRoutes.reserveCapacity(sortedMoves.count)
 
@@ -1339,7 +1378,8 @@ struct DayMapStrip: View {
         let allCoordinates = Self.allCoordinates(
             for: dayTimeline,
             routeCoordinates: historicalRouteCoordinates,
-            liveRouteCoordinates: liveCoordinates
+            liveRouteCoordinates: liveCoordinates,
+            resolution: deviceResolution
         )
         let cameraCoordinates = allCoordinates.isEmpty
             ? presentationCache.latestSampleCoordinate.map { [$0] } ?? []
@@ -1376,8 +1416,12 @@ struct DayMapStrip: View {
         camera = .region(region)
     }
 
-    private static func renderedRoutes(for dayTimeline: DayTimeline) -> [RenderedRoute] {
+    private static func renderedRoutes(
+        for dayTimeline: DayTimeline,
+        resolution: MultiDeviceDayResolution
+    ) -> [RenderedRoute] {
         let renderedRoutes = dayTimeline.moves
+            .filter { resolution.includes($0.deviceIdentifier) }
             .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
             .map { move in
                 let fallback = MoveRouteGeometry.rawCoordinates(for: move)
@@ -1393,7 +1437,7 @@ struct DayMapStrip: View {
             }
         DayMapRouteCache.store(
             renderedRoutes,
-            for: routeRefreshKey(for: dayTimeline),
+            for: routeRefreshKey(for: dayTimeline, resolution: resolution),
             isFullyMatched: false
         )
         return renderedRoutes
@@ -1402,21 +1446,29 @@ struct DayMapStrip: View {
     private static func allCoordinates(
         for dayTimeline: DayTimeline,
         routeCoordinates: [CLLocationCoordinate2D],
-        liveRouteCoordinates: [CLLocationCoordinate2D]
+        liveRouteCoordinates: [CLLocationCoordinate2D],
+        resolution: MultiDeviceDayResolution
     ) -> [CLLocationCoordinate2D] {
-        let placeCoordinates = mapPlaces(for: dayTimeline).map(\.coordinate)
+        let placeCoordinates = mapPlaces(for: dayTimeline, resolution: resolution).map(\.coordinate)
         return routeCoordinates + liveRouteCoordinates + placeCoordinates
     }
 
-    private static func latestSampleCoordinate(for dayTimeline: DayTimeline) -> CLLocationCoordinate2D? {
+    private static func latestSampleCoordinate(
+        for dayTimeline: DayTimeline,
+        resolution: MultiDeviceDayResolution
+    ) -> CLLocationCoordinate2D? {
         dayTimeline.samples
+            .filter { resolution.includes($0.deviceIdentifier) }
             .sorted(by: { $0.timestamp < $1.timestamp })
             .last?
             .coordinate
     }
 
-    private static func makePresentationCache(for dayTimeline: DayTimeline) -> DayMapPresentationCache {
-        let sortedPlaces = mapPlaces(for: dayTimeline)
+    private static func makePresentationCache(
+        for dayTimeline: DayTimeline,
+        resolution: MultiDeviceDayResolution
+    ) -> DayMapPresentationCache {
+        let sortedPlaces = mapPlaces(for: dayTimeline, resolution: resolution)
         let placeMarkers = sortedPlaces.map {
             PlaceMarker(id: $0.id, title: $0.displayTitle, coordinate: $0.coordinate)
         }
@@ -1427,7 +1479,9 @@ struct DayMapStrip: View {
         }
         .joined(separator: ",")
 
-        let sortedSamples = dayTimeline.samples.sorted(by: { $0.timestamp < $1.timestamp })
+        let sortedSamples = dayTimeline.samples
+            .filter { resolution.includes($0.deviceIdentifier) }
+            .sorted(by: { $0.timestamp < $1.timestamp })
         let latestSample = sortedSamples.last
         let latestSampleKey = latestSample.map { sample in
             "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
@@ -1436,27 +1490,35 @@ struct DayMapStrip: View {
         return DayMapPresentationCache(
             placeMarkers: placeMarkers,
             latestSampleCoordinate: latestSample?.coordinate,
-            routeRefreshKey: routeRefreshKey(for: dayTimeline),
+            routeRefreshKey: routeRefreshKey(for: dayTimeline, resolution: resolution),
             placeRefreshKey: placeRefreshKey,
             latestSampleKey: latestSampleKey
         )
     }
 
-    private static func mapPlaces(for dayTimeline: DayTimeline) -> [VisitPlace] {
-        let routePlaces = dayTimeline.moves.flatMap { move in
+    private static func mapPlaces(
+        for dayTimeline: DayTimeline,
+        resolution: MultiDeviceDayResolution
+    ) -> [VisitPlace] {
+        let routePlaces = dayTimeline.moves.filter { resolution.includes($0.deviceIdentifier) }.flatMap { move in
             [move.startPlace, move.endPlace].compactMap { $0 }
         }
         var placesByID: [UUID: VisitPlace] = [:]
 
-        for place in dayTimeline.displayPlaces + routePlaces {
+        for place in dayTimeline.displayPlaces.filter({ resolution.includes($0.deviceIdentifier) }) + routePlaces {
             placesByID[place.id] = place
         }
 
         return placesByID.values.sorted(by: { $0.arrivalDate < $1.arrivalDate })
     }
 
-    private static func routeRefreshKey(for dayTimeline: DayTimeline) -> String {
-        let sortedMoves = dayTimeline.moves.sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
+    private static func routeRefreshKey(
+        for dayTimeline: DayTimeline,
+        resolution: MultiDeviceDayResolution
+    ) -> String {
+        let sortedMoves = dayTimeline.moves
+            .filter { resolution.includes($0.deviceIdentifier) }
+            .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
         return sortedMoves.map { move in
             let start = Int(move.timelineStartDate.timeIntervalSince1970.rounded())
             let end = Int(move.endDate.timeIntervalSince1970.rounded())

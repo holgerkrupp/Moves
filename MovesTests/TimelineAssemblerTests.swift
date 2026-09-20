@@ -1554,6 +1554,115 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertFalse(attributes.contentDescription?.contains("52.52") ?? true)
     }
 
+    func testMultiDeviceResolverUsesMovingPhoneWhenCompanionIsStationary() {
+        let samples = multiDeviceSamples(
+            device: "moving",
+            coordinates: [(52.5200, 13.4050), (52.5220, 13.4050), (52.5240, 13.4050)]
+        ) + multiDeviceSamples(
+            device: "home",
+            coordinates: [(52.5000, 13.4000), (52.5001, 13.4000), (52.5000, 13.4001)]
+        )
+
+        let resolution = MultiDeviceTimelineResolver.resolve(
+            samples: samples,
+            preferredDeviceIdentifier: "home"
+        )
+
+        XCTAssertEqual(resolution.kind, .singleJourney)
+        XCTAssertEqual(resolution.visibleDeviceIdentifier, "moving")
+        XCTAssertTrue(resolution.includes("moving"))
+        XCTAssertFalse(resolution.includes("home"))
+    }
+
+    func testMultiDeviceResolverSilentlyMergesCoTravellingPhones() {
+        let samples = multiDeviceSamples(
+            device: "phone-a",
+            coordinates: [(52.5200, 13.4050), (52.5220, 13.4050), (52.5240, 13.4050)]
+        ) + multiDeviceSamples(
+            device: "phone-b",
+            coordinates: [(52.5201, 13.4051), (52.5221, 13.4051), (52.5241, 13.4051)]
+        )
+
+        let resolution = MultiDeviceTimelineResolver.resolve(
+            samples: samples,
+            preferredDeviceIdentifier: "phone-b"
+        )
+
+        XCTAssertEqual(resolution.kind, .coTravelling)
+        XCTAssertEqual(resolution.visibleDeviceIdentifier, "phone-a")
+        XCTAssertTrue(resolution.includes("phone-a"))
+        XCTAssertFalse(resolution.includes("phone-b"))
+    }
+
+    func testMultiDeviceResolverSeparatesIndependentMovingPhones() {
+        let samples = multiDeviceSamples(
+            device: "owner",
+            coordinates: [(52.5200, 13.4050), (52.5220, 13.4050), (52.5240, 13.4050)]
+        ) + multiDeviceSamples(
+            device: "loaner",
+            coordinates: [(52.4200, 13.1050), (52.4220, 13.1050), (52.4240, 13.1050)]
+        )
+
+        let resolution = MultiDeviceTimelineResolver.resolve(
+            samples: samples,
+            preferredDeviceIdentifier: "owner"
+        )
+
+        XCTAssertEqual(resolution.kind, .independentJourneys)
+        XCTAssertEqual(resolution.visibleDeviceIdentifier, "owner")
+        XCTAssertEqual(resolution.otherMovingDeviceIdentifiers, ["loaner"])
+        XCTAssertTrue(resolution.includes("owner"))
+        XCTAssertFalse(resolution.includes("loaner"))
+    }
+
+    func testRepositoryKeepsNewSamplesScopedToCapturingPhone() throws {
+        let container = try makeInMemoryContainer()
+        let phoneA = SwiftDataTimelineRepository(modelContainer: container, deviceIdentifier: "phone-a")
+        let phoneB = SwiftDataTimelineRepository(modelContainer: container, deviceIdentifier: "phone-b")
+        let timestamp = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
+        _ = try phoneA.appendSamples(
+            from: [makeLocation(latitude: 52.52, longitude: 13.405, speed: 3, timestamp: timestamp)],
+            source: .routeTracking
+        )
+        _ = try phoneB.appendSamples(
+            from: [makeLocation(latitude: 52.42, longitude: 13.105, speed: 3, timestamp: timestamp)],
+            source: .routeTracking
+        )
+
+        let phoneASamples = try phoneA.samples(
+            from: timestamp.addingTimeInterval(-1),
+            to: timestamp.addingTimeInterval(1)
+        )
+        let phoneBSamples = try phoneB.samples(
+            from: timestamp.addingTimeInterval(-1),
+            to: timestamp.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(phoneASamples.map(\.deviceIdentifier), ["phone-a"])
+        XCTAssertEqual(phoneBSamples.map(\.deviceIdentifier), ["phone-b"])
+    }
+
+    private func multiDeviceSamples(
+        device: String,
+        coordinates: [(CLLocationDegrees, CLLocationDegrees)]
+    ) -> [LocationSample] {
+        let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        return coordinates.enumerated().map { index, coordinate in
+            LocationSample(
+                location: makeLocation(
+                    latitude: coordinate.0,
+                    longitude: coordinate.1,
+                    speed: 4,
+                    timestamp: start.addingTimeInterval(TimeInterval(index * 5 * 60))
+                ),
+                source: .routeTracking,
+                dedupeKey: "\(device)-\(index)",
+                deviceIdentifier: device
+            )
+        }
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = Schema([
             DayTimeline.self,

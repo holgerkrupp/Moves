@@ -127,6 +127,8 @@ struct MovesSettingsView: View {
                         }
                     }
 
+                    MultiDeviceSettingsCard()
+
                     AppIconPickerSection()
 
                     SettingsCard(title: "Integrations") {
@@ -456,6 +458,25 @@ struct MovesSettingsView: View {
         }
     }
 
+}
+
+private struct MultiDeviceSettingsCard: View {
+    @AppStorage("Moves.multiDevice.displayName") private var deviceName = ""
+
+    var body: some View {
+        SettingsCard(title: "Multiple iPhones") {
+            TextField("This iPhone's name", text: $deviceName)
+                .textInputAutocapitalization(.words)
+
+            Text("Moves silently combines matching trips from your iPhones. If phones travel separately, each phone shows only its own journey so routes are never joined together.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            Text("This iPhone: \(DeviceIdentityStore.displayName)")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(MovesPalette.routeTracking)
+        }
+    }
 }
 
 struct RouteTrackingSettingsSheet: View {
