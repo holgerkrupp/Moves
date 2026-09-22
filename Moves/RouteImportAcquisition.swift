@@ -28,7 +28,7 @@ enum RouteImportAcquisitionError: LocalizedError, Sendable, Equatable {
     var errorDescription: String? {
         switch self {
         case .sourceUnavailable(let source):
-            return "The selected source is unavailable. Reconnect it or select it again: (source)"
+            return "The selected source is unavailable. Reconnect it or select it again: \(source)"
         case .stagingLimitExceeded:
             return "The selected route import is too large to stage safely. Select fewer or smaller files."
         case .invalidArchive:
@@ -64,9 +64,9 @@ struct RouteImportAcquirer {
         var seen = Set<String>()
         var stagedBytes: Int64 = 0
         var succeeded = false
-        defer {
-            if !succeeded { try? fileManager.removeItem(at: stagingDirectory) }
-        }
+        // Keep partial staging on failure. The recovery UI can retry from it or let the
+        // user choose the source again; cleanup is explicit through Discard.
+        defer { _ = succeeded }
 
         for source in urls.sorted(by: stableURLOrder) {
             let resolved = try resolve(source)

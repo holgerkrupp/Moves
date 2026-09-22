@@ -68,6 +68,68 @@ struct ImportJobError: Codable, Hashable, Sendable {
     var occurredAt: Date
 }
 
+/// Local-only recovery state. This is intentionally not a SwiftData model: unresolved
+/// imports may contain security-scoped source metadata and staged files and must not enter
+/// the CloudKit history schema.
+enum ImportRecoveryKind: String, Codable, CaseIterable, Sendable {
+    case needsInformation
+    case failed
+}
+
+struct ImportRecoveryItem: Codable, Hashable, Identifiable, Sendable {
+    let id: UUID
+    var displayName: String
+    var originalFileName: String
+    var source: ImportJobSourceMetadata
+    var stagedPath: String?
+    var configuration: RouteFileImportConfiguration
+    var kind: ImportRecoveryKind
+    var reason: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(), displayName: String, originalFileName: String,
+        source: ImportJobSourceMetadata = .init(), stagedPath: String? = nil,
+        configuration: RouteFileImportConfiguration = .init(),
+        kind: ImportRecoveryKind, reason: String, createdAt: Date = .now, updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.originalFileName = originalFileName
+        self.source = source
+        self.stagedPath = stagedPath
+        self.configuration = configuration
+        self.kind = kind
+        self.reason = reason
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+struct ImportRecoveryStore: Sendable {
+    static let currentVersion = 1
+    private struct Envelope: Codable { var version: Int; var items: [ImportRecoveryItem] }
+    let fileURL: URL
+
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Moves/ImportRecovery.json")
+    }
+
+    func load() throws -> [ImportRecoveryItem] {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+        let envelope = try JSONDecoder().decode(Envelope.self, from: Data(contentsOf: fileURL))
+        guard envelope.version <= Self.currentVersion else { throw ImportQueueStoreError.unsupportedVersion(envelope.version) }
+        return envelope.items
+    }
+
+    func save(_ items: [ImportRecoveryItem]) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(Envelope(version: Self.currentVersion, items: items)).write(to: fileURL, options: .atomic)
+    }
+}
+
 struct ImportJobRecord: Codable, Hashable, Identifiable, Sendable {
     let id: UUID
     var displayName: String
@@ -194,11 +256,14 @@ enum ImportQueueStoreError: LocalizedError, Sendable {
 final class ImportCoordinator: ObservableObject {
     @Published private(set) var snapshot: ImportQueueSnapshot
     @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var recoveryItems: [ImportRecoveryItem]
 
     private let store: ImportQueueStore
+    private let recoveryStore: ImportRecoveryStore
 
-    init(store: ImportQueueStore = ImportQueueStore()) {
+    init(store: ImportQueueStore = ImportQueueStore(), recoveryStore: ImportRecoveryStore = ImportRecoveryStore()) {
         self.store = store
+        self.recoveryStore = recoveryStore
         var restoredJobs: [ImportJobRecord] = []
         do {
             restoredJobs = try store.load()
@@ -206,6 +271,7 @@ final class ImportCoordinator: ObservableObject {
             lastErrorMessage = error.localizedDescription
         }
         snapshot = ImportQueueSnapshot(jobs: restoredJobs)
+        recoveryItems = (try? recoveryStore.load()) ?? []
     }
 
     var jobs: [ImportJobRecord] { snapshot.jobs }
@@ -231,6 +297,23 @@ final class ImportCoordinator: ObservableObject {
     func resume(id: UUID) throws { try transition(id: id, to: .queued) }
     func cancel(id: UUID) throws { try transition(id: id, to: .cancelled) }
     func retry(id: UUID) throws { try transition(id: id, to: .queued, clearError: true) }
+
+    func addRecovery(_ item: ImportRecoveryItem) throws {
+        recoveryItems.removeAll { $0.id == item.id }
+        recoveryItems.append(item)
+        try recoveryStore.save(recoveryItems)
+    }
+
+    func updateRecovery(_ item: ImportRecoveryItem) throws {
+        guard let index = recoveryItems.firstIndex(where: { $0.id == item.id }) else { return }
+        recoveryItems[index] = item
+        try recoveryStore.save(recoveryItems)
+    }
+
+    func removeRecovery(id: UUID) throws {
+        recoveryItems.removeAll { $0.id == id }
+        try recoveryStore.save(recoveryItems)
+    }
 
     private func transition(id: UUID, to state: ImportJobState, clearError: Bool = false) throws {
         guard let index = snapshot.jobs.firstIndex(where: { $0.id == id }) else { return }

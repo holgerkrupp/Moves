@@ -108,6 +108,30 @@ struct ImportQueueView: View {
                         )
                     }
                 }
+
+                if !coordinator.recoveryItems.isEmpty {
+                    Section("Needs attention") {
+                        ForEach(coordinator.recoveryItems) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Label(item.displayName, systemImage: item.kind == .needsInformation ? "questionmark.circle" : "exclamationmark.triangle")
+                                    Spacer()
+                                    Button("Discard", role: .destructive) {
+                                        try? coordinator.removeRecovery(id: item.id)
+                                    }
+                                    .font(.caption)
+                                }
+                                Text(item.kind == .needsInformation ? "Needs information" : "Import failed")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(item.kind == .needsInformation ? .orange : .red)
+                                Text(item.reason)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                }
             }
             .navigationTitle("Import Queue")
             .toolbar {

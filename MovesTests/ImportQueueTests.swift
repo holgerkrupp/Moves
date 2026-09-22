@@ -71,6 +71,42 @@ final class ImportQueueTests: XCTestCase {
         XCTAssertNil(coordinator.jobs[0].lastError)
     }
 
+    func testRecoveryPersistsKindSourceAndConfigurationAcrossReload() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ImportRecoveryStore(fileURL: root.appendingPathComponent("recovery.json"))
+        let configuration = RouteFileImportConfiguration(
+            mappingMode: .dedicatedTransport,
+            dedicatedTransportMode: .cycling,
+            existingDataPolicy: .overwriteExisting
+        )
+        let item = ImportRecoveryItem(
+            displayName: "routes.gpx", originalFileName: "routes.gpx",
+            source: ImportJobSourceMetadata(originalFileNames: ["routes.gpx"], sourceIdentifiers: ["/missing/routes.gpx"]),
+            stagedPath: "/staged/routes.gpx", configuration: configuration,
+            kind: .needsInformation, reason: "Choose a target date"
+        )
+        try store.save([item])
+        let restored = try store.load()
+        XCTAssertEqual(restored, [item])
+        XCTAssertEqual(restored.first?.kind, .needsInformation)
+        XCTAssertEqual(restored.first?.configuration, configuration)
+        XCTAssertEqual(restored.first?.source.sourceIdentifiers, ["/missing/routes.gpx"])
+    }
+
+    func testAcquirerRetainsPartialStagingForRecovery() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let staging = root.appendingPathComponent("staged")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = root.appendingPathComponent("first.gpx")
+        let missing = root.appendingPathComponent("missing.gpx")
+        try Data("<gpx/>".utf8).write(to: first)
+
+        XCTAssertThrowsError(try RouteImportAcquirer(stagingDirectory: staging).acquire(urls: [first, missing]))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.appendingPathComponent("000000-first.gpx").path))
+    }
+
     func testAcquirerCopiesLocalFileIntoAppOwnedStaging() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let staging = root.appendingPathComponent("Application Support/Moves/RouteImport")

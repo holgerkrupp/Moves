@@ -21,6 +21,35 @@ struct FailedRouteImport: Codable, Identifiable, Hashable {
     let createdAt: Date
     let reason: String
     let configuration: RouteFileImportConfiguration
+    var kind: ImportRecoveryKind = .needsInformation
+    var source: ImportJobSourceMetadata = .init()
+    var stagedPath: String? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, originalFileName, storedFileName, sourceImportIdentifier, createdAt, reason, configuration, kind, source, stagedPath
+    }
+
+    init(id: UUID, originalFileName: String, storedFileName: String, sourceImportIdentifier: String,
+         createdAt: Date, reason: String, configuration: RouteFileImportConfiguration,
+         kind: ImportRecoveryKind = .needsInformation, source: ImportJobSourceMetadata = .init(), stagedPath: String? = nil) {
+        self.id = id; self.originalFileName = originalFileName; self.storedFileName = storedFileName
+        self.sourceImportIdentifier = sourceImportIdentifier; self.createdAt = createdAt; self.reason = reason
+        self.configuration = configuration; self.kind = kind; self.source = source; self.stagedPath = stagedPath
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        originalFileName = try c.decode(String.self, forKey: .originalFileName)
+        storedFileName = try c.decode(String.self, forKey: .storedFileName)
+        sourceImportIdentifier = try c.decode(String.self, forKey: .sourceImportIdentifier)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        reason = try c.decode(String.self, forKey: .reason)
+        configuration = try c.decode(RouteFileImportConfiguration.self, forKey: .configuration)
+        kind = try c.decodeIfPresent(ImportRecoveryKind.self, forKey: .kind) ?? .needsInformation
+        source = try c.decodeIfPresent(ImportJobSourceMetadata.self, forKey: .source) ?? .init()
+        stagedPath = try c.decodeIfPresent(String.self, forKey: .stagedPath)
+    }
 }
 
 struct ImportedRouteDataFilter {
@@ -495,6 +524,13 @@ final class RouteFileImporter: ObservableObject {
         self.modelContainer = modelContext.container
         self.importCoordinator = importCoordinator
         self.failedImports = RouteFileImportStore.failedImports
+        for item in failedImports where !importCoordinator.recoveryItems.contains(where: { $0.id == item.id }) {
+            try? importCoordinator.addRecovery(ImportRecoveryItem(
+                id: item.id, displayName: item.originalFileName, originalFileName: item.originalFileName,
+                source: item.source, stagedPath: item.stagedPath ?? RouteFileImportStore.failedImportsDirectory.path,
+                configuration: item.configuration, kind: item.kind, reason: item.reason, createdAt: item.createdAt
+            ))
+        }
         let persistedState = RouteFileImportStore.state?.state ?? .idle
         state = persistedState == .running ? .paused : persistedState
         if persistedState == .running, var persisted = RouteFileImportStore.state {
@@ -580,6 +616,26 @@ final class RouteFileImporter: ObservableObject {
             } catch {
                 self.state = .failed
                 self.lastErrorMessage = error.localizedDescription
+                let recovery = ImportRecoveryItem(
+                    displayName: urls.first?.lastPathComponent ?? "Route file import",
+                    originalFileName: urls.first?.lastPathComponent ?? "Route file import",
+                    source: ImportJobSourceMetadata(
+                        originalFileNames: urls.map(\.lastPathComponent), sourceIdentifiers: urls.map(\.path)
+                    ), stagedPath: RouteFileImportStore.stagingDirectory.path,
+                    configuration: configuration,
+                    kind: error is RouteImportAcquisitionError ? .needsInformation : .failed,
+                    reason: error.localizedDescription
+                )
+                try? self.importCoordinator.addRecovery(recovery)
+                if !self.failedImports.contains(where: { $0.id == recovery.id }) {
+                    self.failedImports.append(FailedRouteImport(
+                        id: recovery.id, originalFileName: recovery.originalFileName, storedFileName: "",
+                        sourceImportIdentifier: recovery.source.sourceIdentifiers.first ?? "",
+                        createdAt: recovery.createdAt, reason: recovery.reason, configuration: recovery.configuration,
+                        kind: recovery.kind, source: recovery.source, stagedPath: recovery.stagedPath
+                    ))
+                    RouteFileImportStore.failedImports = self.failedImports
+                }
                 if let activeJobID, var job = self.importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
                     job.state = error is RouteImportAcquisitionError ? .needsInformation : .failed
                     job.lastError = ImportJobError(message: error.localizedDescription, isRecoverable: true, occurredAt: .now)
@@ -810,6 +866,28 @@ final class RouteFileImporter: ObservableObject {
         removeFailedImport(id, deleteFile: true)
     }
 
+    func retryFailedImport(_ id: UUID) {
+        guard let item = importCoordinator.recoveryItems.first(where: { $0.id == id }) else { return }
+        let urls = item.source.sourceIdentifiers.map(URL.init(fileURLWithPath:))
+        guard !urls.isEmpty else { return }
+        start(urls: urls, configuration: item.configuration)
+    }
+
+    func locateFailedImport(_ id: UUID, at url: URL) {
+        guard let index = failedImports.firstIndex(where: { $0.id == id }) else { return }
+        failedImports[index].source = ImportJobSourceMetadata(
+            originalFileNames: [url.lastPathComponent], sourceIdentifiers: [url.path]
+        )
+        failedImports[index].stagedPath = url.path
+        RouteFileImportStore.failedImports = failedImports
+        if var item = importCoordinator.recoveryItems.first(where: { $0.id == id }) {
+            item.source = failedImports[index].source
+            item.stagedPath = url.path
+            item.updatedAt = .now
+            try? importCoordinator.updateRecovery(item)
+        }
+    }
+
     private func importTracks(
         _ tracks: [ImportedRouteTrack],
         configuration: RouteFileImportConfiguration,
@@ -895,6 +973,13 @@ final class RouteFileImporter: ObservableObject {
         )
         failedImports.append(failedImport)
         RouteFileImportStore.failedImports = failedImports
+        try? importCoordinator.addRecovery(ImportRecoveryItem(
+            id: failedImport.id, displayName: failedImport.originalFileName,
+            originalFileName: failedImport.originalFileName,
+            source: ImportJobSourceMetadata(originalFileNames: [failedImport.originalFileName], sourceIdentifiers: [sourceIdentifier]),
+            stagedPath: destination.path, configuration: configuration, kind: .needsInformation,
+            reason: failedImport.reason, createdAt: failedImport.createdAt
+        ))
     }
 
     private func removeFailedImport(_ id: UUID, deleteFile: Bool) {
@@ -906,6 +991,7 @@ final class RouteFileImporter: ObservableObject {
         }
         failedImports.removeAll { $0.id == id }
         RouteFileImportStore.failedImports = failedImports
+        try? importCoordinator.removeRecovery(id: id)
     }
 
     private func retarget(
@@ -1740,6 +1826,7 @@ struct FailedRouteImportsView: View {
     @State private var message = ""
     @State private var isShowingMessage = false
     @State private var pendingDiscard: FailedRouteImport?
+    @State private var locatingImport: FailedRouteImport?
 
     var body: some View {
         List {
@@ -1752,25 +1839,37 @@ struct FailedRouteImportsView: View {
             } else {
                 ForEach(importer.failedImports) { failedImport in
                     Section {
-                        DatePicker(
-                            "Target date",
-                            selection: targetDateBinding(for: failedImport.id),
-                            displayedComponents: .date
-                        )
+                        if failedImport.kind == .needsInformation {
+                            DatePicker(
+                                "Target date",
+                                selection: targetDateBinding(for: failedImport.id),
+                                displayedComponents: .date
+                            )
 
-                        Button {
-                            importFailed(failedImport)
-                        } label: {
-                            if importer.resolvingFailedImportID == failedImport.id {
-                                HStack {
-                                    ProgressView()
-                                    Text("Importing…")
+                            Button {
+                                importFailed(failedImport)
+                            } label: {
+                                if importer.resolvingFailedImportID == failedImport.id {
+                                    HStack {
+                                        ProgressView()
+                                        Text("Importing…")
+                                    }
+                                } else {
+                                    Label("Import on selected date", systemImage: "calendar.badge.checkmark")
                                 }
-                            } else {
-                                Label("Import on selected date", systemImage: "calendar.badge.checkmark")
                             }
+                            .disabled(importer.resolvingFailedImportID != nil)
                         }
-                        .disabled(importer.resolvingFailedImportID != nil)
+
+                        if failedImport.kind == .needsInformation {
+                            Button("Locate File", systemImage: "folder") {
+                                locatingImport = failedImport
+                            }
+                            Button("Retry", systemImage: "arrow.clockwise") {
+                                importer.retryFailedImport(failedImport.id)
+                            }
+                            .disabled(importer.isImporting)
+                        }
 
                         Button("Discard saved import", role: .destructive) {
                             pendingDiscard = failedImport
@@ -1808,6 +1907,15 @@ struct FailedRouteImportsView: View {
             Button("Cancel", role: .cancel) { pendingDiscard = nil }
         } message: {
             Text("The quarantined file will be deleted. No timeline data has been written from it.")
+        }
+        .fileImporter(
+            isPresented: Binding(get: { locatingImport != nil }, set: { if !$0 { locatingImport = nil } }),
+            allowedContentTypes: RouteFileImportContentTypes.allowed
+        ) { result in
+            if case .success(let url) = result, let item = locatingImport {
+                importer.locateFailedImport(item.id, at: url)
+            }
+            locatingImport = nil
         }
     }
 

@@ -904,8 +904,8 @@
 			files = (
 				F1000001310000010000000A /* MovesMacApp.swift in Sources */,
 				A41000012FC0000100000003 /* ImportQueue.swift in Sources */,
-				A42000012FC0000100000002 /* ImportQueueViews.swift in Sources */,
-				A43000012FC0000100000002 /* RouteFileImportConfiguration.swift in Sources */,
+				A44000012FC0000100000002 /* ImportQueueViews.swift in Sources */,
+				A45000012FC0000100000002 /* RouteFileImportConfiguration.swift in Sources */,
 				F1000001310000010000000B /* VisitedLocation.swift in Sources */,
 				F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */,
 			);
