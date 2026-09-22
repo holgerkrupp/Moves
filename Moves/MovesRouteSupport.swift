@@ -8,9 +8,14 @@
 import Foundation
 import SwiftUI
 import MapKit
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 enum MovesPalette {
+    #if canImport(UIKit)
     static let backgroundTop = Color(uiColor: .systemGroupedBackground)
     static let backgroundBottom = Color(uiColor: .secondarySystemGroupedBackground)
     static let card = Color(uiColor: .secondarySystemBackground)
@@ -18,11 +23,24 @@ enum MovesPalette {
     static let rail = Color(uiColor: .separator).opacity(0.75)
     static let textFieldBackground = Color(uiColor: .tertiarySystemBackground)
     static let frostedFill = Color(uiColor: .tertiarySystemFill)
+    #else
+    static let backgroundTop = Color(nsColor: .windowBackgroundColor)
+    static let backgroundBottom = Color(nsColor: .underPageBackgroundColor)
+    static let card = Color(nsColor: .controlBackgroundColor)
+    static let border = Color(nsColor: .separatorColor).opacity(0.45)
+    static let rail = Color(nsColor: .separatorColor).opacity(0.75)
+    static let textFieldBackground = Color(nsColor: .textBackgroundColor)
+    static let frostedFill = Color(nsColor: .controlBackgroundColor)
+    #endif
     static let place = Color("MovesPlace")
     static let move = Color("MovesMove")
     static let start = Color("MovesStart")
     static let routeTracking = Color("MovesRouteTracking")
+    #if canImport(UIKit)
     static let healthRoute = Color(uiColor: .systemPink)
+    #else
+    static let healthRoute = Color(nsColor: .systemPink)
+    #endif
 
     static func transport(_ mode: TransportMode) -> Color {
         Color(transportColorAssetName(for: mode))
@@ -151,6 +169,7 @@ struct RenderedRoute: Identifiable {
     }
 }
 
+#if os(iOS)
 @MainActor
 func liveRouteTrackingSnapshot(
     for dayTimeline: DayTimeline,
@@ -193,6 +212,7 @@ func liveRouteTrackingSnapshot(
         coordinates: coordinates
     )
 }
+#endif
 
 func liveRouteSessionSamples(
     from preferredSamples: [LocationSample],

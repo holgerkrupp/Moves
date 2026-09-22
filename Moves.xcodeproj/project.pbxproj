@@ -7,15 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		489A76352C4FC6F300F43B69 /* MovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76342C4FC6F300F43B69 /* MovesApp.swift */; };
-		489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76362C4FC6F300F43B69 /* ContentView.swift */; };
+		4826804430626CAD0076FA35 /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
+		489A76352C4FC6F300F43B69 /* MovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76342C4FC6F300F43B69 /* MovesApp.swift */; platformFilter = ios; };
+		489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76362C4FC6F300F43B69 /* ContentView.swift */; platformFilter = ios; };
 		489A763B2C4FC6F500F43B69 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763A2C4FC6F500F43B69 /* Assets.xcassets */; };
 		489A763E2C4FC6F500F43B69 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763D2C4FC6F500F43B69 /* Preview Assets.xcassets */; };
-		489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76442C4FC70D00F43B69 /* LocationChange.swift */; };
+		489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76442C4FC70D00F43B69 /* LocationChange.swift */; platformFilter = ios; };
 		489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */; };
 		48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
-		48A8FC0F2F8CCC7E000EAECA /* CreatedByView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8FC0E2F8CCC7E000EAECA /* CreatedByView.swift */; };
-		48A8FC112F8CCD27000EAECA /* VersionNumberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8FC102F8CCD27000EAECA /* VersionNumberView.swift */; };
+		48A8FC0F2F8CCC7E000EAECA /* CreatedByView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8FC0E2F8CCC7E000EAECA /* CreatedByView.swift */; platformFilter = ios; };
+		48A8FC112F8CCD27000EAECA /* VersionNumberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8FC102F8CCD27000EAECA /* VersionNumberView.swift */; platformFilter = ios; };
 		48E2BF8C2F9958A3004B7600 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */; };
 		48F58A842FBAF2BA0027EE58 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
 		48F58A852FBAF2BA0027EE58 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
@@ -73,55 +74,56 @@
 		48F925F6305B073A0011EEA3 /* M-stadt.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F5305B073A0011EEA3 /* M-stadt.icon */; };
 		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; };
 		A10000012F00000100000002 /* MovesRouteSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000001 /* MovesRouteSupport.swift */; };
-		A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000003 /* MovesTimelineViews.swift */; };
-		A10000012F00000100000006 /* MovesDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000005 /* MovesDetailViews.swift */; };
-		A10000012F00000100000008 /* MovesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000007 /* MovesSettingsView.swift */; };
-		A10000012F00000100000108 /* AppIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000107 /* AppIconPicker.swift */; };
-		A10000012F00000100000208 /* GeneratedAppIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000207 /* GeneratedAppIcons.swift */; };
-		A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */; };
-		A20000012FA0000100000003 /* WatchRouteInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000002 /* WatchRouteInbox.swift */; };
+		A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000003 /* MovesTimelineViews.swift */; platformFilter = ios; };
+		A10000012F00000100000006 /* MovesDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000005 /* MovesDetailViews.swift */; platformFilter = ios; };
+		A10000012F00000100000008 /* MovesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000007 /* MovesSettingsView.swift */; platformFilter = ios; };
+		A10000012F00000100000108 /* AppIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000107 /* AppIconPicker.swift */; platformFilter = ios; };
+		A10000012F00000100000208 /* GeneratedAppIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000207 /* GeneratedAppIcons.swift */; platformFilter = ios; };
+		A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */; platformFilter = ios; };
+		A20000012FA0000100000003 /* WatchRouteInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000002 /* WatchRouteInbox.swift */; platformFilter = ios; };
 		A20000012FA0000100000011 /* WatchMovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000010 /* WatchMovesApp.swift */; };
 		A20000012FA0000100000013 /* WatchMovesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000012 /* WatchMovesContentView.swift */; };
 		A20000012FA0000100000015 /* WatchLocationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000014 /* WatchLocationTracker.swift */; };
 		A20000012FA0000100000018 /* Moves Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000017 /* Moves Watch App.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A30000012FB0000100000001 /* TimelineWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000000 /* TimelineWidgetSnapshot.swift */; };
+		A30000012FB0000100000001 /* TimelineWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000000 /* TimelineWidgetSnapshot.swift */; platformFilter = ios; };
 		A30000012FB0000100000011 /* MovesWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000010 /* MovesWidgets.swift */; };
 		A30000012FB0000100000013 /* MovesWatchComplications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000012 /* MovesWatchComplications.swift */; };
 		A30000012FB0000100000015 /* TimelineWidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000014 /* TimelineWidgetViews.swift */; };
 		A30000012FB0000100000016 /* TimelineWidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000014 /* TimelineWidgetViews.swift */; };
 		A30000012FB0000100000018 /* TimelineWidgetSnapshotShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000017 /* TimelineWidgetSnapshotShared.swift */; };
 		A30000012FB0000100000019 /* TimelineWidgetSnapshotShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000017 /* TimelineWidgetSnapshotShared.swift */; };
-		A30000012FB0000100000021 /* Moves Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000020 /* Moves Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A30000012FB0000100000021 /* Moves Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000020 /* Moves Widgets.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A40000012FC0000100000001 /* RouteFileImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000000 /* RouteFileImport.swift */; };
-		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
 		A41000012FC0000100000001 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
+		A41000012FC0000100000003 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
 		A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A42000012FC0000100000000 /* RouteImportAcquisition.swift */; };
 		A44000012FC0000100000001 /* ImportQueueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44000012FC0000100000000 /* ImportQueueViews.swift */; };
 		A44000012FC0000100000002 /* ImportQueueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44000012FC0000100000000 /* ImportQueueViews.swift */; };
-		A41000012FC0000100000003 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
 		A45000012FC0000100000001 /* RouteFileImportConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */; };
 		A45000012FC0000100000002 /* RouteFileImportConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */; };
-		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; };
+		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; platformFilter = ios; };
 		A50000012FD0000100000002 /* CloudDataPresence in Frameworks */ = {isa = PBXBuildFile; productRef = A50000012FD0000100000004 /* CloudDataPresence */; };
-		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; };
-		A70000012FF0000100000001 /* MovesShareViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000012FF0000100000000 /* MovesShareViews.swift */; };
-		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; };
-		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; };
-		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; };
-		C10000013000000100000001 /* RouteTrackingLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000000 /* RouteTrackingLiveActivity.swift */; };
+		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; platformFilter = ios; };
+		A70000012FF0000100000001 /* MovesShareViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000012FF0000100000000 /* MovesShareViews.swift */; platformFilter = ios; };
+		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; platformFilter = ios; };
+		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; platformFilter = ios; };
+		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; platformFilter = ios; };
+		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
+		C10000013000000100000001 /* RouteTrackingLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000000 /* RouteTrackingLiveActivity.swift */; platformFilter = ios; };
 		C10000013000000100000003 /* MovesRouteTrackingLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000002 /* MovesRouteTrackingLiveActivityWidget.swift */; };
-		C10000013000000100000005 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; };
+		C10000013000000100000005 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; platformFilter = ios; };
 		C10000013000000100000006 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; };
-		D10000013010000100000001 /* DawarichSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000000 /* DawarichSync.swift */; };
+		D10000013010000100000001 /* DawarichSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000000 /* DawarichSync.swift */; platformFilter = ios; };
 		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; };
-		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; };
+		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; platformFilter = ios; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; };
 		E21000013020000100000001 /* ImportQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21000013020000100000000 /* ImportQueueTests.swift */; };
 		E22000013020000100000001 /* ImportStressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22000013020000100000000 /* ImportStressTests.swift */; };
-		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; };
-		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; };
+		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; platformFilter = ios; };
+		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; platformFilter = ios; };
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
 		F1000001310000010000000A /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
+		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; platformFilter = macos; };
 		F1000001310000010000000B /* VisitedLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */; };
 		F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
 /* End PBXBuildFile section */
@@ -303,7 +305,7 @@
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
 		F10000013100000100000001 /* MovesMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovesMac.entitlements; sourceTree = "<group>"; };
-		F10000013100000100000002 /* MovesMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MovesMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F10000013100000100000002 /* MovesMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = MovesMac.app; path = "Moves Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1000001310000010000000E /* RouteCoordinateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteCoordinateStorage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -359,7 +361,7 @@
 			isa = PBXGroup;
 			children = (
 				489A76332C4FC6F300F43B69 /* Moves */,
-				F10000013100000100000004 /* Moves Mac */,
+				F10000013100000100000004 /* Mac */,
 				A20000012FA000010000001D /* Moves Watch App */,
 				A30000012FB000010000002D /* Moves Widgets */,
 				9A1B00012F00000100000003 /* MovesTests */,
@@ -535,7 +537,7 @@
 			path = "Moves Widgets";
 			sourceTree = "<group>";
 		};
-		F10000013100000100000004 /* Moves Mac */ = {
+		F10000013100000100000004 /* Mac */ = {
 			isa = PBXGroup;
 			children = (
 				F10000013100000100000001 /* MovesMac.entitlements */,
@@ -649,7 +651,6 @@
 			buildPhases = (
 				F10000013100000100000006 /* Sources */,
 				F10000013100000100000003 /* Frameworks */,
-				F10000013100000100000007 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -683,12 +684,12 @@
 					A30000012FB000010000002E = {
 						CreatedOnToolsVersion = 26.4;
 					};
-				A30000012FB000010000002F = {
-					CreatedOnToolsVersion = 26.4;
-				};
-				F10000013100000100000005 = {
-					CreatedOnToolsVersion = 27.1;
-				};
+					A30000012FB000010000002F = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					F10000013100000100000005 = {
+						CreatedOnToolsVersion = 27.1;
+					};
 				};
 			};
 			buildConfigurationList = 489A762C2C4FC6F300F43B69 /* Build configuration list for PBXProject "Moves" */;
@@ -813,14 +814,12 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
-/* Begin PBXShellScriptBuildPhase section */
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXSourcesBuildPhase section */
 		489A762D2C4FC6F300F43B69 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F10000013100000100000014 /* MovesMacApp.swift in Sources */,
 				D10000013010000100000001 /* DawarichSync.swift in Sources */,
 				489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */,
 				A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */,
@@ -911,7 +910,7 @@
 				A44000012FC0000100000002 /* ImportQueueViews.swift in Sources */,
 				A45000012FC0000100000002 /* RouteFileImportConfiguration.swift in Sources */,
 				F1000001310000010000000B /* VisitedLocation.swift in Sources */,
-				F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */,
+				4826804430626CAD0076FA35 /* RouteCoordinateStorage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -936,6 +935,7 @@
 		};
 		A30000012FB0000100000030 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = A30000012FB000010000002E /* Moves Widgets */;
 			targetProxy = A30000012FB0000100000032 /* PBXContainerItemProxy */;
 		};
@@ -1077,7 +1077,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 37;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Moves/Info.plist;
@@ -1103,8 +1107,9 @@
 				MARKETING_VERSION = 2026.17;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = YES;
+				REGISTER_APP_GROUPS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1123,7 +1128,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 37;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Moves/Info.plist;
@@ -1149,8 +1158,9 @@
 				MARKETING_VERSION = 2026.17;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = YES;
+				REGISTER_APP_GROUPS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;

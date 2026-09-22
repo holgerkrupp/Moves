@@ -8,6 +8,53 @@ import SwiftData
 import UIKit
 #endif
 
+protocol PlaceNameResolver {
+    func resolveName(for coordinate: CLLocationCoordinate2D) async -> String?
+}
+
+actor CLGeocoderPlaceNameResolver: PlaceNameResolver {
+    private var cache: [String: String] = [:]
+
+    func resolveName(for coordinate: CLLocationCoordinate2D) async -> String? {
+        let cacheKey = Self.cacheKey(for: coordinate)
+        if let cached = cache[cacheKey] {
+            return cached.isEmpty ? nil : cached
+        }
+
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        do {
+            guard let request = MKReverseGeocodingRequest(location: location) else {
+                cache[cacheKey] = ""
+                return nil
+            }
+            let mapItems = try await request.mapItems
+            let resolvedName = mapItems.first.flatMap(Self.bestName(from:))
+            cache[cacheKey] = resolvedName ?? ""
+            return resolvedName
+        } catch {
+            cache[cacheKey] = ""
+            return nil
+        }
+    }
+
+    private static func cacheKey(for coordinate: CLLocationCoordinate2D) -> String {
+        let roundedLat = String(format: "%.4f", coordinate.latitude)
+        let roundedLon = String(format: "%.4f", coordinate.longitude)
+        return "\(roundedLat)|\(roundedLon)"
+    }
+
+    private static func bestName(from mapItem: MKMapItem) -> String? {
+        let candidates: [String?] = [
+            mapItem.name,
+            mapItem.address?.shortAddress,
+            mapItem.address?.fullAddress,
+        ]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+    }
+}
+
 enum TransportMode: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
     case stationary
     case walking

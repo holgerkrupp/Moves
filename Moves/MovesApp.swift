@@ -9,7 +9,9 @@ import SwiftUI
 import SwiftData
 import AppIntents
 import CloudKitSyncMonitor
+#if canImport(UIKit)
 import UIKit
+#endif
 import UserNotifications
 
 final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {

@@ -2,7 +2,15 @@ import Foundation
 import CoreLocation
 import HealthKit
 import SwiftData
+#if canImport(UIKit)
 import UIKit
+#endif
+
+private struct HealthImportBackgroundTaskToken {
+    #if canImport(UIKit)
+    let identifier: UIBackgroundTaskIdentifier
+    #endif
+}
 
 struct HealthWorkoutRouteImportReport {
     let workoutCount: Int
@@ -176,17 +184,24 @@ final class HealthWorkoutRouteImporter: ObservableObject {
         progressDidChange?(text)
     }
 
-    private func beginBackgroundTask() -> UIBackgroundTaskIdentifier {
-        UIApplication.shared.beginBackgroundTask(withName: "Apple Health route import") { [weak self] in
+    private func beginBackgroundTask() -> HealthImportBackgroundTaskToken {
+        #if canImport(UIKit)
+        let identifier = UIApplication.shared.beginBackgroundTask(withName: "Apple Health route import") { [weak self] in
             Task { @MainActor in
                 self?.shouldStopImport = true
             }
         }
+        return HealthImportBackgroundTaskToken(identifier: identifier)
+        #else
+        return HealthImportBackgroundTaskToken()
+        #endif
     }
 
-    private func endBackgroundTask(_ identifier: UIBackgroundTaskIdentifier) {
-        guard identifier != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(identifier)
+    private func endBackgroundTask(_ token: HealthImportBackgroundTaskToken) {
+        #if canImport(UIKit)
+        guard token.identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(token.identifier)
+        #endif
     }
 
 }

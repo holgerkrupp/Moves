@@ -4,7 +4,9 @@ import Foundation
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(UIKit)
 import UIKit
+#endif
 
 private enum TrackingPromptAction {
     case requestAuthorization

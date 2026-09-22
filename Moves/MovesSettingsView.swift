@@ -13,7 +13,9 @@ import HealthKit
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(UIKit)
 import UIKit
+#endif
 
 struct MovesSettingsView: View {
     @Environment(\.dismiss) private var dismiss

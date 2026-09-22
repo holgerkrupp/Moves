@@ -10,7 +10,6 @@ import Foundation
 import Security
 import SwiftData
 import SwiftUI
-import UIKit
 
 enum LocationService: String, CaseIterable, Identifiable, Codable {
     case dawarich
@@ -1100,7 +1099,9 @@ struct LocationServiceSettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var serverURLField: some View {
+        #if os(iOS)
         TextField(service.serverPlaceholder, text: $input.serverURL)
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
@@ -1108,6 +1109,12 @@ struct LocationServiceSettingsView: View {
             .textContentType(.URL)
             .padding(10)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        #else
+        TextField(service.serverPlaceholder, text: $input.serverURL)
+            .autocorrectionDisabled()
+            .padding(10)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        #endif
     }
 
     @ViewBuilder
@@ -1122,7 +1129,7 @@ struct LocationServiceSettingsView: View {
             )
 
         case .geoPulse:
-            standardField("OwnTracks username", text: $input.username, contentType: .username)
+            standardField("OwnTracks username", text: $input.username, isUsername: true)
             secretField(
                 syncManager.hasStoredSecret(for: service) ? "Leave blank to keep saved password" : "OwnTracks password",
                 text: $input.password
@@ -1130,9 +1137,9 @@ struct LocationServiceSettingsView: View {
             standardField("Device identifier", text: $input.deviceID)
 
         case .ownTracksRecorder:
-            standardField("Tracking username", text: $input.trackingUsername, contentType: .username)
+            standardField("Tracking username", text: $input.trackingUsername, isUsername: true)
             standardField("Device identifier", text: $input.deviceID)
-            standardField("Basic auth username (optional)", text: $input.username, contentType: .username)
+            standardField("Basic auth username (optional)", text: $input.username, isUsername: true)
             secretField(
                 syncManager.hasStoredSecret(for: service) ? "Leave blank to keep saved Basic auth password" : "Basic auth password (optional)",
                 text: $input.password
@@ -1143,26 +1150,50 @@ struct LocationServiceSettingsView: View {
         }
     }
 
+    @ViewBuilder
     private func standardField(
         _ placeholder: String,
         text: Binding<String>,
-        contentType: UITextContentType? = nil
+        isUsername: Bool = false
     ) -> some View {
+        #if os(iOS)
+        if isUsername {
+            TextField(placeholder, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.username)
+                .padding(10)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        } else {
+            TextField(placeholder, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(10)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        }
+        #else
         TextField(placeholder, text: text)
-            .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            .textContentType(contentType)
             .padding(10)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        #endif
     }
 
+    @ViewBuilder
     private func secretField(_ placeholder: String, text: Binding<String>) -> some View {
+        #if os(iOS)
         SecureField(placeholder, text: text)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .textContentType(.password)
             .padding(10)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        #else
+        SecureField(placeholder, text: text)
+            .autocorrectionDisabled()
+            .padding(10)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        #endif
     }
 
     private func connect() {

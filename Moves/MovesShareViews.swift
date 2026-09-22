@@ -3,7 +3,9 @@ import Foundation
 import MapKit
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // MARK: - Share images
 

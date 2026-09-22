@@ -2,7 +2,9 @@ import CoreLocation
 import MapKit
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// An interactive history map that keeps the user's camera framing when it is exported.
 struct MovesHistoryMapView: View {

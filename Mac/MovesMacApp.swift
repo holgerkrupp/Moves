@@ -3,6 +3,7 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+#if os(macOS)
 @main
 struct MovesMacApp: App {
     private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
@@ -369,3 +370,11 @@ private extension MKMapRect {
         return rect.isNull || rect.isEmpty ? rect.insetBy(dx: -10_000, dy: -10_000) : rect.insetBy(dx: -max(rect.size.width * 0.15, 10_000), dy: -max(rect.size.height * 0.15, 10_000))
     }
 }
+
+extension View {
+    func panelSurface() -> some View {
+        padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+#endif

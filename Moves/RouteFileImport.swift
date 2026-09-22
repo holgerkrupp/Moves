@@ -6,6 +6,17 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+private extension View {
+    @ViewBuilder
+    func platformInlineNavigationTitle() -> some View {
+        #if os(iOS)
+        navigationBarTitleDisplayMode(.inline)
+        #else
+        self
+        #endif
+    }
+}
+
 struct RouteFileImportReport {
     let fileCount: Int
     let routeCount: Int
@@ -292,9 +303,7 @@ struct ImportedRouteDataView: View {
                     ForEach(TransportMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 TextField("Minimum distance (km)", text: $minimumDistance)
-                    .keyboardType(.decimalPad)
                 TextField("Minimum imported points", text: $minimumPoints)
-                    .keyboardType(.numberPad)
                 TextField("Search mode", text: $searchText)
                 Picker("Sort", selection: $sortDescending) {
                     Text("Newest first").tag(true)
@@ -339,9 +348,9 @@ struct ImportedRouteDataView: View {
             }
         }
         .navigationTitle("Manage Imported Data")
-        .navigationBarTitleDisplayMode(.inline)
+        .platformInlineNavigationTitle()
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
             }
         }
@@ -633,11 +642,15 @@ final class RouteFileImporter: ObservableObject {
                 )
                 RouteFileImportStore.state = persisted
                 RouteFileImportBackgroundTask.schedule()
+                #if os(iOS) && !targetEnvironment(macCatalyst)
                 if #available(iOS 26.0, *), RouteFileImportBackgroundTask.startUserInitiated() {
                     await self.waitForSystemImport()
                 } else {
                     await self.runPersistedImport()
                 }
+                #else
+                await self.runPersistedImport()
+                #endif
             } catch is CancellationError {
             } catch {
                 self.state = .failed
@@ -1552,9 +1565,9 @@ struct RouteFileImportOptionsView: View {
                 .ignoresSafeArea()
             }
             .navigationTitle("Import Options")
-            .navigationBarTitleDisplayMode(.inline)
+            .platformInlineNavigationTitle()
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
             }
@@ -1683,15 +1696,18 @@ private struct ImportOptionChoice: View {
 enum RouteFileImportBackgroundTask {
     static let continuedTaskIdentifier = "\(RouteFileImportStore.taskIdentifier).continued"
 
+    #if os(iOS)
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: RouteFileImportStore.taskIdentifier, using: nil) { task in
             handle(task)
         }
+        #if !targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
             BGTaskScheduler.shared.register(forTaskWithIdentifier: continuedTaskIdentifier, using: nil) { task in
                 handle(task)
             }
         }
+        #endif
     }
 
     static func schedule() {
@@ -1708,6 +1724,7 @@ enum RouteFileImportBackgroundTask {
     /// Submits the iOS 26 continuous task for a long import explicitly started by the user.
     /// Returns false when the system cannot accept an immediate continuation, allowing the
     /// caller to keep the foreground execution path.
+    #if !targetEnvironment(macCatalyst)
     @available(iOS 26.0, *)
     @discardableResult
     static func startUserInitiated() -> Bool {
@@ -1728,6 +1745,7 @@ enum RouteFileImportBackgroundTask {
             return false
         }
     }
+    #endif
 
     private static func handle(_ task: BGTask) {
         let work = Task.detached(priority: .utility) {
@@ -1743,6 +1761,10 @@ enum RouteFileImportBackgroundTask {
         }
         task.expirationHandler = { work.cancel() }
     }
+    #else
+    static func register() {}
+    static func schedule() {}
+    #endif
 }
 
 /// Non-UI execution path used by BGProcessingTask and BGContinuedProcessingTask. The actor
@@ -1963,9 +1985,9 @@ struct RouteFileImportSettingsView: View {
             .ignoresSafeArea()
         }
         .navigationTitle("File Route Import")
-        .navigationBarTitleDisplayMode(.inline)
+        .platformInlineNavigationTitle()
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
             }
         }
@@ -2101,7 +2123,7 @@ struct FailedRouteImportsView: View {
             }
         }
         .navigationTitle("Failed Imports")
-        .navigationBarTitleDisplayMode(.inline)
+        .platformInlineNavigationTitle()
         .alert("Failed Imports", isPresented: $isShowingMessage) {
             Button("OK", role: .cancel) {}
         } message: {

@@ -139,6 +139,16 @@
         }
       }
     },
+    "%lld places · %lld moves" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld places · %2$lld moves"
+          }
+        }
+      }
+    },
     "%lld recorded visit%@ inside this area" : {
       "localizations" : {
         "en" : {
@@ -184,7 +194,16 @@
     "A route is needed to share this move as GPX" : {
 
     },
+    "Accuracy" : {
+
+    },
     "Accuracy ±%@ m" : {
+
+    },
+    "Actions for (job.displayName)" : {
+
+    },
+    "Activity" : {
 
     },
     "Adjust the filters to preview imported data." : {
@@ -215,6 +234,9 @@
 
     },
     "Apple Health Routes" : {
+
+    },
+    "Arrived" : {
 
     },
     "Arrived %@" : {
@@ -259,6 +281,9 @@
     "Captured location" : {
 
     },
+    "Choose a day from the sidebar to browse your location history." : {
+
+    },
     "Choose Date" : {
 
     },
@@ -272,6 +297,9 @@
 
     },
     "Clear selection" : {
+
+    },
+    "Comment" : {
 
     },
     "Connection" : {
@@ -313,6 +341,9 @@
     "Create Location" : {
 
     },
+    "Created" : {
+
+    },
     "Created in Buxtehude by" : {
 
     },
@@ -335,6 +366,12 @@
 
     },
     "Date" : {
+
+    },
+    "Day" : {
+
+    },
+    "Day key" : {
 
     },
     "Day Summary" : {
@@ -367,6 +404,9 @@
     "Delete Place?" : {
 
     },
+    "Departed" : {
+
+    },
     "Designs" : {
 
     },
@@ -392,6 +432,9 @@
 
     },
     "Display" : {
+
+    },
+    "Distance" : {
 
     },
     "Done" : {
@@ -466,6 +509,9 @@
     "Filter by date" : {
 
     },
+    "Filtered" : {
+
+    },
     "Filters" : {
 
     },
@@ -511,6 +557,9 @@
     "Grant location access first to use this feature." : {
 
     },
+    "History" : {
+
+    },
     "History Map" : {
 
     },
@@ -520,13 +569,31 @@
     "iCloud sync in progress" : {
 
     },
+    "ID" : {
+
+    },
     "If this journey is an inaccurate outlier, exclude it from minimum, average, and maximum commute times without deleting it." : {
+
+    },
+    "Import (job.displayName)" : {
+
+    },
+    "Import failed" : {
 
     },
     "Import on selected date" : {
 
     },
     "Import Options" : {
+
+    },
+    "Import progress" : {
+
+    },
+    "Import queue" : {
+
+    },
+    "Import Queue" : {
 
     },
     "Imported Data" : {
@@ -583,10 +650,22 @@
     "Last successful upload %@." : {
 
     },
+    "Latitude" : {
+
+    },
+    "Library" : {
+
+    },
     "Limit by date" : {
 
     },
     "Listen for location changes" : {
+
+    },
+    "Locate File" : {
+
+    },
+    "Location" : {
 
     },
     "Location Access Required" : {
@@ -602,6 +681,9 @@
 
     },
     "Locations will appear here after Moves records visits." : {
+
+    },
+    "Longitude" : {
 
     },
     "Made with Moves" : {
@@ -628,6 +710,9 @@
           }
         }
       }
+    },
+    "Metadata" : {
+
     },
     "Minimum distance (km)" : {
 
@@ -671,6 +756,12 @@
     "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo." : {
 
     },
+    "Needs attention" : {
+
+    },
+    "Needs information" : {
+
+    },
     "Newest first" : {
 
     },
@@ -692,7 +783,13 @@
     "No GPX data in this time span" : {
 
     },
+    "No History" : {
+
+    },
     "No imported routes" : {
+
+    },
+    "No imports" : {
 
     },
     "No matching days for this filter yet." : {
@@ -702,6 +799,9 @@
 
     },
     "No movement summary available yet." : {
+
+    },
+    "No recorded days yet" : {
 
     },
     "No recorded visits fall inside the current proximity circle." : {
@@ -726,6 +826,9 @@
 
     },
     "Not Now" : {
+
+    },
+    "Nothing Selected" : {
 
     },
     "Notification Access" : {
@@ -761,6 +864,9 @@
     "Organize in year/month folders" : {
 
     },
+    "Overall progress" : {
+
+    },
     "Pause" : {
 
     },
@@ -774,6 +880,9 @@
 
     },
     "Place remarks" : {
+
+    },
+    "Places" : {
 
     },
     "Places & Moves" : {
@@ -797,6 +906,9 @@
     "Previous Day" : {
 
     },
+    "Progress for (job.displayName)" : {
+
+    },
     "Proximity radius" : {
 
     },
@@ -815,7 +927,13 @@
     "Real route tracking, %@ remaining" : {
 
     },
+    "Recent" : {
+
+    },
     "Recent Dates" : {
+
+    },
+    "Record" : {
 
     },
     "Recorded visits remain in your timeline. Only the saved name and proximity area are removed." : {
@@ -864,6 +982,9 @@
     "Resume" : {
 
     },
+    "Retry" : {
+
+    },
     "Revert" : {
 
     },
@@ -873,10 +994,19 @@
     "Review or delete imported routes for this day" : {
 
     },
+    "Route" : {
+
+    },
     "Route File Import" : {
 
     },
+    "Route files you import will appear here." : {
+
+    },
     "Routes are being saved and map-matched in the background. Large batches may take time because each file is parsed and checkpointed separately." : {
+
+    },
+    "Samples" : {
 
     },
     "Save" : {
@@ -894,7 +1024,16 @@
     "Search mode" : {
 
     },
+    "Search places, moves, or dates" : {
+
+    },
     "Search Visits" : {
+
+    },
+    "Select a day" : {
+
+    },
+    "Select a day or activity to inspect its metadata." : {
 
     },
     "Select all" : {
@@ -966,6 +1105,9 @@
     "Sort" : {
 
     },
+    "Source" : {
+
+    },
     "Start" : {
 
     },
@@ -979,6 +1121,9 @@
 
     },
     "Start Route Tracking" : {
+
+    },
+    "Started" : {
 
     },
     "Starts frequent GPS tracking for a limited time." : {
@@ -1071,10 +1216,16 @@
     "This removes this place from the timeline. You can undo the deletion afterwards." : {
 
     },
+    "Time" : {
+
+    },
     "Timeframe" : {
 
     },
     "Timeline" : {
+
+    },
+    "Timeline data shared through your private iCloud container will appear here." : {
 
     },
     "Timeline Period" : {
@@ -1090,6 +1241,9 @@
 
     },
     "Today" : {
+
+    },
+    "Toggle Inspector" : {
 
     },
     "Toggle Real Route Tracking" : {

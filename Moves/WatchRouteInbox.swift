@@ -1,9 +1,12 @@
 import Foundation
 import CoreLocation
 import SwiftData
+#if canImport(WatchConnectivity)
 import WatchConnectivity
+#endif
 import WidgetKit
 
+#if canImport(WatchConnectivity)
 private struct WatchRoutePayload: Codable {
     let id: UUID
     let startedAt: Date
@@ -105,3 +108,4 @@ extension WatchRouteInbox: WCSessionDelegate {
         }
     }
 }
+#endif
