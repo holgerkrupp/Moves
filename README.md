@@ -85,6 +85,24 @@ It uses on-device location + motion signals and stores timeline data locally wit
 - `Moves/VisitedLocation.swift` models and SwiftData repository
 - `MovesTests/TimelineAssemblerTests.swift` repository and classifier unit tests
 
+## Data limitations
+
+Transport inference is best-effort. Visit monitoring and significant-location
+updates are intentionally sparse, and Core Motion can return an activity that
+started before the represented visit-to-visit leg. Moves therefore uses the
+available location trace as supporting evidence, but cannot reconstruct every
+transport change or guarantee a mode for every leg.
+
+Step totals come from the system pedometer for the move interval. They may be
+unavailable when Motion & Fitness access is denied, on devices without
+pedometer data, or for imported Health and route files. A later import or sync
+that has no step total does not replace steps already stored for the same move.
+
+Health workout route imports preserve route geometry and the workout's declared
+activity type; they do not provide a pedometer total unless one is separately
+available for the move interval. Imported routes remain authoritative for their
+own declared mode and are not reclassified by the sparse-location heuristic.
+
 ## Running Tests
 
 Use Xcode (`Product > Test`) with the `MovesTests` target.
