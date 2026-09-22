@@ -408,6 +408,7 @@ struct ContentView: View {
                 selectedDayKey: selectedDayKey,
                 captureManager: captureManager,
                 routeFileImporter: routeFileImporter,
+                importCoordinator: importCoordinator,
                 modelContext: modelContext
             )
         }
@@ -430,17 +431,17 @@ struct ContentView: View {
                 isShowingDroppedRouteImportOptions = false
                 Task { @MainActor in
                     await Task.yield()
-                    routeFileImporter.start(urls: urls, configuration: droppedRouteImportConfiguration)
+                    importCoordinator.enqueueRouteFiles(urls, configuration: droppedRouteImportConfiguration)
                 }
             }
         }
         .sheet(isPresented: $isShowingImportQueue) {
             ImportQueueView(coordinator: importCoordinator) { _ in
-                routeFileImporter.resume()
+                importCoordinator.resumeRouteImport()
             } onPause: { _ in
-                routeFileImporter.pause()
+                importCoordinator.pauseRouteImport()
             } onCancel: { _ in
-                routeFileImporter.cancel()
+                importCoordinator.cancelRouteImport()
             }
             .presentationDetents([.medium, .large])
         }

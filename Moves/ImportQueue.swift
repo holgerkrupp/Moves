@@ -260,6 +260,7 @@ final class ImportCoordinator: ObservableObject {
 
     private let store: ImportQueueStore
     private let recoveryStore: ImportRecoveryStore
+    private weak var routeFileImporter: RouteFileImporter?
 
     init(store: ImportQueueStore = ImportQueueStore(), recoveryStore: ImportRecoveryStore = ImportRecoveryStore()) {
         self.store = store
@@ -279,6 +280,21 @@ final class ImportCoordinator: ObservableObject {
     var aggregateProgress: Double? {
         snapshot.aggregateProgress
     }
+
+    /// Views submit route imports here. The importer stays behind this adapter so the
+    /// existing durable state and background-task integration remain compatible.
+    func attach(routeFileImporter: RouteFileImporter) {
+        self.routeFileImporter = routeFileImporter
+    }
+
+    func enqueueRouteFiles(_ urls: [URL], configuration: RouteFileImportConfiguration) {
+        guard !urls.isEmpty else { return }
+        routeFileImporter?.start(urls: urls, configuration: configuration)
+    }
+
+    func resumeRouteImport() { routeFileImporter?.resume() }
+    func pauseRouteImport() { routeFileImporter?.pause() }
+    func cancelRouteImport() { routeFileImporter?.cancel() }
 
     @discardableResult
     func enqueue(_ job: ImportJobRecord) throws -> UUID {

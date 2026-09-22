@@ -152,6 +152,7 @@ struct MovesApp: App {
                     importCoordinator: importCoordinator
                 )
             )
+            importCoordinator.attach(routeFileImporter: _routeFileImporter.wrappedValue)
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
                 captureManager: captureManager

@@ -28,6 +28,7 @@ struct MovesSettingsView: View {
     let dayTimelines: [DayTimeline]
     let selectedDayKey: String
     let captureManager: MovesLocationCaptureManager
+    let importCoordinator: ImportCoordinator
 
     @State private var isExporting = false
     @State private var exportDocument: TimelineExportDocument?
@@ -57,11 +58,13 @@ struct MovesSettingsView: View {
         selectedDayKey: String,
         captureManager: MovesLocationCaptureManager,
         routeFileImporter: RouteFileImporter,
+        importCoordinator: ImportCoordinator,
         modelContext: ModelContext
     ) {
         self.dayTimelines = dayTimelines
         self.selectedDayKey = selectedDayKey
         self.captureManager = captureManager
+        self.importCoordinator = importCoordinator
         _routeFileImporter = ObservedObject(wrappedValue: routeFileImporter)
     }
 
@@ -297,10 +300,10 @@ struct MovesSettingsView: View {
                             }
                             HStack {
                                 Button(routeFileImporter.isImporting ? "Pause" : "Resume") {
-                                    routeFileImporter.isImporting ? routeFileImporter.pause() : routeFileImporter.resume()
+                                    routeFileImporter.isImporting ? importCoordinator.pauseRouteImport() : importCoordinator.resumeRouteImport()
                                 }
                                 Button("Restart") { routeFileImporter.restart() }
-                                Button("Cancel", role: .destructive) { routeFileImporter.cancel() }
+                                Button("Cancel", role: .destructive) { importCoordinator.cancelRouteImport() }
                             }
                         }
 
@@ -398,14 +401,7 @@ struct MovesSettingsView: View {
             switch result {
             case .success(let urls):
                 Task { @MainActor in
-                    routeFileImporter.start(urls: urls, configuration: routeImportConfiguration)
-                    await routeFileImporter.resumeAndWait()
-                    if let report = routeFileImporter.lastReport {
-                        routeImportMessage = "Imported \(report.routeCount) route(s) from \(report.fileCount) file(s), covering \(report.sampleCount) GPS point(s)." + (report.failedFileCount > 0 ? " \(report.failedFileCount) file(s) need a target date in Failed Imports." : "")
-                    } else {
-                        routeImportMessage = routeFileImporter.lastErrorMessage ?? "No route data was imported."
-                    }
-                    isShowingRouteImportMessage = true
+                    importCoordinator.enqueueRouteFiles(urls, configuration: routeImportConfiguration)
                 }
             case .failure(let error):
                 routeImportMessage = "File import failed: \(error.localizedDescription)"
