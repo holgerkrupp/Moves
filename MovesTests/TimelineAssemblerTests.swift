@@ -80,6 +80,33 @@ final class MovesTimelinePeriodTests: XCTestCase {
 
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
+    func testQuietDayUsesMostRecentPriorPlaceForDisplay() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let firstDay = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 10)))
+        let quietDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: firstDay))
+
+        let recordedDay = DayTimeline(dayStart: firstDay)
+        let emptyDay = DayTimeline(dayStart: quietDay)
+        let place = VisitPlace(
+            arrivalDate: firstDay.addingTimeInterval(8 * 60 * 60),
+            departureDate: nil,
+            latitude: 53.5511,
+            longitude: 9.9937,
+            horizontalAccuracy: 20
+        )
+        place.dayTimeline = recordedDay
+        context.insert(recordedDay)
+        context.insert(emptyDay)
+        context.insert(place)
+        try context.save()
+
+        XCTAssertFalse(emptyDay.hasRecordedActivity)
+        XCTAssertEqual(emptyDay.displayPlaces.map(\.id), [place.id])
+    }
+
     func testLocationSamplesAreDeduplicatedAcrossSourcesForTheSameFix() throws {
         let container = try makeInMemoryContainer()
         let repository = SwiftDataTimelineRepository(modelContainer: container)

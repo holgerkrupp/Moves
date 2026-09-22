@@ -193,6 +193,19 @@ struct DayTimelinePageContent: View {
         MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
     }
 
+    private var presentationRefreshKey: String {
+        let places = dayTimeline.places.map { place in
+            "place:\(place.id.uuidString):\(place.arrivalDate.timeIntervalSinceReferenceDate):\(place.departureDate?.timeIntervalSinceReferenceDate ?? -1):\(place.userLabel ?? ""):\(place.autoLabel ?? "")"
+        }
+        let moves = dayTimeline.moves.map { move in
+            "move:\(move.id.uuidString):\(move.timelineStartDate.timeIntervalSinceReferenceDate):\(move.endDate.timeIntervalSinceReferenceDate):\(move.transportModeRawValue):\(move.deviceIdentifier)"
+        }
+        let samples = dayTimeline.samples.map { sample in
+            "sample:\(sample.dedupeKey):\(sample.timestamp.timeIntervalSinceReferenceDate):\(sample.latitude):\(sample.longitude):\(sample.deviceIdentifier)"
+        }
+        return (places + moves + samples).sorted().joined(separator: "|")
+    }
+
     private static func makePresentationCache(for dayTimeline: DayTimeline) -> DayTimelinePresentationCache {
         let resolution = MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
         let visiblePlaces = dayTimeline.places.filter { resolution.includes($0.deviceIdentifier) }
@@ -333,6 +346,9 @@ struct DayTimelinePageContent: View {
         .onChange(of: dayTimeline.dayKey) { _, _ in
             presentationCache = Self.makePresentationCache(for: dayTimeline)
             mapSelection = nil
+        }
+        .onChange(of: presentationRefreshKey) { _, _ in
+            presentationCache = Self.makePresentationCache(for: dayTimeline)
         }
         .onChange(of: transportSummaryRefreshKey) { _, _ in
             presentationCache = Self.makePresentationCache(for: dayTimeline)
@@ -937,7 +953,9 @@ struct DayMapStrip: View {
     let isActive: Bool
     @Binding var selection: TimelineMapSelection?
     let fillsAvailableSpace: Bool
-    private let deviceResolution: MultiDeviceDayResolution
+    private var deviceResolution: MultiDeviceDayResolution {
+        MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
+    }
     private static let collapsedMapHeight: CGFloat = 180
     private static let collapsedMapCornerRadius: CGFloat = 14
     private static let fullScreenMapAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
@@ -975,6 +993,19 @@ struct DayMapStrip: View {
         return [presentationCache.routeRefreshKey, presentationCache.placeRefreshKey, liveKey, presentationCache.latestSampleKey].joined(separator: "|")
     }
 
+    private var presentationRefreshKey: String {
+        let places = dayTimeline.places.map { place in
+            "place:\(place.id.uuidString):\(place.arrivalDate.timeIntervalSinceReferenceDate):\(place.departureDate?.timeIntervalSinceReferenceDate ?? -1):\(place.userLabel ?? ""):\(place.autoLabel ?? "")"
+        }
+        let moves = dayTimeline.moves.map { move in
+            "move:\(move.id.uuidString):\(move.timelineStartDate.timeIntervalSinceReferenceDate):\(move.endDate.timeIntervalSinceReferenceDate):\(move.transportModeRawValue):\(move.deviceIdentifier)"
+        }
+        let samples = dayTimeline.samples.map { sample in
+            "sample:\(sample.dedupeKey):\(sample.timestamp.timeIntervalSinceReferenceDate):\(sample.latitude):\(sample.longitude):\(sample.deviceIdentifier)"
+        }
+        return (places + moves + samples).sorted().joined(separator: "|")
+    }
+
     init(
         dayTimeline: DayTimeline,
         isActive: Bool,
@@ -986,16 +1017,16 @@ struct DayMapStrip: View {
         self.isActive = isActive
         _selection = selection
         self.fillsAvailableSpace = fillsAvailableSpace
-        self.deviceResolution = deviceResolution ?? MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
+        let resolvedDeviceResolution = deviceResolution ?? MultiDeviceTimelineResolver.resolve(samples: dayTimeline.samples)
 
-        let cache = Self.makePresentationCache(for: dayTimeline, resolution: self.deviceResolution)
+        let cache = Self.makePresentationCache(for: dayTimeline, resolution: resolvedDeviceResolution)
         let cachedRoutes = DayMapRouteCache.routes(for: cache.routeRefreshKey)
-        let renderedRoutes = cachedRoutes?.routes ?? Self.renderedRoutes(for: dayTimeline, resolution: self.deviceResolution)
+        let renderedRoutes = cachedRoutes?.routes ?? Self.renderedRoutes(for: dayTimeline, resolution: resolvedDeviceResolution)
         let allCoordinates = Self.allCoordinates(
             for: dayTimeline,
             routeCoordinates: renderedRoutes.flatMap { $0.coordinates },
             liveRouteCoordinates: [],
-            resolution: self.deviceResolution
+            resolution: resolvedDeviceResolution
         )
         let cameraCoordinates = allCoordinates.isEmpty
             ? cache.latestSampleCoordinate.map { [$0] } ?? []
@@ -1038,6 +1069,9 @@ struct DayMapStrip: View {
                 refreshCamera(for: newSelection)
             }
             .onChange(of: dayTimeline.dayKey) { _, _ in
+                presentationCache = Self.makePresentationCache(for: dayTimeline, resolution: deviceResolution)
+            }
+            .onChange(of: presentationRefreshKey) { _, _ in
                 presentationCache = Self.makePresentationCache(for: dayTimeline, resolution: deviceResolution)
             }
     }
