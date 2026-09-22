@@ -12,10 +12,6 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-extension Notification.Name {
-    static let movesLocationSamplesDidChange = Notification.Name("Moves.locationSamplesDidChange")
-}
-
 enum LocationService: String, CaseIterable, Identifiable, Codable {
     case dawarich
     case reitti

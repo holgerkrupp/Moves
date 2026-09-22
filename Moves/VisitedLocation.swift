@@ -4,7 +4,9 @@ import CoreLocation
 import MapKit
 import Security
 import SwiftData
+#if canImport(UIKit)
 import UIKit
+#endif
 
 enum TransportMode: String, Codable, CaseIterable, Identifiable, Hashable {
     case stationary
@@ -2032,7 +2034,14 @@ enum DeviceIdentityStore {
     static var displayName: String {
         let stored = UserDefaults.standard.string(forKey: "Moves.multiDevice.displayName")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (stored?.isEmpty == false ? stored : nil) ?? UIDevice.current.name
+        if let stored, !stored.isEmpty {
+            return stored
+        }
+        #if canImport(UIKit)
+        return UIDevice.current.name
+        #else
+        return Host.current().localizedName ?? "Mac"
+        #endif
     }
 
     private static func loadOrCreateIdentifier() -> String {
@@ -2088,6 +2097,7 @@ enum DeviceIdentityStore {
     }
 }
 
+#if canImport(UIKit)
 enum MultiDeviceLocationRole: String {
     case tracking
     case management
@@ -2155,6 +2165,7 @@ final class MultiDevicePresenceManager: ObservableObject {
         captureManager.applyMultiDeviceLocationRole(role)
     }
 }
+#endif
 
 enum MultiDeviceActivityKind: Equatable {
     case singleJourney
