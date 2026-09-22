@@ -229,6 +229,13 @@ struct ImportQueueStore: Sendable {
         try save(try load().filter { $0.id != id })
     }
 
+    func update(id: UUID, _ update: (inout ImportJobRecord) -> Void) throws {
+        var jobs = try load()
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        update(&jobs[index])
+        try save(jobs)
+    }
+
     private static func restoreInterruptedJob(_ job: ImportJobRecord) -> ImportJobRecord {
         guard job.state == .acquiring || job.state == .parsing || job.state == .importing || job.state == .postProcessing else {
             return job

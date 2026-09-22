@@ -427,6 +427,7 @@ enum RouteFileImportState: String, Codable {
 }
 
 private struct PersistedRouteFileImport: Codable {
+    var jobID: UUID?
     var files: [String]
     var nextIndex: Int
     var importedFileCount: Int
@@ -621,6 +622,7 @@ final class RouteFileImporter: ObservableObject {
                     try? self.importCoordinator.update(job)
                 }
                 let persisted = PersistedRouteFileImport(
+                    jobID: self.activeJobID,
                     files: files.map(\.path), nextIndex: 0, importedFileCount: 0,
                     routeCount: 0, sampleCount: 0, failedFileCount: 0,
                     skipExistingDates: configuration.existingDataPolicy == .skipDate,
@@ -631,7 +633,11 @@ final class RouteFileImporter: ObservableObject {
                 )
                 RouteFileImportStore.state = persisted
                 RouteFileImportBackgroundTask.schedule()
-                await self.runPersistedImport()
+                if #available(iOS 26.0, *), RouteFileImportBackgroundTask.startUserInitiated() {
+                    await self.waitForSystemImport()
+                } else {
+                    await self.runPersistedImport()
+                }
             } catch is CancellationError {
             } catch {
                 self.state = .failed
@@ -685,6 +691,35 @@ final class RouteFileImporter: ObservableObject {
     func resumeAndWait() async {
         if !isImporting { resume() }
         await importTask?.value
+    }
+
+    private func waitForSystemImport() async {
+        while let persisted = RouteFileImportStore.state {
+            importProgress = Double(persisted.nextIndex) / Double(max(persisted.files.count, 1))
+            if persisted.state == .completed {
+                state = .completed
+                importPhase = "Complete"
+                importProgressText = "Import complete"
+                return
+            }
+            if persisted.state == .failed {
+                state = .failed
+                importPhase = "Import failed"
+                return
+            }
+            if persisted.state == .paused {
+                state = .paused
+                importPhase = "Paused — progress saved"
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+        }
+        state = .completed
+        importPhase = "Complete"
     }
 
     func pause() {
@@ -1646,21 +1681,16 @@ private struct ImportOptionChoice: View {
 }
 
 enum RouteFileImportBackgroundTask {
+    static let continuedTaskIdentifier = "\(RouteFileImportStore.taskIdentifier).continued"
+
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: RouteFileImportStore.taskIdentifier, using: nil) { task in
-            let work = Task { @MainActor in
-                defer { task.setTaskCompleted(success: true) }
-                guard let processing = task as? BGProcessingTask else { return }
-                do {
-                    let container = try MovesApp.makeModelContainer()
-                    let importer = RouteFileImporter(modelContext: ModelContext(container))
-                    await importer.resumeAndWait()
-                    processing.expirationHandler = { importer.pause() }
-                } catch {
-                    task.setTaskCompleted(success: false)
-                }
+            handle(task)
+        }
+        if #available(iOS 26.0, *) {
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: continuedTaskIdentifier, using: nil) { task in
+                handle(task)
             }
-            task.expirationHandler = { work.cancel() }
         }
     }
 
@@ -1668,9 +1698,169 @@ enum RouteFileImportBackgroundTask {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: RouteFileImportStore.taskIdentifier)
         guard RouteFileImportStore.state != nil else { return }
         let request = BGProcessingTaskRequest(identifier: RouteFileImportStore.taskIdentifier)
+        // Route files are staged locally; waiting for network would make a resumable local
+        // import less reliable. CloudKit synchronization remains independent of this task.
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower = false
         try? BGTaskScheduler.shared.submit(request)
+    }
+
+    /// Submits the iOS 26 continuous task for a long import explicitly started by the user.
+    /// Returns false when the system cannot accept an immediate continuation, allowing the
+    /// caller to keep the foreground execution path.
+    @available(iOS 26.0, *)
+    @discardableResult
+    static func startUserInitiated() -> Bool {
+        guard let state = RouteFileImportStore.state,
+              state.state == .running,
+              state.nextIndex < state.files.count else { return false }
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: continuedTaskIdentifier)
+        let request = BGContinuedProcessingTaskRequest(
+            identifier: continuedTaskIdentifier,
+            title: "Importing routes",
+            subtitle: "Moves is importing your route files"
+        )
+        request.strategy = .fail
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func handle(_ task: BGTask) {
+        let work = Task.detached(priority: .utility) {
+            do {
+                let container = try MovesApp.makeModelContainer()
+                let execution = RouteFileImportExecution(modelContainer: container)
+                task.expirationHandler = { Task { await execution.requestStop() } }
+                let completed = await execution.run()
+                task.setTaskCompleted(success: completed)
+            } catch {
+                task.setTaskCompleted(success: false)
+            }
+        }
+        task.expirationHandler = { work.cancel() }
+    }
+}
+
+/// Non-UI execution path used by BGProcessingTask and BGContinuedProcessingTask. The actor
+/// boundary keeps parsing and SwiftData work off MainActor, while each completed file is saved
+/// before the next one starts so termination is always resumable.
+private actor RouteFileImportExecution {
+    private let modelContainer: ModelContainer
+    private var stopRequested = false
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
+    func requestStop() {
+        stopRequested = true
+    }
+
+    func run() async -> Bool {
+        guard var persisted = RouteFileImportStore.state,
+              persisted.nextIndex < persisted.files.count else { return true }
+        let worker = RouteFileImportWorker(modelContainer: modelContainer)
+        do {
+            persisted.state = .running
+            RouteFileImportStore.state = persisted
+            updateQueue(jobID: persisted.jobID) { job in
+                job.state = .importing
+                job.phase = .importing
+                job.updatedAt = .now
+            }
+            while persisted.nextIndex < persisted.files.count {
+                try Task.checkCancellation()
+                guard !stopRequested else { throw ExecutionError.paused }
+                let url = URL(fileURLWithPath: persisted.files[persisted.nextIndex])
+                let parsedDTOs = try await Task.detached(priority: .utility) {
+                    try Task.checkCancellation()
+                    return try RouteTrackParserWorker.parse(url: url)
+                }.value
+                try Task.checkCancellation()
+                guard !stopRequested else { throw ExecutionError.paused }
+                if parsedDTOs.contains(where: { !$0.hasOriginalTimestamps }) {
+                    persisted.failedFileCount = (persisted.failedFileCount ?? 0) + 1
+                } else {
+                    let result = try await worker.importTracks(
+                        parsedDTOs,
+                        configuration: persisted.configuration,
+                        shouldPause: { [weak self] in
+                            guard let self else { return true }
+                            return await self.stopRequested
+                        }
+                    )
+                    persisted.routeCount += result.routeCount
+                    persisted.sampleCount += result.sampleCount
+                }
+                persisted.nextIndex += 1
+                persisted.importedFileCount = persisted.nextIndex
+                persisted.updatedAt = .now
+                RouteFileImportStore.state = persisted
+                updateQueue(jobID: persisted.jobID) { job in
+                    job.state = .importing
+                    job.phase = .importing
+                    job.counters.completedItemCount = persisted.importedFileCount
+                    job.counters.routeCount = persisted.routeCount
+                    job.counters.sampleCount = persisted.sampleCount
+                    job.counters.failedItemCount = persisted.failedFileCount ?? 0
+                    job.updatedAt = .now
+                }
+            }
+            persisted.state = .completed
+            updateQueue(jobID: persisted.jobID) { job in
+                job.state = .completed
+                job.phase = .postProcessing
+                job.counters.completedItemCount = job.counters.itemCount
+                job.counters.routeCount = persisted.routeCount
+                job.counters.sampleCount = persisted.sampleCount
+                job.counters.failedItemCount = persisted.failedFileCount ?? 0
+                job.updatedAt = .now
+            }
+            RouteFileImportStore.state = nil
+            try? FileManager.default.removeItem(at: RouteFileImportStore.stagingDirectory)
+            return true
+        } catch ExecutionError.paused {
+            persisted.state = .paused
+            persisted.updatedAt = .now
+            RouteFileImportStore.state = persisted
+            updateQueue(jobID: persisted.jobID) { job in
+                job.state = .paused
+                job.updatedAt = .now
+            }
+            return false
+        } catch is CancellationError {
+            persisted.state = .paused
+            persisted.updatedAt = .now
+            RouteFileImportStore.state = persisted
+            updateQueue(jobID: persisted.jobID) { job in
+                job.state = .paused
+                job.updatedAt = .now
+            }
+            return false
+        } catch {
+            persisted.state = .failed
+            persisted.updatedAt = .now
+            RouteFileImportStore.state = persisted
+            updateQueue(jobID: persisted.jobID) { job in
+                job.state = .failed
+                job.lastError = ImportJobError(message: error.localizedDescription, isRecoverable: true, occurredAt: .now)
+                job.updatedAt = .now
+            }
+            return false
+        }
+    }
+
+    private func updateQueue(jobID: UUID?, _ update: (inout ImportJobRecord) -> Void) {
+        guard let jobID else { return }
+        try? ImportQueueStore().update(id: jobID, update)
+    }
+
+    private enum ExecutionError: Error {
+        case paused
     }
 }
 
