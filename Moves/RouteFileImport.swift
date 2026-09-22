@@ -569,11 +569,33 @@ final class RouteFileImporter: ObservableObject {
         importProgress = 0
         importPhase = "Preparing files"
         importTask?.cancel()
+        let initialJob = ImportJobRecord(
+            displayName: urls.count == 1 ? urls[0].lastPathComponent : "Route file import",
+            source: ImportJobSourceMetadata(
+                originalFileNames: urls.map(\.lastPathComponent),
+                sourceIdentifiers: urls.map(\.path)
+            ),
+            stagedPath: RouteFileImportStore.stagingDirectory.path,
+            configuration: configuration,
+            state: .acquiring,
+            phase: .acquiring
+        )
+        activeJobID = try? importCoordinator.enqueue(initialJob)
         importTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let files = try await self.prepareFiles(urls)
+                let acquisition = try await self.prepareFiles(urls)
+                let files = acquisition.files
                 guard !files.isEmpty else { throw RouteFileImportError.noFiles }
+                if let activeJobID, var job = self.importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
+                    job.displayName = files.count == 1 ? files[0].lastPathComponent : "Route file import (\(files.count) files)"
+                    job.source.originalFileNames = acquisition.sourceNames
+                    job.source.sourceIdentifiers = acquisition.sourceIdentifiers
+                    job.source.bookmarkData = acquisition.bookmarkData
+                    job.counters.itemCount = files.count
+                    job.updatedAt = .now
+                    try? self.importCoordinator.update(job)
+                }
                 let persisted = PersistedRouteFileImport(
                     files: files.map(\.path), nextIndex: 0, importedFileCount: 0,
                     routeCount: 0, sampleCount: 0, failedFileCount: 0,
@@ -584,25 +606,18 @@ final class RouteFileImporter: ObservableObject {
                     state: .running, updatedAt: .now
                 )
                 RouteFileImportStore.state = persisted
-                let job = ImportJobRecord(
-                    displayName: files.count == 1 ? files[0].lastPathComponent : "Route file import (\(files.count) files)",
-                    source: ImportJobSourceMetadata(
-                        originalFileNames: files.map(\.lastPathComponent),
-                        sourceIdentifiers: files.map(\.path)
-                    ),
-                    stagedPath: RouteFileImportStore.stagingDirectory.path,
-                    configuration: configuration,
-                    state: .queued,
-                    phase: .acquiring,
-                    counters: ImportJobCounters(itemCount: files.count)
-                )
-                self.activeJobID = try? self.importCoordinator.enqueue(job)
                 RouteFileImportBackgroundTask.schedule()
                 await self.runPersistedImport()
             } catch is CancellationError {
             } catch {
                 self.state = .failed
                 self.lastErrorMessage = error.localizedDescription
+                if let activeJobID, var job = self.importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
+                    job.state = error is RouteImportAcquisitionError ? .needsInformation : .failed
+                    job.lastError = ImportJobError(message: error.localizedDescription, isRecoverable: true, occurredAt: .now)
+                    job.updatedAt = .now
+                    try? self.importCoordinator.update(job)
+                }
             }
         }
     }
@@ -1008,26 +1023,11 @@ final class RouteFileImporter: ObservableObject {
         }
     }
 
-    private func prepareFiles(_ urls: [URL]) async throws -> [URL] {
+    private func prepareFiles(_ urls: [URL]) async throws -> RouteImportAcquisitionResult {
         let directory = RouteFileImportStore.stagingDirectory
         try? FileManager.default.removeItem(at: directory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var files: [URL] = []
-        for url in urls.uniqueForImport {
-            let didAccess = url.startAccessingSecurityScopedResource()
-            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
-                files += try collectSupportedFiles(in: url)
-            } else if url.pathExtension.lowercased() == "zip" {
-                files += try extractZip(url, into: directory)
-            } else if isSupportedRouteFile(url) {
-                let destination = directory.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
-                try FileManager.default.copyItem(at: url, to: destination)
-                files.append(destination)
-            }
-        }
-        return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        let result = try RouteImportAcquirer(stagingDirectory: directory).acquire(urls: urls)
+        return result
     }
 
     private func collectSupportedFiles(in directory: URL) throws -> [URL] {

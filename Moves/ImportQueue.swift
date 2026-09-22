@@ -27,11 +27,25 @@ struct ImportJobSourceMetadata: Codable, Hashable, Sendable {
     var sourceType: String
     var originalFileNames: [String]
     var sourceIdentifiers: [String]
+    var bookmarkData: [Data]
 
-    init(sourceType: String = "route-file", originalFileNames: [String] = [], sourceIdentifiers: [String] = []) {
+    private enum CodingKeys: String, CodingKey {
+        case sourceType, originalFileNames, sourceIdentifiers, bookmarkData
+    }
+
+    init(sourceType: String = "route-file", originalFileNames: [String] = [], sourceIdentifiers: [String] = [], bookmarkData: [Data] = []) {
         self.sourceType = sourceType
         self.originalFileNames = originalFileNames
         self.sourceIdentifiers = sourceIdentifiers
+        self.bookmarkData = bookmarkData
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceType = try container.decodeIfPresent(String.self, forKey: .sourceType) ?? "route-file"
+        originalFileNames = try container.decodeIfPresent([String].self, forKey: .originalFileNames) ?? []
+        sourceIdentifiers = try container.decodeIfPresent([String].self, forKey: .sourceIdentifiers) ?? []
+        bookmarkData = try container.decodeIfPresent([Data].self, forKey: .bookmarkData) ?? []
     }
 }
 

@@ -55,4 +55,60 @@ final class ImportQueueTests: XCTestCase {
         XCTAssertEqual(coordinator.jobs[0].state, .queued)
         XCTAssertNil(coordinator.jobs[0].lastError)
     }
+
+    func testAcquirerCopiesLocalFileIntoAppOwnedStaging() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let staging = root.appendingPathComponent("Application Support/Moves/RouteImport")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("route.gpx")
+        try Data("<gpx/>".utf8).write(to: source)
+
+        let result = try RouteImportAcquirer(stagingDirectory: staging).acquire(urls: [source])
+
+        XCTAssertEqual(result.files.count, 1)
+        XCTAssertNotEqual(result.files[0], source)
+        XCTAssertEqual(try Data(contentsOf: result.files[0]), Data("<gpx/>".utf8))
+        XCTAssertTrue(result.files[0].path.hasSuffix("-route.gpx"))
+    }
+
+    func testAcquirerEnumeratesFoldersDeterministicallyAndDeduplicates() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = root.appendingPathComponent("routes")
+        let staging = root.appendingPathComponent("staged")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("b".utf8).write(to: folder.appendingPathComponent("b.gpx"))
+        try Data("a".utf8).write(to: folder.appendingPathComponent("a.gpx"))
+
+        let result = try RouteImportAcquirer(stagingDirectory: staging).acquire(urls: [folder, folder])
+
+        XCTAssertEqual(result.sourceNames, ["a.gpx", "b.gpx"])
+        XCTAssertEqual(result.files.map(\.lastPathComponent), ["000000-a.gpx", "000001-b.gpx"])
+    }
+
+    func testAcquirerReportsMissingSourceAsRecoverable() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertThrowsError(try RouteImportAcquirer(stagingDirectory: root.appendingPathComponent("staged")).acquire(
+            urls: [root.appendingPathComponent("missing.gpx")]
+        )) { error in
+            XCTAssertEqual(error as? RouteImportAcquisitionError, .sourceUnavailable(root.appendingPathComponent("missing.gpx").path))
+        }
+    }
+
+    func testAcquirerEnforcesBoundedStaging() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = root.appendingPathComponent("large.gpx")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(repeating: 1, count: 10).write(to: source)
+
+        XCTAssertThrowsError(try RouteImportAcquirer(
+            stagingDirectory: root.appendingPathComponent("staged"),
+            configuration: RouteImportAcquisitionConfiguration(maximumStagedFiles: 1, maximumStagedBytes: 9)
+        ).acquire(urls: [source])) { error in
+            XCTAssertEqual(error as? RouteImportAcquisitionError, .stagingLimitExceeded)
+        }
+    }
 }
