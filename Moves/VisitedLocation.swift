@@ -8,7 +8,7 @@ import SwiftData
 import UIKit
 #endif
 
-enum TransportMode: String, Codable, CaseIterable, Identifiable, Hashable {
+enum TransportMode: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
     case stationary
     case walking
     case running

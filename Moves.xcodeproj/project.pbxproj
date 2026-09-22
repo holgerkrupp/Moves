@@ -93,6 +93,7 @@
 		A30000012FB0000100000019 /* TimelineWidgetSnapshotShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000017 /* TimelineWidgetSnapshotShared.swift */; };
 		A30000012FB0000100000021 /* Moves Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000020 /* Moves Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A40000012FC0000100000001 /* RouteFileImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000000 /* RouteFileImport.swift */; };
+		A41000012FC0000100000001 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
 		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; };
 		A50000012FD0000100000002 /* CloudDataPresence in Frameworks */ = {isa = PBXBuildFile; productRef = A50000012FD0000100000004 /* CloudDataPresence */; };
 		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; };
@@ -108,6 +109,7 @@
 		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; };
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; };
+		E21000013020000100000001 /* ImportQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21000013020000100000000 /* ImportQueueTests.swift */; };
 		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; };
 		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; };
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
@@ -269,6 +271,7 @@
 		A30000012FB0000100000020 /* Moves Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000012FB0000100000022 /* Moves Watch Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Watch Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A40000012FC0000100000000 /* RouteFileImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileImport.swift; sourceTree = "<group>"; };
+		A41000012FC0000100000000 /* ImportQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueue.swift; sourceTree = "<group>"; };
 		A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudDataPresencePublisher.swift; sourceTree = "<group>"; };
 		A60000012FE0000100000000 /* DailyTimelineBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyTimelineBackup.swift; sourceTree = "<group>"; };
 		A70000012FF0000100000000 /* MovesShareViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesShareViews.swift; sourceTree = "<group>"; };
@@ -282,6 +285,7 @@
 		D10000013010000100000002 /* DawarichSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DawarichSyncTests.swift; sourceTree = "<group>"; };
 		E10000013020000100000000 /* MovesStatisticsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchView.swift; sourceTree = "<group>"; };
 		E20000013020000100000000 /* MovesStatisticsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchTests.swift; sourceTree = "<group>"; };
+		E21000013020000100000000 /* ImportQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueTests.swift; sourceTree = "<group>"; };
 		E30000013030000100000000 /* MovesKnownLocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesKnownLocationsView.swift; sourceTree = "<group>"; };
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
@@ -394,6 +398,7 @@
 				A10000012F00000100000207 /* GeneratedAppIcons.swift */,
 				A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */,
 				A40000012FC0000100000000 /* RouteFileImport.swift */,
+				A41000012FC0000100000000 /* ImportQueue.swift */,
 				A20000012FA0000100000002 /* WatchRouteInbox.swift */,
 				F1000001310000010000000E /* RouteCoordinateStorage.swift */,
 				A30000012FB0000100000000 /* TimelineWidgetSnapshot.swift */,
@@ -480,6 +485,7 @@
 			children = (
 				D10000013010000100000002 /* DawarichSyncTests.swift */,
 				E20000013020000100000000 /* MovesStatisticsSearchTests.swift */,
+				E21000013020000100000000 /* ImportQueueTests.swift */,
 				9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */,
 			);
 			path = MovesTests;
@@ -801,6 +807,7 @@
 				489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */,
 				A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */,
 				A40000012FC0000100000001 /* RouteFileImport.swift in Sources */,
+				A41000012FC0000100000001 /* ImportQueue.swift in Sources */,
 				A20000012FA0000100000003 /* WatchRouteInbox.swift in Sources */,
 				F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */,
 				A30000012FB0000100000001 /* TimelineWidgetSnapshot.swift in Sources */,
@@ -835,6 +842,7 @@
 			files = (
 				D10000013010000100000003 /* DawarichSyncTests.swift in Sources */,
 				E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */,
+				E21000013020000100000001 /* ImportQueueTests.swift in Sources */,
 				9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

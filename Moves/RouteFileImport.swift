@@ -23,7 +23,7 @@ struct FailedRouteImport: Codable, Identifiable, Hashable {
     let configuration: RouteFileImportConfiguration
 }
 
-enum RouteFileImportMappingMode: String, CaseIterable, Codable, Identifiable, Hashable {
+enum RouteFileImportMappingMode: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     case automatic
     case dedicatedTransport
     case raw
@@ -38,7 +38,7 @@ enum RouteFileImportMappingMode: String, CaseIterable, Codable, Identifiable, Ha
     }
 }
 
-enum RouteFileExistingDataPolicy: String, CaseIterable, Codable, Identifiable, Hashable {
+enum RouteFileExistingDataPolicy: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     case skipDate
     case expandAroundExisting
     case overwriteExisting
@@ -53,7 +53,7 @@ enum RouteFileExistingDataPolicy: String, CaseIterable, Codable, Identifiable, H
     }
 }
 
-struct RouteFileImportConfiguration: Codable, Hashable {
+struct RouteFileImportConfiguration: Codable, Hashable, Sendable {
     var mappingMode: RouteFileImportMappingMode = .automatic
     var dedicatedTransportMode: TransportMode = .unknown
     var existingDataPolicy: RouteFileExistingDataPolicy = .skipDate
@@ -515,11 +515,17 @@ final class RouteFileImporter: ObservableObject {
     @Published private(set) var resolvingFailedImportID: UUID?
 
     private let modelContainer: ModelContainer
+    /// Compatibility facade for the existing Settings UI. Durable queue records are owned by
+    /// ImportCoordinator; this class remains responsible only for presenting route-file progress
+    /// while its worker is migrated incrementally.
+    private let importCoordinator: ImportCoordinator
+    private var activeJobID: UUID?
     private var importTask: Task<Void, Never>?
     private var shouldPause = false
 
     init(modelContext: ModelContext) {
         self.modelContainer = modelContext.container
+        self.importCoordinator = ImportCoordinator()
         self.failedImports = RouteFileImportStore.failedImports
         let persistedState = RouteFileImportStore.state?.state ?? .idle
         state = persistedState == .running ? .paused : persistedState
@@ -527,6 +533,31 @@ final class RouteFileImporter: ObservableObject {
             persisted.state = .paused
             RouteFileImportStore.state = persisted
         }
+        migrateLegacyQueueStateIfNeeded()
+    }
+
+    private func migrateLegacyQueueStateIfNeeded() {
+        guard importCoordinator.jobs.isEmpty, let persisted = RouteFileImportStore.state else { return }
+        let job = ImportJobRecord(
+            displayName: "Route file import",
+            source: ImportJobSourceMetadata(
+                originalFileNames: persisted.files.map { URL(fileURLWithPath: $0).lastPathComponent },
+                sourceIdentifiers: persisted.files
+            ),
+            stagedPath: RouteFileImportStore.stagingDirectory.path,
+            configuration: persisted.configuration,
+            state: persisted.state == .running ? .paused : .queued,
+            phase: .importing,
+            counters: ImportJobCounters(
+                itemCount: persisted.files.count,
+                completedItemCount: persisted.nextIndex,
+                routeCount: persisted.routeCount,
+                sampleCount: persisted.sampleCount,
+                failedItemCount: persisted.failedFileCount ?? 0
+            ),
+            updatedAt: persisted.updatedAt
+        )
+        _ = try? importCoordinator.enqueue(job)
     }
 
     var isImporting: Bool { state == .running }
@@ -553,6 +584,19 @@ final class RouteFileImporter: ObservableObject {
                     state: .running, updatedAt: .now
                 )
                 RouteFileImportStore.state = persisted
+                let job = ImportJobRecord(
+                    displayName: files.count == 1 ? files[0].lastPathComponent : "Route file import (\(files.count) files)",
+                    source: ImportJobSourceMetadata(
+                        originalFileNames: files.map(\.lastPathComponent),
+                        sourceIdentifiers: files.map(\.path)
+                    ),
+                    stagedPath: RouteFileImportStore.stagingDirectory.path,
+                    configuration: configuration,
+                    state: .queued,
+                    phase: .acquiring,
+                    counters: ImportJobCounters(itemCount: files.count)
+                )
+                self.activeJobID = try? self.importCoordinator.enqueue(job)
                 RouteFileImportBackgroundTask.schedule()
                 await self.runPersistedImport()
             } catch is CancellationError {
@@ -587,6 +631,7 @@ final class RouteFileImporter: ObservableObject {
     func pause() {
         guard isImporting else { return }
         shouldPause = true
+        if let activeJobID { try? importCoordinator.pause(id: activeJobID) }
         importProgressText = "Pausing…"
     }
 
@@ -612,6 +657,8 @@ final class RouteFileImporter: ObservableObject {
         importTask = nil
         try? FileManager.default.removeItem(at: RouteFileImportStore.stagingDirectory)
         RouteFileImportStore.state = nil
+        if let activeJobID { try? importCoordinator.cancel(id: activeJobID) }
+        activeJobID = nil
         state = .idle
         importProgress = nil
         importProgressText = ""
@@ -665,6 +712,16 @@ final class RouteFileImporter: ObservableObject {
             )
             lastErrorMessage = nil
             state = .completed
+            if let activeJobID, var job = importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
+                job.state = .completed
+                job.phase = .postProcessing
+                job.counters.completedItemCount = job.counters.itemCount
+                job.counters.routeCount = persisted.routeCount
+                job.counters.sampleCount = persisted.sampleCount
+                job.counters.failedItemCount = persisted.failedFileCount ?? 0
+                job.updatedAt = .now
+                try? importCoordinator.update(job)
+            }
             RouteFileImportStore.state = nil
             try? FileManager.default.removeItem(at: RouteFileImportStore.stagingDirectory)
             if (persisted.failedFileCount ?? 0) > 0 {
@@ -679,6 +736,7 @@ final class RouteFileImporter: ObservableObject {
             RouteFileImportStore.state = persisted
             RouteFileImportBackgroundTask.schedule()
             state = .paused
+            if let activeJobID { try? importCoordinator.pause(id: activeJobID) }
             importProgressText = "Import paused"
             importPhase = "Paused — progress saved"
         } catch is CancellationError {
@@ -686,11 +744,18 @@ final class RouteFileImporter: ObservableObject {
             RouteFileImportStore.state = persisted
             RouteFileImportBackgroundTask.schedule()
             state = .paused
+            if let activeJobID { try? importCoordinator.pause(id: activeJobID) }
             importPhase = "Paused — progress saved"
         } catch {
             persisted.state = .failed
             RouteFileImportStore.state = persisted
             state = .failed
+            if let activeJobID, var job = importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
+                job.state = .failed
+                job.lastError = ImportJobError(message: error.localizedDescription, isRecoverable: true, occurredAt: .now)
+                job.updatedAt = .now
+                try? importCoordinator.update(job)
+            }
             lastErrorMessage = error.localizedDescription
             importPhase = "Import failed"
         }
