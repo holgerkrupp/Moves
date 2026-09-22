@@ -924,6 +924,67 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(mode, .automotive)
     }
 
+    func testClassifierPrefersSustainedWalkingTraceOverStaleAutomotiveSpeed() async {
+        let classifier = CoreMotionTransportClassifier()
+
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let end = start.addingTimeInterval(20 * 60)
+        let locations = [
+            makeLocation(latitude: 52.5200, longitude: 13.4050, speed: 14.0, timestamp: start),
+            makeLocation(latitude: 52.5240, longitude: 13.4090, speed: 1.4, timestamp: start.addingTimeInterval(5 * 60)),
+            makeLocation(latitude: 52.5280, longitude: 13.4130, speed: 1.5, timestamp: start.addingTimeInterval(10 * 60)),
+            makeLocation(latitude: 52.5320, longitude: 13.4170, speed: 1.3, timestamp: end),
+        ]
+
+        let mode = await classifier.classifyTransport(start: start, end: end, locations: locations)
+        XCTAssertEqual(mode, .walking)
+    }
+
+    func testMoveUpsertDoesNotEraseExistingStepsWhenNewSampleHasNone() throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let end = start.addingTimeInterval(20 * 60)
+        let startPlace = VisitPlace(
+            arrivalDate: start,
+            departureDate: start,
+            latitude: 52.5200,
+            longitude: 13.4050,
+            horizontalAccuracy: 20
+        )
+        let endPlace = VisitPlace(
+            arrivalDate: end,
+            departureDate: nil,
+            latitude: 52.5320,
+            longitude: 13.4170,
+            horizontalAccuracy: 20
+        )
+
+        let first = try repository.upsertMove(
+            startPlace: startPlace,
+            endPlace: endPlace,
+            startDate: start,
+            endDate: end,
+            transportMode: .walking,
+            distanceMeters: 1_800,
+            stepCount: 2_400,
+            samples: []
+        )
+        let second = try repository.upsertMove(
+            startPlace: startPlace,
+            endPlace: endPlace,
+            startDate: start,
+            endDate: end,
+            transportMode: .walking,
+            distanceMeters: 1_800,
+            stepCount: nil,
+            samples: []
+        )
+
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(second.stepCount, 2_400)
+    }
+
     func testClassifierInfersTrainFromHigherSustainedSpeed() async {
         let classifier = CoreMotionTransportClassifier()
 

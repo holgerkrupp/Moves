@@ -116,6 +116,7 @@ final class CoreMotionTransportClassifier: MotionClassifier {
     private let activityManager = CMMotionActivityManager()
     private let pedometer = CMPedometer()
     private static let minimumDistanceForNonStationaryOverride: CLLocationDistance = 450
+    private static let minimumWalkingEvidenceDuration: TimeInterval = 8 * 60
 
     func classifyTransport(start: Date, end: Date, locations: [CLLocation]) async -> TransportMode {
         guard end > start else { return .stationary }
@@ -226,6 +227,16 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         fallback: TransportMode,
         locations: [CLLocation]
     ) -> TransportMode {
+        // Core Motion can report the automotive activity that preceded a walk when
+        // the visit-to-visit window is assembled from sparse significant-location
+        // samples. A sustained, kilometre-scale low-speed trace is stronger
+        // evidence for the leg represented by this window than that stale label.
+        if (candidate == .automotive || candidate == .running || candidate == .cycling
+            || (candidate == .stationary && fallback == .automotive)),
+           walkingLocationEvidence(locations) {
+            return .walking
+        }
+
         guard candidate == .stationary else { return candidate }
 
         let traveledDistance = Self.totalDistance(for: locations)
@@ -263,6 +274,35 @@ final class CoreMotionTransportClassifier: MotionClassifier {
             return .cycling
         }
         return .walking
+    }
+
+    private func walkingLocationEvidence(_ locations: [CLLocation]) -> Bool {
+        guard locations.count >= 2,
+              let first = locations.first,
+              let last = locations.last,
+              last.timestamp.timeIntervalSince(first.timestamp) >= Self.minimumWalkingEvidenceDuration,
+              Self.totalDistance(for: locations) >= Self.minimumDistanceForNonStationaryOverride
+        else {
+            return false
+        }
+
+        let validSpeeds = locations
+            .map(\.speed)
+            .filter { $0 >= 0 }
+            .sorted()
+
+        let medianSpeed: CLLocationSpeed
+        if validSpeeds.isEmpty {
+            medianSpeed = Self.totalDistance(for: locations)
+                / last.timestamp.timeIntervalSince(first.timestamp)
+        } else {
+            let middle = validSpeeds.count / 2
+            medianSpeed = validSpeeds.count.isMultiple(of: 2)
+                ? (validSpeeds[middle - 1] + validSpeeds[middle]) / 2
+                : validSpeeds[middle]
+        }
+
+        return (0.7...2.2).contains(medianSpeed)
     }
 
     private func refinedLongDistanceMode(

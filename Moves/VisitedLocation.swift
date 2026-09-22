@@ -1147,7 +1147,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             move.dedupeKey = dedupeKey
             move.transportMode = transportMode
             move.distanceMeters = distanceMeters
-            move.stepCount = stepCount
+            // A later, less capable source may not have pedometer access. Do not
+            // erase steps already attached to the same move in that case.
+            move.stepCount = stepCount ?? move.stepCount
             move.startDate = startDate
             move.endDate = endDate
         } else {
