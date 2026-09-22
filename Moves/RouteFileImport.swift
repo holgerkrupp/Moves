@@ -516,6 +516,26 @@ final class RouteFileImporter: ObservableObject {
     private var importTask: Task<Void, Never>?
     private var shouldPause = false
 
+    /// Presentation compatibility for the existing Settings screen. The coordinator's
+    /// durable recovery records are canonical; this projection keeps older UI components
+    /// working while allowing the Mac sidebar to use the same source of truth.
+    var recoveryItemsForDisplay: [FailedRouteImport] {
+        importCoordinator.unresolvedRecoveryItems.map { item in
+            FailedRouteImport(
+                id: item.id,
+                originalFileName: item.originalFileName,
+                storedFileName: item.stagedPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? item.originalFileName,
+                sourceImportIdentifier: item.source.sourceIdentifiers.first ?? item.originalFileName,
+                createdAt: item.createdAt,
+                reason: item.reason,
+                configuration: item.configuration,
+                kind: item.kind,
+                source: item.source,
+                stagedPath: item.stagedPath
+            )
+        }
+    }
+
     convenience init(modelContext: ModelContext) {
         self.init(modelContext: modelContext, importCoordinator: ImportCoordinator())
     }
@@ -828,12 +848,12 @@ final class RouteFileImporter: ObservableObject {
 
     func resolveFailedImport(_ id: UUID, targetDate: Date) async throws {
         guard resolvingFailedImportID == nil,
-              let failedImport = failedImports.first(where: { $0.id == id }) else { return }
+              let failedImport = recoveryItemsForDisplay.first(where: { $0.id == id }) else { return }
         resolvingFailedImportID = id
         defer { resolvingFailedImportID = nil }
 
-        let url = RouteFileImportStore.failedImportsDirectory
-            .appendingPathComponent(failedImport.storedFileName)
+        let url = failedImport.stagedPath.map(URL.init(fileURLWithPath:))
+            ?? RouteFileImportStore.failedImportsDirectory.appendingPathComponent(failedImport.storedFileName)
         let parsedDTOs = try await Task.detached(priority: .utility) {
             try Task.checkCancellation()
             return try RouteTrackParserWorker.parse(url: url)
@@ -870,21 +890,28 @@ final class RouteFileImporter: ObservableObject {
         guard let item = importCoordinator.recoveryItems.first(where: { $0.id == id }) else { return }
         let urls = item.source.sourceIdentifiers.map(URL.init(fileURLWithPath:))
         guard !urls.isEmpty else { return }
+        // A retry supersedes the current recovery record. If it fails again, start() writes
+        // one fresh record, keeping the sidebar count one-per-unresolved-import.
+        try? importCoordinator.removeRecovery(id: id)
+        failedImports.removeAll { $0.id == id }
+        RouteFileImportStore.failedImports = failedImports
         start(urls: urls, configuration: item.configuration)
     }
 
     func locateFailedImport(_ id: UUID, at url: URL) {
-        guard let index = failedImports.firstIndex(where: { $0.id == id }) else { return }
-        failedImports[index].source = ImportJobSourceMetadata(
+        let source = ImportJobSourceMetadata(
             originalFileNames: [url.lastPathComponent], sourceIdentifiers: [url.path]
         )
-        failedImports[index].stagedPath = url.path
-        RouteFileImportStore.failedImports = failedImports
         if var item = importCoordinator.recoveryItems.first(where: { $0.id == id }) {
-            item.source = failedImports[index].source
+            item.source = source
             item.stagedPath = url.path
             item.updatedAt = .now
             try? importCoordinator.updateRecovery(item)
+        }
+        if let index = failedImports.firstIndex(where: { $0.id == id }) {
+            failedImports[index].source = source
+            failedImports[index].stagedPath = url.path
+            RouteFileImportStore.failedImports = failedImports
         }
     }
 
@@ -983,10 +1010,10 @@ final class RouteFileImporter: ObservableObject {
     }
 
     private func removeFailedImport(_ id: UUID, deleteFile: Bool) {
-        guard let failedImport = failedImports.first(where: { $0.id == id }) else { return }
-        if deleteFile {
-            let url = RouteFileImportStore.failedImportsDirectory
-                .appendingPathComponent(failedImport.storedFileName)
+        let failedImport = recoveryItemsForDisplay.first(where: { $0.id == id })
+        if deleteFile, let failedImport {
+            let url = failedImport.stagedPath.map(URL.init(fileURLWithPath:))
+                ?? RouteFileImportStore.failedImportsDirectory.appendingPathComponent(failedImport.storedFileName)
             try? FileManager.default.removeItem(at: url)
         }
         failedImports.removeAll { $0.id == id }
@@ -1830,14 +1857,14 @@ struct FailedRouteImportsView: View {
 
     var body: some View {
         List {
-            if importer.failedImports.isEmpty {
+            if importer.recoveryItemsForDisplay.isEmpty {
                 ContentUnavailableView(
                     "No Failed Imports",
                     systemImage: "checkmark.circle",
                     description: Text("Files with ambiguous or missing timestamps will appear here before any timeline data is written.")
                 )
             } else {
-                ForEach(importer.failedImports) { failedImport in
+                ForEach(importer.recoveryItemsForDisplay) { failedImport in
                     Section {
                         if failedImport.kind == .needsInformation {
                             DatePicker(

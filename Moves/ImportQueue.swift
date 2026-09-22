@@ -277,6 +277,17 @@ final class ImportCoordinator: ObservableObject {
 
     var jobs: [ImportJobRecord] { snapshot.jobs }
 
+    /// Recovery records are the source of truth for unresolved imports. They remain local
+    /// because they can contain security-scoped bookmarks and app-owned staging paths.
+    var unresolvedRecoveryItems: [ImportRecoveryItem] {
+        recoveryItems.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var unresolvedRecoveryCount: Int { recoveryItems.count }
+    var missingInformationCount: Int {
+        recoveryItems.count { $0.kind == .needsInformation }
+    }
+
     var aggregateProgress: Double? {
         snapshot.aggregateProgress
     }

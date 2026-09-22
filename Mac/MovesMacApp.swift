@@ -21,8 +21,11 @@ struct MovesMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Moves") { MovesMacBrowser() }
+        WindowGroup("Moves") {
+            MovesMacBrowser(modelContainer: modelContainer, importCoordinator: importCoordinator)
+        }
             .modelContainer(modelContainer)
+            .environmentObject(importCoordinator)
             .defaultSize(width: 1_180, height: 760)
             .commands {
                 CommandGroup(after: .sidebar) {
@@ -38,7 +41,7 @@ private extension Notification.Name {
 }
 
 private enum MacSelection: Hashable {
-    case day(String), place(UUID), move(UUID)
+    case day(String), place(UUID), move(UUID), imported, recovery
 }
 
 private struct MacYear: Identifiable {
@@ -63,12 +66,26 @@ private struct MacRecentItem: Identifiable {
 }
 
 private struct MovesMacBrowser: View {
-    @EnvironmentObject private var importCoordinator: ImportCoordinator
+    @ObservedObject private var importCoordinator: ImportCoordinator
+    @StateObject private var importer: RouteFileImporter
+    @Environment(\.modelContext) private var modelContext
+    @Query private var allSamples: [LocationSample]
+    @Query private var allMoves: [MoveSegment]
     @Query(sort: \DayTimeline.dayStart, order: .reverse) private var timelines: [DayTimeline]
     @State private var selection: MacSelection?
     @State private var isInspectorPresented = true
     @State private var searchText = ""
     @State private var isShowingImportQueue = false
+
+    init(modelContainer: ModelContainer, importCoordinator: ImportCoordinator) {
+        _importCoordinator = ObservedObject(wrappedValue: importCoordinator)
+        _importer = StateObject(wrappedValue: RouteFileImporter(
+            modelContext: ModelContext(modelContainer), importCoordinator: importCoordinator
+        ))
+    }
+
+    private var importedSampleCount: Int { allSamples.filter { $0.source == .fileRouteImport }.count }
+    private var importedMoveCount: Int { allMoves.filter { $0.samples.contains { $0.source == .fileRouteImport } }.count }
 
     private var years: [MacYear] {
         let calendar = Calendar.autoupdatingCurrent
@@ -99,7 +116,14 @@ private struct MovesMacBrowser: View {
 
     var body: some View {
         NavigationSplitView { sidebar } detail: {
-            MacWorkspace(timelines: filteredTimelines, selection: $selection, searchText: searchText)
+            switch selection {
+            case .imported:
+                ImportedRouteDataView(modelContext: modelContext)
+            case .recovery:
+                FailedRouteImportsView(importer: importer)
+            default:
+                MacWorkspace(timelines: filteredTimelines, selection: $selection, searchText: searchText)
+            }
         }
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search places, moves, or dates")
         .inspector(isPresented: $isInspectorPresented) {
@@ -126,6 +150,12 @@ private struct MovesMacBrowser: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
+            Section("Library") {
+                MacSidebarRow(title: "Imported", subtitle: "\(importedMoveCount) routes · \(importedSampleCount) samples", systemImage: "arrow.down.to.line.compact")
+                    .tag(MacSelection.imported)
+                MacSidebarRow(title: "Failed Imports", subtitle: recoverySubtitle, systemImage: "exclamationmark.triangle")
+                    .tag(MacSelection.recovery)
+            }
             Section("Recent") {
                 if recentItems.isEmpty { Text("No recorded days yet").foregroundStyle(.secondary) }
                 else { ForEach(recentItems) { item in MacSidebarRow(title: item.title, subtitle: item.subtitle, systemImage: item.icon).tag(item.selection) } }
@@ -150,8 +180,15 @@ private struct MovesMacBrowser: View {
         .navigationTitle("Moves")
         .navigationSplitViewColumnWidth(min: 230, ideal: 285, max: 360)
         .overlay {
-            if timelines.isEmpty { ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here.")) }
+            if timelines.isEmpty && importedSampleCount == 0 { ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here.")) }
         }
+    }
+
+    private var recoverySubtitle: String {
+        let count = importCoordinator.unresolvedRecoveryCount
+        guard count > 0 else { return "All imports resolved" }
+        let missing = importCoordinator.missingInformationCount
+        return missing == count ? "\(count) missing information" : "\(count) unresolved · \(missing) missing information"
     }
 
     private func summary(for timeline: DayTimeline) -> String { "\(timeline.places.count) places · \(timeline.moves.count) moves · \(timeline.samples.count) samples" }
