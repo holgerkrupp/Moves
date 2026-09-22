@@ -71,16 +71,94 @@ enum MovesPalette {
 }
 
 enum DurationFormatter {
-    private static let formatter: DateComponentsFormatter = {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute]
-        formatter.unitsStyle = .abbreviated
-        formatter.maximumUnitCount = 2
-        return formatter
-    }()
+    private static let unitsStyle = Duration.UnitsFormatStyle(
+        allowedUnits: [.hours, .minutes],
+        width: .abbreviated,
+        maximumUnitCount: 2,
+        fractionalPart: .hide(rounded: .towardZero)
+    )
 
-    static func text(for duration: TimeInterval) -> String {
-        formatter.string(from: max(duration, 0)) ?? "0m"
+    private static let extendedUnitsStyle = Duration.UnitsFormatStyle(
+        allowedUnits: [.days, .hours, .minutes],
+        width: .abbreviated,
+        maximumUnitCount: 2,
+        fractionalPart: .hide(rounded: .toNearestOrAwayFromZero)
+    )
+
+    private static let wideUnitsStyle = Duration.UnitsFormatStyle(
+        allowedUnits: [.days, .hours, .minutes],
+        width: .wide,
+        maximumUnitCount: 2,
+        fractionalPart: .hide(rounded: .towardZero)
+    )
+
+    static func text(
+        for duration: TimeInterval,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        Duration.seconds(max(duration, 0))
+            .formatted(unitsStyle.locale(locale))
+    }
+
+    static func showsNonzeroMinutes(for duration: TimeInterval) -> Bool {
+        max(duration, 0) >= 60
+    }
+
+    static func extendedText(
+        for duration: TimeInterval,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        Duration.seconds(max(duration, 0))
+            .formatted(extendedUnitsStyle.locale(locale))
+    }
+
+    static func wideText(
+        for duration: TimeInterval,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        Duration.seconds(max(duration, 0))
+            .formatted(wideUnitsStyle.locale(locale))
+    }
+}
+
+enum MovesMeasurementFormatter {
+    static func distance(
+        meters: Double,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        Measurement(value: max(meters, 0), unit: UnitLength.meters)
+            .formatted(
+                .measurement(width: .abbreviated, usage: .road)
+                    .locale(locale)
+            )
+    }
+
+    static func accuracy(
+        meters: Double,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        Measurement(value: max(meters, 0), unit: UnitLength.meters)
+            .formatted(
+                .measurement(
+                    width: .abbreviated,
+                    numberFormatStyle: .number.precision(.fractionLength(1))
+                )
+                .locale(locale)
+            )
+    }
+
+    static func speed(
+        kilometersPerHour: Double,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        Measurement(value: max(kilometersPerHour, 0), unit: UnitSpeed.kilometersPerHour)
+            .formatted(
+                .measurement(
+                    width: .abbreviated,
+                    numberFormatStyle: .number.precision(.fractionLength(1))
+                )
+                .locale(locale)
+            )
     }
 }
 

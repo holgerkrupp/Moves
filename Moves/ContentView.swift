@@ -318,12 +318,13 @@ private func temporaryRouteTrackingAutoStopText(
 ) -> String {
     let stopAtBatteryFifty = captureManager.temporaryRouteTrackingStopsAtFiftyPercentBattery
     let stopInLowPowerMode = captureManager.temporaryRouteTrackingStopsInLowPowerMode
+    let batteryThreshold = 0.5.formatted(.percent)
 
     switch (stopAtBatteryFifty, stopInLowPowerMode) {
     case (true, true):
-        return " It will also stop if battery reaches 50% or Low Power Mode turns on."
+        return String(localized: " It will also stop if battery reaches \(batteryThreshold) or Low Power Mode turns on.")
     case (true, false):
-        return " It will also stop if battery reaches 50%."
+        return String(localized: " It will also stop if battery reaches \(batteryThreshold).")
     case (false, true):
         return " It will also stop if Low Power Mode turns on."
     case (false, false):
@@ -358,18 +359,31 @@ struct ContentView: View {
     @State private var isShowingDroppedRouteImportOptions = false
     @State private var droppedRouteImportConfiguration = RouteFileImportConfiguration()
     @State private var isShowingImportQueue = false
+    @State private var isFillingSelectedDayGaps = false
+    @State private var gapFillResultMessage = ""
+    @State private var isShowingGapFillResult = false
+
+    /// Empty `DayTimeline` records are an implementation detail used while recording. They
+    /// should not become browsable days in the timeline UI.
+    private var recordedDayTimelines: [DayTimeline] {
+        dayTimelines.filter(\.hasRecordedActivity)
+    }
+
+    private var recordedDaySignature: [String] {
+        dayTimelines.map { "\($0.dayKey):\($0.hasRecordedActivity)" }
+    }
 
     private var selectedDay: DayTimeline? {
-        guard dayTimelines.indices.contains(selectedPageIndex) else { return nil }
-        return dayTimelines[selectedPageIndex]
+        guard recordedDayTimelines.indices.contains(selectedPageIndex) else { return nil }
+        return recordedDayTimelines[selectedPageIndex]
     }
 
     private var canGoOlder: Bool {
-        dayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex > 0
+        recordedDayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex > 0
     }
 
     private var canGoNewer: Bool {
-        dayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex < dayTimelines.count - 1
+        recordedDayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex < recordedDayTimelines.count - 1
     }
 
     private var cloudDataPresenceCountSignature: String {
@@ -460,6 +474,11 @@ struct ContentView: View {
         } message: {
             Text(multiDevicePresenceManager.promptMessage)
         }
+        .alert("Fill Missing Moves", isPresented: $isShowingGapFillResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(gapFillResultMessage)
+        }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
             if captureManager.isLocationTrackingAvailable {
@@ -475,7 +494,7 @@ struct ContentView: View {
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
-        .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
+        .onChange(of: recordedDaySignature) { _, _ in
             repairDuplicateDayTimelinesIfNeeded()
             syncSelectedDayIfNeeded()
             publishWidgetSnapshot()
@@ -507,12 +526,12 @@ struct ContentView: View {
             enqueueRouteImport(items.map(\.url))
         }
         .onChange(of: selectedPageIndex) { _, newIndex in
-            guard dayTimelines.indices.contains(newIndex) else { return }
-            selectedDayKey = dayTimelines[newIndex].dayKey
+            guard recordedDayTimelines.indices.contains(newIndex) else { return }
+            selectedDayKey = recordedDayTimelines[newIndex].dayKey
         }
         .onChange(of: selectedDayKey) { _, newKey in
             timelineMapSelection = nil
-            guard let index = dayTimelines.firstIndex(where: { $0.dayKey == newKey }),
+            guard let index = recordedDayTimelines.firstIndex(where: { $0.dayKey == newKey }),
                   index != selectedPageIndex else { return }
             selectedPageIndex = index
         }
@@ -577,7 +596,7 @@ struct ContentView: View {
     }
 
     private var recentDayTimelines: [DayTimeline] {
-        Array(dayTimelines.suffix(60).reversed())
+        Array(recordedDayTimelines.suffix(60).reversed())
     }
 
     private var daySidebarSelection: Binding<String?> {
@@ -612,7 +631,7 @@ struct ContentView: View {
                     }
                 }
 
-                if dayTimelines.isEmpty {
+                if recordedDayTimelines.isEmpty {
                     emptyState
                         .safeAreaPadding(.horizontal, 14)
                 } else {
@@ -621,7 +640,7 @@ struct ContentView: View {
                         .padding(.top, 10)
 
                     TabView(selection: $selectedPageIndex) {
-                        ForEach(Array(dayTimelines.enumerated()), id: \.element.dayKey) { index, day in
+                        ForEach(Array(recordedDayTimelines.enumerated()), id: \.element.dayKey) { index, day in
                             DayTimelinePage(
                                 dayKey: day.dayKey,
                                 isActive: index == selectedPageIndex,
@@ -651,7 +670,7 @@ struct ContentView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     MovesStatisticsSearchView(
-                        dayTimelines: dayTimelines,
+                        dayTimelines: recordedDayTimelines,
                         initialDate: selectedDay?.dayStart ?? .now
                     )
                 } label: {
@@ -665,6 +684,21 @@ struct ContentView: View {
                     coordinator: importCoordinator,
                     isPresented: $isShowingImportQueue
                 )
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    fillGapsOnSelectedDay()
+                } label: {
+                    if isFillingSelectedDayGaps {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Fill Missing Moves", systemImage: "wand.and.stars")
+                    }
+                }
+                .disabled(isFillingSelectedDayGaps || (selectedDay?.places.count ?? 0) < 2)
+                .help("Fill missing moves on the selected day")
             }
 
             if captureManager.isLocationTrackingAvailable {
@@ -869,44 +903,18 @@ struct ContentView: View {
         #if targetEnvironment(macCatalyst)
         // Catalyst is a review/import client. Never manufacture placeholder records while
         // CloudKit is still populating a fresh local store.
-        if let todayIndex = dayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
+        if let todayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
             selectedDayKey = todayKey
             selectedPageIndex = todayIndex
-        } else if let latestIndex = dayTimelines.indices.last {
-            selectedDayKey = dayTimelines[latestIndex].dayKey
+        } else if let latestIndex = recordedDayTimelines.indices.last {
+            selectedDayKey = recordedDayTimelines[latestIndex].dayKey
             selectedPageIndex = latestIndex
         }
         return
         #endif
 
-        var existingKeys = Set(dayTimelines.map(\.dayKey))
-        var didInsertDay = false
-
-        if !existingKeys.contains(todayKey) {
+        if !dayTimelines.contains(where: { $0.dayKey == todayKey }) {
             modelContext.insert(DayTimeline(dayStart: todayStart))
-            existingKeys.insert(todayKey)
-            didInsertDay = true
-        }
-
-        // Days without any recorded location have no timeline of their own, which made paging
-        // skip them entirely. Fill the gaps so every day since the first recording is reachable.
-        if let earliestDayStart = dayTimelines.first?.dayStart {
-            var dayStart = calendar.startOfDay(for: earliestDayStart)
-
-            while dayStart < todayStart {
-                let dayKey = DayTimeline.makeDayKey(for: dayStart)
-                if !existingKeys.contains(dayKey) {
-                    modelContext.insert(DayTimeline(dayStart: dayStart))
-                    existingKeys.insert(dayKey)
-                    didInsertDay = true
-                }
-
-                guard let nextDayStart = calendar.date(byAdding: .day, value: 1, to: dayStart) else { break }
-                dayStart = nextDayStart
-            }
-        }
-
-        if didInsertDay {
             do {
                 try modelContext.save()
             } catch {
@@ -914,9 +922,12 @@ struct ContentView: View {
             }
         }
 
-        selectedDayKey = todayKey
-        if let todayIndex = dayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
+        if let todayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
+            selectedDayKey = todayKey
             selectedPageIndex = todayIndex
+        } else if let latestIndex = recordedDayTimelines.indices.last {
+            selectedDayKey = recordedDayTimelines[latestIndex].dayKey
+            selectedPageIndex = latestIndex
         }
     }
 
@@ -936,6 +947,22 @@ struct ContentView: View {
     private func publishWidgetSnapshot() {
         guard let dayTimeline = selectedDay ?? dayTimelines.last else { return }
         TimelineWidgetSnapshotStore.save(.make(from: dayTimeline))
+    }
+
+    private func fillGapsOnSelectedDay() {
+        guard let selectedDay, !isFillingSelectedDayGaps else { return }
+        isFillingSelectedDayGaps = true
+
+        Task { @MainActor in
+            let filledGapCount = await captureManager.fillVisitGaps(onDayWithKey: selectedDay.dayKey)
+            isFillingSelectedDayGaps = false
+            gapFillResultMessage = filledGapCount == 0
+                ? "No missing moves were found on this day."
+                : "Filled \(filledGapCount) missing move\(filledGapCount == 1 ? "" : "s") on this day."
+            isShowingGapFillResult = true
+            publishWidgetSnapshot()
+            cloudDataPresencePublisher.publishSoon()
+        }
     }
 
     private func refreshSpotlightIndex() {
@@ -965,11 +992,11 @@ struct ContentView: View {
         case "place":
             guard let identifier = url.pathComponents.dropFirst().first,
                   let placeID = UUID(uuidString: identifier),
-                  let dayIndex = dayTimelines.firstIndex(where: { day in
+                  let dayIndex = recordedDayTimelines.firstIndex(where: { day in
                       day.places.contains(where: { $0.id == placeID })
                   }) else { return }
             selectedPageIndex = dayIndex
-            selectedDayKey = dayTimelines[dayIndex].dayKey
+            selectedDayKey = recordedDayTimelines[dayIndex].dayKey
         default:
             break
         }
@@ -990,51 +1017,51 @@ struct ContentView: View {
     }
 
     private func syncSelectedDayIfNeeded() {
-        guard !dayTimelines.isEmpty else {
+        guard !recordedDayTimelines.isEmpty else {
             selectedPageIndex = 0
             selectedDayKey = ""
             return
         }
 
         if selectedDayKey.isEmpty {
-            selectedPageIndex = dayTimelines.count - 1
-            selectedDayKey = dayTimelines[selectedPageIndex].dayKey
+            selectedPageIndex = recordedDayTimelines.count - 1
+            selectedDayKey = recordedDayTimelines[selectedPageIndex].dayKey
             return
         }
 
-        if let selectedIndex = dayTimelines.firstIndex(where: { $0.dayKey == selectedDayKey }) {
+        if let selectedIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == selectedDayKey }) {
             selectedPageIndex = selectedIndex
             return
         }
 
-        if dayTimelines.indices.contains(selectedPageIndex) {
-            selectedDayKey = dayTimelines[selectedPageIndex].dayKey
+        if recordedDayTimelines.indices.contains(selectedPageIndex) {
+            selectedDayKey = recordedDayTimelines[selectedPageIndex].dayKey
             return
         }
 
-        selectedPageIndex = dayTimelines.count - 1
-        selectedDayKey = dayTimelines[selectedPageIndex].dayKey
+        selectedPageIndex = recordedDayTimelines.count - 1
+        selectedDayKey = recordedDayTimelines[selectedPageIndex].dayKey
     }
 
     private func selectOlderDay() {
         let nextIndex = selectedPageIndex - 1
-        guard dayTimelines.indices.contains(nextIndex) else { return }
+        guard recordedDayTimelines.indices.contains(nextIndex) else { return }
         selectedPageIndex = nextIndex
     }
 
     private func selectNewerDay() {
         let nextIndex = selectedPageIndex + 1
-        guard dayTimelines.indices.contains(nextIndex) else { return }
+        guard recordedDayTimelines.indices.contains(nextIndex) else { return }
         selectedPageIndex = nextIndex
     }
 
     private func jumpToDate(_ date: Date) {
-        guard !dayTimelines.isEmpty else { return }
+        guard !recordedDayTimelines.isEmpty else { return }
 
         let calendar = Calendar.autoupdatingCurrent
         let targetStart = calendar.startOfDay(for: date)
 
-        let closest = dayTimelines.enumerated().min { lhs, rhs in
+        let closest = recordedDayTimelines.enumerated().min { lhs, rhs in
             let lhsStart = calendar.startOfDay(for: lhs.element.dayStart)
             let rhsStart = calendar.startOfDay(for: rhs.element.dayStart)
             return abs(lhsStart.timeIntervalSince(targetStart)) < abs(rhsStart.timeIntervalSince(targetStart))
@@ -1047,7 +1074,7 @@ struct ContentView: View {
 
     private var datePickerSheet: some View {
         MovesJumpToDateView(
-            dayTimelines: dayTimelines,
+            dayTimelines: recordedDayTimelines,
             selectedDate: selectedDay?.dayStart ?? .now,
             onSelectDate: jumpToDate,
             onDismiss: { isShowingDatePicker = false }

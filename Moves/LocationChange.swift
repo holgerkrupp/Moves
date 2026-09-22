@@ -33,33 +33,13 @@ enum TemporaryRouteTrackingDuration: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .thirtyMinutes:
-            return "30 minutes"
-        case .oneHour:
-            return "1 hour"
-        case .twoHours:
-            return "2 hours"
-        case .fourHours:
-            return "4 hours"
-        case .endOfDay:
-            return "Until end of day"
-        }
+        guard let timeInterval else { return String(localized: "Until end of day") }
+        return DurationFormatter.wideText(for: timeInterval)
     }
 
     var availabilityText: String {
-        switch self {
-        case .thirtyMinutes:
-            return "for 30 minutes"
-        case .oneHour:
-            return "for 1 hour"
-        case .twoHours:
-            return "for 2 hours"
-        case .fourHours:
-            return "for 4 hours"
-        case .endOfDay:
-            return "until the end of today"
-        }
+        guard timeInterval != nil else { return String(localized: "until the end of today") }
+        return String(localized: "for \(title)")
     }
 
     var timeInterval: TimeInterval? {
@@ -108,6 +88,15 @@ protocol MotionClassifier {
 protocol TimelineAssembler {
     func ingestVisit(_ visit: CLVisit) async
     func ingestLocations(_ locations: [CLLocation], source: LocationSampleSource) async
+    func fillVisitGaps(onDayWithKey dayKey: String) async -> Int
+}
+
+enum VisitGapFillingSettings {
+    static let isEnabledKey = "Moves.visitGapFilling.isEnabled"
+
+    static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: isEnabledKey)
+    }
 }
 
 final class CoreMotionTransportClassifier: MotionClassifier {
@@ -379,15 +368,20 @@ final class DefaultTimelineAssembler: TimelineAssembler {
     private let repository: TimelineRepository
     private let motionClassifier: MotionClassifier
     private let placeNameResolver: PlaceNameResolver
+    private let automaticallyFillsVisitGaps: () -> Bool
 
     init(
         repository: TimelineRepository,
         motionClassifier: MotionClassifier,
-        placeNameResolver: PlaceNameResolver
+        placeNameResolver: PlaceNameResolver,
+        automaticallyFillsVisitGaps: @escaping () -> Bool = {
+            VisitGapFillingSettings.isEnabled()
+        }
     ) {
         self.repository = repository
         self.motionClassifier = motionClassifier
         self.placeNameResolver = placeNameResolver
+        self.automaticallyFillsVisitGaps = automaticallyFillsVisitGaps
     }
 
     func ingestLocations(_ locations: [CLLocation], source: LocationSampleSource) async {
@@ -406,6 +400,11 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             let visitPlace = try repository.addOrUpdateVisit(from: visit)
             await fillAutomaticPlaceLabelIfNeeded(for: visitPlace)
 
+            guard automaticallyFillsVisitGaps() else {
+                try repository.saveIfNeeded()
+                return
+            }
+
             let normalizedArrival = visitPlace.arrivalDate
             guard
                 let previousPlace = try repository.latestPlace(
@@ -417,57 +416,86 @@ final class DefaultTimelineAssembler: TimelineAssembler {
                 return
             }
 
-            let endDate = normalizedArrival
-
-            if previousPlace.departureDate == nil {
-                let candidateSamples = try repository.samples(from: previousPlace.arrivalDate, to: endDate)
-                previousPlace.departureDate = inferredDepartureDate(
-                    for: previousPlace,
-                    endDate: endDate,
-                    samples: candidateSamples
-                )
-            }
-
-            let candidateStartDate = previousPlace.departureDate ?? previousPlace.arrivalDate
-            let startDate = min(max(candidateStartDate, previousPlace.arrivalDate), endDate)
-
-            guard endDate.timeIntervalSince(startDate) > 60 else {
-                try repository.saveIfNeeded()
-                return
-            }
-
-            let betweenSamples = try repository.samples(from: startDate, to: endDate)
-            let movementLocations = movementLocations(
-                startPlace: previousPlace,
-                endPlace: visitPlace,
-                startDate: startDate,
-                endDate: endDate,
-                samples: betweenSamples
-            )
-
-            let transportMode = await motionClassifier.classifyTransport(
-                start: startDate,
-                end: endDate,
-                locations: movementLocations
-            )
-            let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
-            let totalDistance = Self.totalDistance(for: movementLocations)
-
-            _ = try repository.upsertMove(
-                startPlace: previousPlace,
-                endPlace: visitPlace,
-                startDate: startDate,
-                endDate: endDate,
-                transportMode: transportMode,
-                distanceMeters: totalDistance,
-                stepCount: steps,
-                samples: betweenSamples
-            )
-
+            _ = try await fillGap(from: previousPlace, to: visitPlace)
             try repository.saveIfNeeded()
         } catch {
             print("Failed to build timeline segment: \(error.localizedDescription)")
         }
+    }
+
+    func fillVisitGaps(onDayWithKey dayKey: String) async -> Int {
+        do {
+            let places = try repository.placesForGapFilling(onDayWithKey: dayKey)
+            guard places.count > 1 else { return 0 }
+
+            var filledGapCount = 0
+            for (startPlace, endPlace) in zip(places, places.dropFirst()) {
+                if try await fillGap(from: startPlace, to: endPlace) {
+                    filledGapCount += 1
+                }
+            }
+
+            try repository.saveIfNeeded()
+            return filledGapCount
+        } catch {
+            print("Failed to fill visit gaps: \(error.localizedDescription)")
+            return 0
+        }
+    }
+
+    private func fillGap(from previousPlace: VisitPlace, to visitPlace: VisitPlace) async throws -> Bool {
+        let alreadyHasConnectingMove = previousPlace.outgoingMoves.contains {
+            $0.endPlace?.id == visitPlace.id
+        } || visitPlace.incomingMoves.contains {
+            $0.startPlace?.id == previousPlace.id
+        }
+        guard !alreadyHasConnectingMove else { return false }
+
+        let endDate = visitPlace.arrivalDate
+
+        if previousPlace.departureDate == nil {
+            let candidateSamples = try repository.samples(from: previousPlace.arrivalDate, to: endDate)
+            previousPlace.departureDate = inferredDepartureDate(
+                for: previousPlace,
+                endDate: endDate,
+                samples: candidateSamples
+            )
+        }
+
+        let candidateStartDate = previousPlace.departureDate ?? previousPlace.arrivalDate
+        let startDate = min(max(candidateStartDate, previousPlace.arrivalDate), endDate)
+
+        guard endDate > startDate else { return false }
+
+        let betweenSamples = try repository.samples(from: startDate, to: endDate)
+        let movementLocations = movementLocations(
+            startPlace: previousPlace,
+            endPlace: visitPlace,
+            startDate: startDate,
+            endDate: endDate,
+            samples: betweenSamples
+        )
+
+        let transportMode = await motionClassifier.classifyTransport(
+            start: startDate,
+            end: endDate,
+            locations: movementLocations
+        )
+        let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
+        let totalDistance = Self.totalDistance(for: movementLocations)
+
+        _ = try repository.upsertMove(
+            startPlace: previousPlace,
+            endPlace: visitPlace,
+            startDate: startDate,
+            endDate: endDate,
+            transportMode: transportMode,
+            distanceMeters: totalDistance,
+            stepCount: steps,
+            samples: betweenSamples
+        )
+
+        return true
     }
 
     private func movementLocations(
@@ -623,7 +651,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         self.assembler = DefaultTimelineAssembler(
             repository: repository,
             motionClassifier: CoreMotionTransportClassifier(),
-            placeNameResolver: CLGeocoderPlaceNameResolver()
+            placeNameResolver: CLGeocoderPlaceNameResolver(),
+            automaticallyFillsVisitGaps: {
+                VisitGapFillingSettings.isEnabled(userDefaults: userDefaults)
+            }
         )
 
         super.init()
@@ -650,6 +681,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         migrateExistingTrackingConsentIfNeeded()
         restoreBackgroundLocationListeningState()
         updateBackgroundLocationAllowance()
+    }
+
+    @discardableResult
+    func fillVisitGaps(onDayWithKey dayKey: String) async -> Int {
+        await assembler.fillVisitGaps(onDayWithKey: dayKey)
     }
 
     var trackingStatusText: String {

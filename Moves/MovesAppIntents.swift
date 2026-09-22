@@ -52,7 +52,8 @@ enum MovesTimelinePeriod: String, AppEnum {
         switch self {
         case .today: "Today"
         case .yesterday: "Yesterday"
-        case .lastSevenDays: "The last 7 days"
+        case .lastSevenDays:
+            String(localized: "The last \(DurationFormatter.wideText(for: 7 * 24 * 60 * 60))")
         case .thisMonth: "This month"
         case .allTime: "All time"
         }
@@ -318,11 +319,7 @@ final class MovesIntentRuntime {
     }
 
     private static func distanceText(_ meters: CLLocationDistance) -> String {
-        let formatter = MeasurementFormatter()
-        formatter.unitStyle = .medium
-        formatter.unitOptions = .naturalScale
-        formatter.numberFormatter.maximumFractionDigits = 1
-        return formatter.string(from: Measurement(value: max(meters, 0), unit: UnitLength.meters))
+        MovesMeasurementFormatter.distance(meters: meters)
     }
 
     private static func joinForSpeech(_ values: [String]) -> String {

@@ -141,7 +141,7 @@ struct ImportedRoutePreview: Identifiable, Hashable {
     let sampleCount: Int
 
     var title: String {
-        "\(transportMode.title) · \(String(format: "%.1f", distanceMeters / 1_000)) km"
+        "\(transportMode.title) · \(MovesMeasurementFormatter.distance(meters: distanceMeters))"
     }
 }
 

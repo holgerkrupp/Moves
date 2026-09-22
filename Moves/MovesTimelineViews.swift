@@ -1064,8 +1064,13 @@ struct DayMapStrip: View {
                 guard isActive else { return }
                 await refreshHistoricalRouteCoordinates()
             }
-            .task(id: cameraRefreshKey) {
+            .task(id: "\(cameraRefreshKey)|\(dayTimeline.dayKey)|\(isActive ? 1 : 0)") {
+                guard isActive else { return }
                 refreshCamera()
+            }
+            .onChange(of: isActive) { _, isNowActive in
+                guard isNowActive else { return }
+                refreshCamera(for: selection)
             }
             .onChange(of: selection) { _, newSelection in
                 refreshCamera(for: newSelection)
@@ -1951,11 +1956,12 @@ enum TimelineEntry: Identifiable {
     }
 
     private static func averageSpeedText(for segment: MoveSegment) -> String? {
-        guard segment.timelineDuration > 0 else { return nil }
+        guard DurationFormatter.showsNonzeroMinutes(for: segment.timelineDuration) else {
+            return nil
+        }
 
         let kilometersPerHour = max(segment.distanceMeters, 0) / segment.timelineDuration * 3.6
-        let formattedSpeed = kilometersPerHour.formatted(.number.precision(.fractionLength(1)))
-        return "\(formattedSpeed) km/h"
+        return MovesMeasurementFormatter.speed(kilometersPerHour: kilometersPerHour)
     }
 
     private static func timeString(from date: Date) -> String {

@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		4826804430626CAD0076FA35 /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
 		489A76352C4FC6F300F43B69 /* MovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76342C4FC6F300F43B69 /* MovesApp.swift */; platformFilter = ios; };
 		489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76362C4FC6F300F43B69 /* ContentView.swift */; platformFilter = ios; };
 		489A763B2C4FC6F500F43B69 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763A2C4FC6F500F43B69 /* Assets.xcassets */; };
@@ -95,12 +94,9 @@
 		A30000012FB0000100000021 /* Moves Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000020 /* Moves Widgets.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A40000012FC0000100000001 /* RouteFileImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000000 /* RouteFileImport.swift */; };
 		A41000012FC0000100000001 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
-		A41000012FC0000100000003 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
 		A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A42000012FC0000100000000 /* RouteImportAcquisition.swift */; };
 		A44000012FC0000100000001 /* ImportQueueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44000012FC0000100000000 /* ImportQueueViews.swift */; };
-		A44000012FC0000100000002 /* ImportQueueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44000012FC0000100000000 /* ImportQueueViews.swift */; };
 		A45000012FC0000100000001 /* RouteFileImportConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */; };
-		A45000012FC0000100000002 /* RouteFileImportConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */; };
 		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; platformFilter = ios; };
 		A50000012FD0000100000002 /* CloudDataPresence in Frameworks */ = {isa = PBXBuildFile; productRef = A50000012FD0000100000004 /* CloudDataPresence */; };
 		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; platformFilter = ios; };
@@ -122,10 +118,8 @@
 		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; platformFilter = ios; };
 		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; platformFilter = ios; };
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
-		F1000001310000010000000A /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
-		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; platformFilter = macos; };
-		F1000001310000010000000B /* VisitedLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */; };
 		F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
+		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -305,7 +299,6 @@
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
 		F10000013100000100000001 /* MovesMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovesMac.entitlements; sourceTree = "<group>"; };
-		F10000013100000100000002 /* MovesMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = MovesMac.app; path = "Moves Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1000001310000010000000E /* RouteCoordinateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteCoordinateStorage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -347,13 +340,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		F10000013100000100000003 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -374,7 +360,6 @@
 			isa = PBXGroup;
 			children = (
 				489A76312C4FC6F300F43B69 /* Moves.app */,
-				F10000013100000100000002 /* MovesMac.app */,
 				9A1B00012F00000100000001 /* MovesTests.xctest */,
 				A20000012FA0000100000017 /* Moves Watch App.app */,
 				A30000012FB0000100000020 /* Moves Widgets.appex */,
@@ -645,22 +630,6 @@
 			productReference = A30000012FB0000100000022 /* Moves Watch Widgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		F10000013100000100000005 /* Moves Mac */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = F10000013100000100000008 /* Build configuration list for PBXNativeTarget "Moves Mac" */;
-			buildPhases = (
-				F10000013100000100000006 /* Sources */,
-				F10000013100000100000003 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "Moves Mac";
-			productName = "Moves Mac";
-			productReference = F10000013100000100000002 /* MovesMac.app */;
-			productType = "com.apple.product-type.application";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -687,9 +656,6 @@
 					A30000012FB000010000002F = {
 						CreatedOnToolsVersion = 26.4;
 					};
-					F10000013100000100000005 = {
-						CreatedOnToolsVersion = 27.1;
-					};
 				};
 			};
 			buildConfigurationList = 489A762C2C4FC6F300F43B69 /* Build configuration list for PBXProject "Moves" */;
@@ -713,7 +679,6 @@
 				A20000012FA000010000001E /* Moves Watch App */,
 				A30000012FB000010000002E /* Moves Widgets */,
 				A30000012FB000010000002F /* Moves Watch Widgets */,
-				F10000013100000100000005 /* Moves Mac */,
 				9A1B00012F00000100000008 /* MovesTests */,
 			);
 		};
@@ -901,19 +866,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		F10000013100000100000006 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				F1000001310000010000000A /* MovesMacApp.swift in Sources */,
-				A41000012FC0000100000003 /* ImportQueue.swift in Sources */,
-				A44000012FC0000100000002 /* ImportQueueViews.swift in Sources */,
-				A45000012FC0000100000002 /* RouteFileImportConfiguration.swift in Sources */,
-				F1000001310000010000000B /* VisitedLocation.swift in Sources */,
-				4826804430626CAD0076FA35 /* RouteCoordinateStorage.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1075,7 +1027,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Moves/Moves.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1090,6 +1042,8 @@
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Moves imports workout route GPS from Apple Health to improve your private daily timeline.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Moves writes your workouts to Apple Health when you choose to export your activity from your private daily timeline.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Moves can connect to self-hosted location servers on your local network.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
@@ -1104,7 +1058,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1126,7 +1081,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Moves/Moves.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1141,6 +1096,8 @@
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Moves imports workout route GPS from Apple Health to improve your private daily timeline.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Moves writes your workouts to Apple Health when you choose to export your activity from your private daily timeline.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Moves can connect to self-hosted location servers on your local network.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
@@ -1155,7 +1112,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1226,14 +1184,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Moves Watch App/MovesWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1252,14 +1210,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Moves Watch App/MovesWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1278,7 +1236,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1286,7 +1244,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1305,7 +1263,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1313,7 +1271,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1332,7 +1290,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1340,7 +1298,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1359,7 +1317,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 40;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1367,7 +1325,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.17;
+				MARKETING_VERSION = 2026.18;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1377,42 +1335,6 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
 				WATCHOS_DEPLOYMENT_TARGET = 26.0;
-			};
-			name = Release;
-		};
-		F1000001310000010000000C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Moves/Mac/MovesMac.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2026.17;
-				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.mac;
-				PRODUCT_NAME = "Moves Mac";
-				SDKROOT = macosx;
-				SUPPORTED_PLATFORMS = macosx;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		F1000001310000010000000D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Moves/Mac/MovesMac.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2026.17;
-				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.mac;
-				PRODUCT_NAME = "Moves Mac";
-				SDKROOT = macosx;
-				SUPPORTED_PLATFORMS = macosx;
-				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -1469,15 +1391,6 @@
 			buildConfigurations = (
 				A30000012FB0000100000037 /* Debug */,
 				A30000012FB0000100000039 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		F10000013100000100000008 /* Build configuration list for PBXNativeTarget "Moves Mac" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F1000001310000010000000C /* Debug */,
-				F1000001310000010000000D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

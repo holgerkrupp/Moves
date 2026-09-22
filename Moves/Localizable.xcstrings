@@ -4,6 +4,12 @@
     "" : {
 
     },
+    " It will also stop if battery reaches %@ or Low Power Mode turns on." : {
+
+    },
+    " It will also stop if battery reaches %@." : {
+
+    },
     "%@" : {
 
     },
@@ -197,7 +203,7 @@
     "Accuracy" : {
 
     },
-    "Accuracy ±%@ m" : {
+    "Accuracy ±%@" : {
 
     },
     "Actions for (job.displayName)" : {
@@ -249,6 +255,9 @@
 
     },
     "Auto-off %@." : {
+
+    },
+    "Automatically fill missing moves" : {
 
     },
     "Automatically upload new points" : {
@@ -506,6 +515,12 @@
     "Files with ambiguous or missing timestamps will appear here before any timeline data is written." : {
 
     },
+    "Fill Missing Moves" : {
+
+    },
+    "Fill missing moves on the selected day" : {
+
+    },
     "Filter by date" : {
 
     },
@@ -516,6 +531,9 @@
 
     },
     "Flight endpoint" : {
+
+    },
+    "for %@" : {
 
     },
     "Format" : {
@@ -581,6 +599,9 @@
     "Import failed" : {
 
     },
+    "Import file" : {
+
+    },
     "Import on selected date" : {
 
     },
@@ -626,7 +647,7 @@
     "Includes the visited locations and movement tracks from the selected time span." : {
 
     },
-    "Indirect connections can include up to eight legs and stops of up to 12 hours. Turn on return trips to calculate two-way commute statistics." : {
+    "Indirect connections can include up to eight legs and stops of up to %@. Turn on return trips to calculate two-way commute statistics." : {
 
     },
     "iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them." : {
@@ -1180,6 +1201,9 @@
     "The JSON below includes the persisted move, its endpoints, and every recorded location sample." : {
 
     },
+    "The last %@" : {
+
+    },
     "The quarantined file will be deleted. No timeline data has been written from it." : {
 
     },
@@ -1276,7 +1300,7 @@
     "Turn off" : {
 
     },
-    "Turn off at 50% battery" : {
+    "Turn off at %@ battery" : {
 
     },
     "Turn off in Low Power Mode" : {
@@ -1286,6 +1310,9 @@
 
     },
     "Until end of day" : {
+
+    },
+    "until the end of today" : {
 
     },
     "Upload All History" : {
@@ -1322,6 +1349,9 @@
 
     },
     "Visited Place" : {
+
+    },
+    "When iOS reports two consecutive visits without movement between them, Moves creates an estimated move from the available location and motion data." : {
 
     },
     "When this is off, maps use small dots so more of the map stays visible." : {

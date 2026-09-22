@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ImportCircularProgressView: View {
     let progress: Double?
+    let isActive: Bool
 
     var body: some View {
         ZStack {
@@ -12,7 +13,7 @@ struct ImportCircularProgressView: View {
                     .trim(from: 0, to: progress)
                     .stroke(.tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-            } else {
+            } else if isActive {
                 Circle()
                     .trim(from: 0, to: 0.28)
                     .stroke(.tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
@@ -30,7 +31,10 @@ struct ImportQueueToolbarButton: View {
 
     var body: some View {
         Button { isPresented = true } label: {
-            ImportCircularProgressView(progress: coordinator.snapshot.aggregateProgress)
+            ImportCircularProgressView(
+                progress: coordinator.snapshot.aggregateProgress,
+                isActive: !coordinator.snapshot.unfinishedJobs.isEmpty
+            )
                 .frame(width: 22, height: 22)
                 .overlay {
                     if coordinator.snapshot.unfinishedJobs.isEmpty {
@@ -60,16 +64,25 @@ struct ImportQueueView: View {
     var onResume: ((UUID) -> Void)?
     var onPause: ((UUID) -> Void)?
     var onCancel: ((UUID) -> Void)?
+    @State private var isShowingImportOptions = false
+    @State private var isShowingFileImporter = false
+    @State private var importConfiguration = RouteFileImportConfiguration()
 
     var body: some View {
         NavigationStack {
             List {
                 if coordinator.snapshot.jobs.isEmpty {
-                    ContentUnavailableView(
-                        "No imports",
-                        systemImage: "tray",
-                        description: Text("Route files you import will appear here.")
-                    )
+                    VStack(spacing: 12) {
+                        ContentUnavailableView(
+                            "No imports",
+                            systemImage: "tray",
+                            description: Text("Route files you import will appear here.")
+                        )
+                        Button("Import file", systemImage: "square.and.arrow.down") {
+                            isShowingImportOptions = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 } else {
                     if let progress = coordinator.snapshot.aggregateProgress {
                         Section {
@@ -135,8 +148,33 @@ struct ImportQueueView: View {
             }
             .navigationTitle("Import Queue")
             .toolbar {
+                if !coordinator.snapshot.jobs.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Import file", systemImage: "square.and.arrow.down") {
+                            isShowingImportOptions = true
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $isShowingImportOptions) {
+                RouteFileImportOptionsView(configuration: $importConfiguration) {
+                    isShowingImportOptions = false
+                    Task { @MainActor in
+                        await Task.yield()
+                        isShowingFileImporter = true
+                    }
+                }
+            }
+            .fileImporter(
+                isPresented: $isShowingFileImporter,
+                allowedContentTypes: RouteFileImportContentTypes.allowed,
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result {
+                    coordinator.enqueueRouteFiles(urls, configuration: importConfiguration)
                 }
             }
         }
@@ -155,7 +193,10 @@ private struct ImportQueueJobRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
-                ImportCircularProgressView(progress: job.counters.progress)
+                ImportCircularProgressView(
+                    progress: job.counters.progress,
+                    isActive: ![.completed, .cancelled].contains(job.state)
+                )
                     .frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(job.displayName).font(.headline)

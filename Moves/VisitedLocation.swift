@@ -534,6 +534,7 @@ protocol TimelineRepository {
     func addOrUpdateVisit(from visit: CLVisit) throws -> VisitPlace
     func appendSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample]
     func latestPlace(before date: Date, excluding placeID: UUID?) throws -> VisitPlace?
+    func placesForGapFilling(onDayWithKey dayKey: String) throws -> [VisitPlace]
     func samples(from startDate: Date, to endDate: Date) throws -> [LocationSample]
     func upsertMove(
         startPlace: VisitPlace,
@@ -1143,6 +1144,20 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 && $0.id != placeID
                 && ($0.departureDate ?? $0.arrivalDate) < date
         }
+    }
+
+    func placesForGapFilling(onDayWithKey dayKey: String) throws -> [VisitPlace] {
+        var descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { timeline in
+                timeline.dayKey == dayKey
+            }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let timeline = try modelContext.fetch(descriptor).first else { return [] }
+        return timeline.places
+            .filter { belongsToCurrentDevice($0.deviceIdentifier) }
+            .sorted { $0.arrivalDate < $1.arrivalDate }
     }
 
     func samples(from startDate: Date, to endDate: Date) throws -> [LocationSample] {

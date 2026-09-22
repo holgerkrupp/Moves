@@ -996,10 +996,12 @@ private struct MoveDetailsView: View {
     }
 
     private var averageSpeed: String? {
-        guard segment.timelineDuration > 0 else { return nil }
+        guard DurationFormatter.showsNonzeroMinutes(for: segment.timelineDuration) else {
+            return nil
+        }
         let kilometersPerHour = (segment.distanceMeters / segment.timelineDuration) * 3.6
         guard kilometersPerHour.isFinite else { return nil }
-        return "\(kilometersPerHour.formatted(.number.precision(.fractionLength(1)))) km/h"
+        return MovesMeasurementFormatter.speed(kilometersPerHour: kilometersPerHour)
     }
 
     private var rawData: String {
@@ -1160,7 +1162,7 @@ private struct MoveEndpointDetail: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-                Text("Accuracy ±\(max(place.horizontalAccuracy, 0).formatted(.number.precision(.fractionLength(1)))) m")
+                Text("Accuracy ±\(MovesMeasurementFormatter.accuracy(meters: place.horizontalAccuracy))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

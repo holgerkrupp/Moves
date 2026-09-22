@@ -363,7 +363,6 @@ enum KnownLocationLabeler {
 
 private enum KnownLocationFormatting {
     static func radius(_ meters: Double) -> String {
-        if meters < 1_000 { return "\(Int(meters.rounded())) m" }
-        return String(format: "%.1f km", meters / 1_000)
+        MovesMeasurementFormatter.distance(meters: meters)
     }
 }

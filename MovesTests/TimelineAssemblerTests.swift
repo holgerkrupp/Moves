@@ -80,6 +80,152 @@ final class MovesTimelinePeriodTests: XCTestCase {
 
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
+    func testDurationFormatterUsesLocalizedMinuteUnit() {
+        let locale = Locale(identifier: "en_US")
+
+        XCTAssertEqual(DurationFormatter.text(for: 0, locale: locale), "0 min")
+        XCTAssertEqual(DurationFormatter.text(for: 12 * 60, locale: locale), "12 min")
+        XCTAssertEqual(DurationFormatter.text(for: 61 * 60, locale: locale), "1 hr, 1 min")
+    }
+
+    func testDurationFormatterOnlyShowsSpeedForAtLeastOneDisplayedMinute() {
+        XCTAssertFalse(DurationFormatter.showsNonzeroMinutes(for: 0))
+        XCTAssertFalse(DurationFormatter.showsNonzeroMinutes(for: 59.9))
+        XCTAssertTrue(DurationFormatter.showsNonzeroMinutes(for: 60))
+    }
+
+    func testDurationFormatterLocalizesWideAndExtendedUnits() {
+        XCTAssertEqual(
+            DurationFormatter.wideText(
+                for: 30 * 60,
+                locale: Locale(identifier: "de_DE")
+            ),
+            "30 Minuten"
+        )
+        XCTAssertEqual(
+            DurationFormatter.extendedText(
+                for: 25 * 60 * 60,
+                locale: Locale(identifier: "en_US")
+            ),
+            "1 day, 1 hr"
+        )
+    }
+
+    func testMeasurementFormatterUsesLocalePreferredUnits() {
+        XCTAssertEqual(
+            MovesMeasurementFormatter.distance(
+                meters: 450,
+                locale: Locale(identifier: "de_DE")
+            ),
+            "450 m"
+        )
+        XCTAssertEqual(
+            MovesMeasurementFormatter.speed(
+                kilometersPerHour: 10,
+                locale: Locale(identifier: "en_US")
+            ),
+            "6.2 mph"
+        )
+    }
+
+    func testVisitGapFillingCreatesMoveForShortGapWhenEnabled() async throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let assembler = DefaultTimelineAssembler(
+            repository: repository,
+            motionClassifier: StubMotionClassifier(),
+            placeNameResolver: StubPlaceNameResolver(),
+            automaticallyFillsVisitGaps: { true }
+        )
+        let firstArrival = Date(timeIntervalSince1970: 1_710_000_000)
+        let firstDeparture = firstArrival.addingTimeInterval(12 * 60)
+
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5511, longitude: 9.9937),
+            horizontalAccuracy: 20,
+            arrivalDate: firstArrival,
+            departureDate: firstDeparture
+        ))
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5520, longitude: 10.0000),
+            horizontalAccuracy: 20,
+            arrivalDate: firstDeparture.addingTimeInterval(30),
+            departureDate: .distantFuture
+        ))
+
+        let context = ModelContext(container)
+        let moves = try context.fetch(FetchDescriptor<MoveSegment>())
+        XCTAssertEqual(moves.count, 1)
+        XCTAssertEqual(moves.first?.startDate, firstDeparture)
+        XCTAssertEqual(moves.first?.endDate, firstDeparture.addingTimeInterval(30))
+    }
+
+    func testVisitGapFillingLeavesGapEmptyWhenDisabled() async throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let assembler = DefaultTimelineAssembler(
+            repository: repository,
+            motionClassifier: StubMotionClassifier(),
+            placeNameResolver: StubPlaceNameResolver(),
+            automaticallyFillsVisitGaps: { false }
+        )
+        let firstArrival = Date(timeIntervalSince1970: 1_710_000_000)
+        let firstDeparture = firstArrival.addingTimeInterval(12 * 60)
+
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5511, longitude: 9.9937),
+            horizontalAccuracy: 20,
+            arrivalDate: firstArrival,
+            departureDate: firstDeparture
+        ))
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5520, longitude: 10.0000),
+            horizontalAccuracy: 20,
+            arrivalDate: firstDeparture.addingTimeInterval(30),
+            departureDate: .distantFuture
+        ))
+
+        let context = ModelContext(container)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<VisitPlace>()), 2)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 0)
+    }
+
+    func testManualDayGapFillingCreatesOnlyMissingMoves() async throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let assembler = DefaultTimelineAssembler(
+            repository: repository,
+            motionClassifier: StubMotionClassifier(),
+            placeNameResolver: StubPlaceNameResolver(),
+            automaticallyFillsVisitGaps: { false }
+        )
+        let firstArrival = Date(timeIntervalSince1970: 1_710_000_000)
+        let firstDeparture = firstArrival.addingTimeInterval(12 * 60)
+
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5511, longitude: 9.9937),
+            horizontalAccuracy: 20,
+            arrivalDate: firstArrival,
+            departureDate: firstDeparture
+        ))
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5520, longitude: 10.0000),
+            horizontalAccuracy: 20,
+            arrivalDate: firstDeparture.addingTimeInterval(30),
+            departureDate: .distantFuture
+        ))
+
+        let dayKey = DayTimeline.makeDayKey(for: firstArrival)
+        let firstFilledCount = await assembler.fillVisitGaps(onDayWithKey: dayKey)
+        let context = ModelContext(container)
+        XCTAssertEqual(firstFilledCount, 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 1)
+
+        let secondFilledCount = await assembler.fillVisitGaps(onDayWithKey: dayKey)
+        XCTAssertEqual(secondFilledCount, 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 1)
+    }
+
     func testQuietDayUsesMostRecentPriorPlaceForDisplay() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -2134,6 +2280,22 @@ final class TimelineAssemblerTests: XCTestCase {
             speed: speed,
             timestamp: timestamp
         )
+    }
+}
+
+private struct StubMotionClassifier: MotionClassifier {
+    func classifyTransport(start: Date, end: Date, locations: [CLLocation]) async -> TransportMode {
+        .walking
+    }
+
+    func stepCount(start: Date, end: Date) async -> Int? {
+        nil
+    }
+}
+
+private struct StubPlaceNameResolver: PlaceNameResolver {
+    func resolveName(for coordinate: CLLocationCoordinate2D) async -> String? {
+        nil
     }
 }
 

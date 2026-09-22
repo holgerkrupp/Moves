@@ -26,6 +26,7 @@ struct MovesSettingsView: View {
     @AppStorage(DailyTimelineBackup.isEnabledKey) private var dailyBackupIsEnabled = false
     @AppStorage(DailyTimelineBackup.formatKey) private var dailyBackupFormat = DailyTimelineBackupFormat.gpx.rawValue
     @AppStorage(DailyTimelineBackup.usesMonthlyFoldersKey) private var dailyBackupUsesMonthlyFolders = false
+    @AppStorage(VisitGapFillingSettings.isEnabledKey) private var automaticallyFillsVisitGaps = false
 
     let dayTimelines: [DayTimeline]
     let selectedDayKey: String
@@ -148,6 +149,17 @@ struct MovesSettingsView: View {
                         MultiDeviceSettingsCard()
 
                         SettingsCard(title: "Tracking") {
+                            Toggle(
+                                "Automatically fill missing moves",
+                                isOn: $automaticallyFillsVisitGaps
+                            )
+
+                            Text("When iOS reports two consecutive visits without movement between them, Moves creates an estimated move from the available location and motion data.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+
+                            Divider()
+
                             NavigationLink {
                                 RouteTrackingSettingsSheet(captureManager: captureManager)
                             } label: {
@@ -1089,11 +1101,13 @@ private func routeTrackingAutoStopText(
     stopsAtFiftyPercentBattery: Bool,
     stopsInLowPowerMode: Bool
 ) -> String {
+    let batteryThreshold = 0.5.formatted(.percent)
+
     switch (stopsAtFiftyPercentBattery, stopsInLowPowerMode) {
     case (true, true):
-        return " It will also stop if battery reaches 50% or Low Power Mode turns on."
+        return String(localized: " It will also stop if battery reaches \(batteryThreshold) or Low Power Mode turns on.")
     case (true, false):
-        return " It will also stop if battery reaches 50%."
+        return String(localized: " It will also stop if battery reaches \(batteryThreshold).")
     case (false, true):
         return " It will also stop if Low Power Mode turns on."
     case (false, false):
@@ -1297,9 +1311,11 @@ private struct RouteTrackingSettingsSection: View {
                         }
 
                         GridRow {
-                            Text("Turn off at 50% battery")
+                            Text("Turn off at \(0.5.formatted(.percent)) battery")
 
-                            Toggle("Turn off at 50% battery", isOn: routeTrackingStopsAtBatteryFiftyBinding)
+                            Toggle(isOn: routeTrackingStopsAtBatteryFiftyBinding) {
+                                Text("Turn off at \(0.5.formatted(.percent)) battery")
+                            }
                                 .labelsHidden()
                         }
 

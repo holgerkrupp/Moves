@@ -543,7 +543,7 @@ struct MovesStatisticsSearchView: View {
                     Toggle("Include indirect connections", isOn: $includesIndirectConnections)
                     Toggle("Include return trips", isOn: $includesReturnTrips)
 
-                    Text("Indirect connections can include up to eight legs and stops of up to 12 hours. Turn on return trips to calculate two-way commute statistics.")
+                    Text("Indirect connections can include up to eight legs and stops of up to \(DurationFormatter.wideText(for: 12 * 60 * 60)). Turn on return trips to calculate two-way commute statistics.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
@@ -1042,23 +1042,11 @@ private struct ConnectionJourneyDetailView: View {
 enum MovesStatisticsFormatting {
     static func duration(_ value: TimeInterval?) -> String {
         guard let value, value.isFinite else { return "—" }
-        let totalMinutes = max(Int((value / 60).rounded()), 0)
-        if totalMinutes < 60 { return "\(totalMinutes) min" }
-
-        let totalHours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if totalHours < 24 {
-            return minutes == 0 ? "\(totalHours) hr" : "\(totalHours) hr \(minutes) min"
-        }
-
-        let days = totalHours / 24
-        let hours = totalHours % 24
-        return hours == 0 ? "\(days) d" : "\(days) d \(hours) hr"
+        return DurationFormatter.extendedText(for: value)
     }
 
     static func distance(_ meters: Double) -> String {
-        if meters < 1_000 { return "\(Int(max(meters, 0).rounded())) m" }
-        return String(format: "%.1f km", meters / 1_000)
+        MovesMeasurementFormatter.distance(meters: meters)
     }
 
     static func visitInterval(_ place: VisitPlace) -> String {

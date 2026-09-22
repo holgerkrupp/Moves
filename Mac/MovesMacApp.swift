@@ -87,10 +87,11 @@ private struct MovesMacBrowser: View {
 
     private var importedSampleCount: Int { allSamples.filter { $0.source == .fileRouteImport }.count }
     private var importedMoveCount: Int { allMoves.filter { $0.samples.contains { $0.source == .fileRouteImport } }.count }
+    private var recordedTimelines: [DayTimeline] { timelines.filter(\.hasRecordedActivity) }
 
     private var years: [MacYear] {
         let calendar = Calendar.autoupdatingCurrent
-        let grouped = Dictionary(grouping: timelines) { calendar.component(.year, from: $0.dayStart) }
+        let grouped = Dictionary(grouping: recordedTimelines) { calendar.component(.year, from: $0.dayStart) }
         return grouped.keys.sorted(by: >).map { year in
             let byMonth = Dictionary(grouping: grouped[year, default: []]) { calendar.component(.month, from: $0.dayStart) }
             return MacYear(year: year, months: byMonth.keys.sorted(by: >).map { month in
@@ -100,15 +101,15 @@ private struct MovesMacBrowser: View {
     }
 
     private var recentItems: [MacRecentItem] {
-        timelines.prefix(8).map { timeline in
+        recordedTimelines.prefix(8).map { timeline in
             MacRecentItem(id: "day-\(timeline.dayKey)", title: timeline.dayStart.formatted(date: .abbreviated, time: .omitted), subtitle: summary(for: timeline), icon: "calendar", selection: .day(timeline.dayKey))
         }
     }
 
     private var filteredTimelines: [DayTimeline] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return timelines }
-        return timelines.filter { timeline in
+        guard !query.isEmpty else { return recordedTimelines }
+        return recordedTimelines.filter { timeline in
             timeline.dayStart.formatted(date: .long, time: .omitted).localizedCaseInsensitiveContains(query) ||
             timeline.places.contains { $0.displayTitle.localizedCaseInsensitiveContains(query) } ||
             timeline.moves.contains { $0.transportMode.title.localizedCaseInsensitiveContains(query) }
@@ -133,7 +134,10 @@ private struct MovesMacBrowser: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .movesMacToggleInspector)) { _ in isInspectorPresented.toggle() }
         .onChange(of: timelines) { _, current in
-            if case let .day(key) = selection, !current.contains(where: { $0.dayKey == key }) { selection = nil }
+            if case let .day(key) = selection,
+               !current.contains(where: { $0.dayKey == key && $0.hasRecordedActivity }) {
+                selection = nil
+            }
         }
         .toolbar {
             ToolbarItem {
@@ -181,7 +185,7 @@ private struct MovesMacBrowser: View {
         .navigationTitle("Moves")
         .navigationSplitViewColumnWidth(min: 230, ideal: 285, max: 360)
         .overlay {
-            if timelines.isEmpty && importedSampleCount == 0 { ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here.")) }
+            if recordedTimelines.isEmpty && importedSampleCount == 0 { ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here.")) }
         }
     }
 
@@ -242,13 +246,27 @@ private struct MacDayWorkspace: View {
         day.places.map(\.coordinate) + day.samples.map(\.coordinate) + day.moves.flatMap { RouteCoordinateStorage.decode($0.manualRouteCoordinatesData ?? $0.routeCacheCoordinatesData) }
     }
 
+    private var cameraRefreshKey: String {
+        let coordinateKey = coordinates.map { "\($0.latitude):\($0.longitude)" }.joined(separator: "|")
+        return "\(day.dayKey)|\(coordinateKey)"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             MacDayMap(day: day, camera: $camera).frame(minHeight: 260, idealHeight: 390, maxHeight: .infinity)
             Divider()
             activityList
         }
-        .onAppear { camera = .rect(MKMapRect.bounding(coordinates: coordinates)) }
+        .onAppear(perform: reframeMap)
+        .onChange(of: cameraRefreshKey) { _, _ in reframeMap() }
+    }
+
+    private func reframeMap() {
+        guard !coordinates.isEmpty else {
+            camera = .automatic
+            return
+        }
+        camera = .rect(MKMapRect.bounding(coordinates: coordinates))
     }
 
     private var activityList: some View {
@@ -335,7 +353,7 @@ private struct MacInspector: View {
     private func placeInspector(_ place: VisitPlace) -> some View {
         Form {
             Section("Place") { Text(place.displayTitle).font(.headline); LabeledContent("Arrived", value: place.arrivalDate.formatted(date: .long, time: .shortened)); if let departure = place.departureDate { LabeledContent("Departed", value: departure.formatted(date: .omitted, time: .shortened)) } }
-            Section("Location") { LabeledContent("Latitude", value: place.latitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Longitude", value: place.longitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Accuracy", value: "±\(place.horizontalAccuracy.formatted(.number.precision(.fractionLength(0)))) m") }
+            Section("Location") { LabeledContent("Latitude", value: place.latitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Longitude", value: place.longitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Accuracy", value: "±\(MovesMeasurementFormatter.accuracy(meters: place.horizontalAccuracy))") }
             if let comment = place.comment, !comment.isEmpty { Section("Comment") { Text(comment) } }
             Section("Record") { LabeledContent("ID", value: place.id.uuidString) }
         }
@@ -355,11 +373,10 @@ private func routeColor(_ mode: TransportMode) -> Color {
     switch mode { case .walking, .running: .green; case .cycling: .orange; case .train: .purple; case .plane: .pink; case .boat: .teal; case .stationary: .gray; default: .blue }
 }
 
-private func formatDistance(_ meters: Double) -> String { meters >= 1_000 ? "\((meters / 1_000).formatted(.number.precision(.fractionLength(1)))) km" : "\(meters.formatted(.number.precision(.fractionLength(0)))) m" }
+private func formatDistance(_ meters: Double) -> String { MovesMeasurementFormatter.distance(meters: meters) }
 
 private func formatDuration(_ duration: TimeInterval) -> String {
-    let formatter = DateComponentsFormatter(); formatter.unitsStyle = .abbreviated; formatter.allowedUnits = duration >= 3_600 ? [.hour, .minute] : [.minute]
-    return formatter.string(from: duration) ?? "—"
+    DurationFormatter.text(for: duration)
 }
 
 private extension MKMapRect {
