@@ -659,8 +659,7 @@ final class RouteFileImporter: ObservableObject {
             job.phase = .importing
             job.updatedAt = .now
         }
-        let context = ModelContext(modelContainer)
-        let repository = SwiftDataTimelineRepository(modelContext: context)
+        let worker = RouteFileImportWorker(modelContainer: modelContainer)
         do {
             while persisted.nextIndex < persisted.files.count {
                 try Task.checkCancellation()
@@ -673,16 +672,17 @@ final class RouteFileImporter: ObservableObject {
                     return try RouteTrackParserWorker.parse(url: url)
                 }.value
                 try Task.checkCancellation()
-                let tracks = parsedDTOs.map { $0.makeImportedTrack() }
-                if tracks.contains(where: { !$0.hasOriginalTimestamps }) {
+                if parsedDTOs.contains(where: { !$0.hasOriginalTimestamps }) {
                     try quarantineFailedImport(url, configuration: persisted.configuration)
                     persisted.failedFileCount = (persisted.failedFileCount ?? 0) + 1
                 } else {
-                    let result = try await importTracks(
-                        tracks,
+                    let result = try await worker.importTracks(
+                        parsedDTOs,
                         configuration: persisted.configuration,
-                        context: context,
-                        repository: repository
+                        shouldPause: { [weak self] in
+                            guard let self else { return true }
+                            return await MainActor.run { self.shouldPause }
+                        }
                     )
                     persisted.routeCount += result.routeCount
                     persisted.sampleCount += result.sampleCount
@@ -702,10 +702,10 @@ final class RouteFileImporter: ObservableObject {
                     job.updatedAt = .now
                 }
             }
-            try repository.saveIfNeeded()
-            importPhase = "Naming imported places (throttled)"
-            try await geocodeImportedPlaces(in: context)
-            try repository.saveIfNeeded()
+            // Place naming is intentionally outside the import critical path. The durable
+            // route data is complete before optional, rate-limited post-processing starts.
+            Task { await worker.postProcessImportedPlaces() }
+            importPhase = "Imported route data"
             lastReport = RouteFileImportReport(
                 fileCount: persisted.importedFileCount,
                 routeCount: persisted.routeCount,
@@ -782,22 +782,26 @@ final class RouteFileImporter: ObservableObject {
             try Task.checkCancellation()
             return try RouteTrackParserWorker.parse(url: url)
         }.value
-        let tracks = parsedDTOs.map { $0.makeImportedTrack() }
-        guard !tracks.isEmpty else { throw RouteFileImportError.noRouteGeometry }
+        guard !parsedDTOs.isEmpty else { throw RouteFileImportError.noRouteGeometry }
 
-        let retargetedTracks = retarget(tracks, to: targetDate)
-        let context = ModelContext(modelContainer)
-        let repository = SwiftDataTimelineRepository(modelContext: context)
-        let result = try await importTracks(
-            retargetedTracks,
+        let retargetedTracks = retarget(parsedDTOs.map { $0.makeImportedTrack() }, to: targetDate)
+        let worker = RouteFileImportWorker(modelContainer: modelContainer)
+        let result = try await worker.importTracks(
+            retargetedTracks.map { track in
+                RouteTrackDTO(
+                    points: track.locations.map {
+                        RouteTrackPointDTO(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude,
+                                           altitude: $0.altitude, timestamp: $0.timestamp)
+                    }, transportMode: track.transportMode, hasOriginalTimestamps: track.hasOriginalTimestamps,
+                    startsAfterVisitGap: track.startsAfterVisitGap
+                )
+            },
             configuration: failedImport.configuration,
-            context: context,
-            repository: repository
+            shouldPause: { false }
         )
         guard result.routeCount > 0 else {
             throw RouteFileImportError.noRoutesImportedForSelectedDate
         }
-        try repository.saveIfNeeded()
         removeFailedImport(id, deleteFile: true)
         NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
     }

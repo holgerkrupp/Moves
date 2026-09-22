@@ -93,6 +93,7 @@
 		A30000012FB0000100000019 /* TimelineWidgetSnapshotShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000017 /* TimelineWidgetSnapshotShared.swift */; };
 		A30000012FB0000100000021 /* Moves Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000020 /* Moves Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A40000012FC0000100000001 /* RouteFileImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000000 /* RouteFileImport.swift */; };
+		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
 		A41000012FC0000100000001 /* ImportQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000012FC0000100000000 /* ImportQueue.swift */; };
 		A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A42000012FC0000100000000 /* RouteImportAcquisition.swift */; };
 		A44000012FC0000100000001 /* ImportQueueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44000012FC0000100000000 /* ImportQueueViews.swift */; };
@@ -277,6 +278,7 @@
 		A30000012FB0000100000020 /* Moves Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000012FB0000100000022 /* Moves Watch Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Watch Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A40000012FC0000100000000 /* RouteFileImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileImport.swift; sourceTree = "<group>"; };
+		A40000012FC0000100000002 /* RouteFileImportWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileImportWorker.swift; sourceTree = "<group>"; };
 		A41000012FC0000100000000 /* ImportQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueue.swift; sourceTree = "<group>"; };
 		A42000012FC0000100000000 /* RouteImportAcquisition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteImportAcquisition.swift; sourceTree = "<group>"; };
 		A44000012FC0000100000000 /* ImportQueueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueViews.swift; sourceTree = "<group>"; };
@@ -407,6 +409,7 @@
 				A10000012F00000100000207 /* GeneratedAppIcons.swift */,
 				A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */,
 				A40000012FC0000100000000 /* RouteFileImport.swift */,
+				A40000012FC0000100000002 /* RouteFileImportWorker.swift */,
 				A41000012FC0000100000000 /* ImportQueue.swift */,
 				A42000012FC0000100000000 /* RouteImportAcquisition.swift */,
 				A44000012FC0000100000000 /* ImportQueueViews.swift */,
@@ -819,6 +822,7 @@
 				489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */,
 				A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */,
 				A40000012FC0000100000001 /* RouteFileImport.swift in Sources */,
+				B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */,
 				A41000012FC0000100000001 /* ImportQueue.swift in Sources */,
 				A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */,
 				A44000012FC0000100000001 /* ImportQueueViews.swift in Sources */,
