@@ -152,11 +152,16 @@ final class MovesIntentRuntime {
 
     var needsForegroundTrackingAuthorization: Bool {
         guard let captureManager else { return false }
-        return !captureManager.isDemoMode && captureManager.authorizationStatus == .notDetermined
+        return captureManager.isLocationTrackingAvailable
+            && !captureManager.isDemoMode
+            && captureManager.authorizationStatus == .notDetermined
     }
 
     func startRouteTracking(duration: TemporaryRouteTrackingDuration) throws -> String {
         guard let captureManager else { throw MovesIntentError.runtimeUnavailable }
+        guard captureManager.isLocationTrackingAvailable else {
+            return "Location tracking is unavailable in Moves for Mac."
+        }
 
         if captureManager.isDemoMode {
             return "Moves is using simulator demo data, so real route tracking was not started."
@@ -183,6 +188,9 @@ final class MovesIntentRuntime {
 
     func stopRouteTracking() throws -> String {
         guard let captureManager else { throw MovesIntentError.runtimeUnavailable }
+        guard captureManager.isLocationTrackingAvailable else {
+            return "Location tracking is unavailable in Moves for Mac."
+        }
 
         guard captureManager.isTemporaryRouteTrackingActive else {
             return "Real route tracking is already off."
@@ -205,6 +213,9 @@ final class MovesIntentRuntime {
 
     func trackingStatus() throws -> String {
         guard let captureManager else { throw MovesIntentError.runtimeUnavailable }
+        guard captureManager.isLocationTrackingAvailable else {
+            return "Location tracking is unavailable in Moves for Mac."
+        }
 
         if captureManager.isTemporaryRouteTrackingActive,
            let endsAt = captureManager.temporaryRouteTrackingEndsAt {
@@ -217,6 +228,9 @@ final class MovesIntentRuntime {
 
     func setBackgroundTracking(enabled: Bool) throws -> String {
         guard let captureManager else { throw MovesIntentError.runtimeUnavailable }
+        guard captureManager.isLocationTrackingAvailable else {
+            return "Location tracking is unavailable in Moves for Mac."
+        }
         captureManager.setBackgroundLocationListeningEnabled(enabled)
 
         if enabled {
@@ -400,6 +414,9 @@ struct StartRealRouteTrackingIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Start Real Route Tracking"
     static let description = IntentDescription("Starts frequent GPS tracking for a limited time.")
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
+    #if targetEnvironment(macCatalyst)
+    static let isDiscoverable = false
+    #endif
 
     @Parameter(title: "Duration", default: .endOfDay)
     var duration: MovesRouteTrackingDuration
@@ -427,6 +444,9 @@ struct ToggleRealRouteTrackingIntent: LiveActivityIntent, PredictableIntent {
     static let title: LocalizedStringResource = "Toggle Real Route Tracking"
     static let description = IntentDescription("Starts real-route GPS tracking when it is off, or stops it when it is on.")
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
+    #if targetEnvironment(macCatalyst)
+    static let isDiscoverable = false
+    #endif
 
     static var predictionConfiguration: some IntentPredictionConfiguration {
         IntentPrediction(
@@ -458,6 +478,9 @@ struct StopRealRouteTrackingIntent: AppIntent {
     static let title: LocalizedStringResource = "Stop Real Route Tracking"
     static let description = IntentDescription("Stops frequent GPS tracking and returns to low-energy tracking.")
     static let supportedModes: IntentModes = .background
+    #if targetEnvironment(macCatalyst)
+    static let isDiscoverable = false
+    #endif
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let message = try await MovesIntentRuntime.shared.stopRouteTracking()
@@ -469,6 +492,9 @@ struct GetMovesTrackingStatusIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Tracking Status"
     static let description = IntentDescription("Reports whether real route and background tracking are active.")
     static let supportedModes: IntentModes = .background
+    #if targetEnvironment(macCatalyst)
+    static let isDiscoverable = false
+    #endif
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let message = try await MovesIntentRuntime.shared.trackingStatus()
@@ -480,6 +506,9 @@ struct SetMovesBackgroundTrackingIntent: AppIntent {
     static let title: LocalizedStringResource = "Set Background Tracking"
     static let description = IntentDescription("Turns low-energy visit and significant-location tracking on or off.")
     static let supportedModes: IntentModes = .background
+    #if targetEnvironment(macCatalyst)
+    static let isDiscoverable = false
+    #endif
 
     @Parameter(title: "Enabled", default: true)
     var enabled: Bool
@@ -540,6 +569,7 @@ struct ExportMovesTimelineIntent: AppIntent {
 
 struct MovesAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        #if !targetEnvironment(macCatalyst)
         AppShortcut(
             intent: StartRealRouteTrackingIntent(),
             phrases: [
@@ -569,6 +599,7 @@ struct MovesAppShortcuts: AppShortcutsProvider {
             shortTitle: "Toggle Route Tracking",
             systemImageName: "location.circle.fill"
         )
+        #endif
         AppShortcut(
             intent: GetMovesTimelineSummaryIntent(),
             phrases: [

@@ -9,6 +9,7 @@ struct MovesJumpToDateView: View {
         case swimming
         case cycling
         case automotive
+        case motorcycle
         case train
         case plane
         case boat
@@ -23,6 +24,7 @@ struct MovesJumpToDateView: View {
             case .swimming: return "Swim"
             case .cycling: return "Cycle"
             case .automotive: return "Car"
+            case .motorcycle: return "Motorcycle"
             case .train: return "Train"
             case .plane: return "Plane"
             case .boat: return "Boat"
@@ -37,6 +39,7 @@ struct MovesJumpToDateView: View {
             case .swimming: return "figure.pool.swim"
             case .cycling: return "figure.outdoor.cycle"
             case .automotive: return "car.fill"
+            case .motorcycle: return "motorcycle.fill"
             case .train: return "tram.fill"
             case .plane: return "airplane"
             case .boat: return "sailboat.fill"
@@ -51,6 +54,7 @@ struct MovesJumpToDateView: View {
             case .swimming: return MovesPalette.transport(.swimming)
             case .cycling: return MovesPalette.transport(.cycling)
             case .automotive: return MovesPalette.transport(.automotive)
+            case .motorcycle: return MovesPalette.transport(.motorcycle)
             case .train: return MovesPalette.transport(.train)
             case .plane: return MovesPalette.transport(.plane)
             case .boat: return MovesPalette.transport(.boat)
@@ -64,7 +68,6 @@ struct MovesJumpToDateView: View {
 
     @State private var pickerDate: Date
     @State private var activityFilter: ActivityFilter = .overall
-    @State private var isShowingActivityFilterPicker = false
 
     init(
         dayTimelines: [DayTimeline],
@@ -97,121 +100,130 @@ struct MovesJumpToDateView: View {
     }
 
     private var availableActivityFilters: [ActivityFilter] {
-        let transportFilters: [ActivityFilter] = [.onFoot, .swimming, .cycling, .automotive, .train, .plane, .boat]
+        let transportFilters: [ActivityFilter] = [.onFoot, .swimming, .cycling, .automotive, .motorcycle, .train, .plane, .boat]
         let availableTransports = transportFilters.filter { totalDistance(for: $0) > 0 }
         return [.overall, .placeCount] + availableTransports
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if let earliestRecordedDayStart {
-                    DatePicker(
-                        "Date",
-                        selection: $pickerDate,
-                        in: earliestRecordedDayStart...latestSelectableDayStart,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .onChange(of: pickerDate) { _, newDate in
-                        onSelectDate(newDate)
+            ScrollView {
+                VStack(spacing: 16) {
+                    if let earliestRecordedDayStart {
+                        DatePicker(
+                            "Date",
+                            selection: $pickerDate,
+                            in: earliestRecordedDayStart...latestSelectableDayStart,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+                        .onChange(of: pickerDate) { _, newDate in
+                            onSelectDate(newDate)
+                        }
                     }
-                }
 
-                HStack(spacing: 10) {
-                    Button("Earliest") {
-                        guard let earliestRecordedDayStart else { return }
-                        pickerDate = earliestRecordedDayStart
-                        onSelectDate(earliestRecordedDayStart)
-                        onDismiss()
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Today") {
-                        pickerDate = latestSelectableDayStart
-                        onSelectDate(latestSelectableDayStart)
-                        onDismiss()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
-                        Text("Most active days")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        Button {
-                            isShowingActivityFilterPicker = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: activityFilter.symbolName)
-                                    .foregroundStyle(activityFilter.tint)
-                                Text(activityFilter.title)
-                                    .foregroundStyle(.primary)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(MovesPalette.card.opacity(0.8))
-                            )
+                        Button("Earliest") {
+                            guard let earliestRecordedDayStart else { return }
+                            pickerDate = earliestRecordedDayStart
+                            onSelectDate(earliestRecordedDayStart)
+                            onDismiss()
                         }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $isShowingActivityFilterPicker, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-                            activityFilterPickerContent
+                        .buttonStyle(.bordered)
+
+                        Button("Today") {
+                            pickerDate = latestSelectableDayStart
+                            onSelectDate(latestSelectableDayStart)
+                            onDismiss()
                         }
+                        .buttonStyle(.bordered)
                     }
 
-                    if mostActiveDays.isEmpty {
-                        Text("No matching days for this filter yet.")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 6)
-                    } else {
-                        ForEach(mostActiveDays, id: \.dayKey) { day in
-                            Button {
-                                pickerDate = day.dayStart
-                                onSelectDate(day.dayStart)
-                                onDismiss()
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Text("Most active days")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.secondary)
+
+                            Spacer(minLength: 8)
+
+                            Menu {
+                                ForEach(availableActivityFilters) { filter in
+                                    Button {
+                                        activityFilter = filter
+                                    } label: {
+                                        Label(filter.title, systemImage: filter.symbolName)
+                                    }
+                                }
                             } label: {
-                                HStack {
-                                    Text(day.dayStart, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                HStack(spacing: 6) {
+                                    Image(systemName: activityFilter.symbolName)
+                                        .foregroundStyle(activityFilter.tint)
+                                    Text(activityFilter.title)
                                         .foregroundStyle(.primary)
-
-                                    Spacer()
-
-                                    Text("\(day.uniqueLocationCount) places")
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                                        .foregroundStyle(.secondary)
-
-                                    Text("\(day.moves.count) moves")
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                                        .foregroundStyle(.secondary)
-
-                                    Text(Measurement(value: totalDistance(for: day), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
-                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(.secondary)
                                 }
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(MovesPalette.card.opacity(0.8))
+                                )
                             }
-                            .buttonStyle(.plain)
+                            .menuStyle(.borderlessButton)
+                            .fixedSize(horizontal: true, vertical: false)
+                        }
+
+                        if mostActiveDays.isEmpty {
+                            Text("No matching days for this filter yet.")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 6)
+                        } else {
+                            ForEach(mostActiveDays, id: \.dayKey) { day in
+                                Button {
+                                    pickerDate = day.dayStart
+                                    onSelectDate(day.dayStart)
+                                    onDismiss()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(day.dayStart, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+
+                                        if day.hasImportedRouteData {
+                                            Image(systemName: "tray.and.arrow.down.fill")
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(MovesPalette.routeTracking)
+                                                .accessibilityLabel("Contains imported data")
+                                        }
+
+                                        Spacer(minLength: 4)
+
+                                        Text("\(day.uniqueLocationCount) places")
+                                        Text("\(day.moves.count) moves")
+                                        Text(Measurement(value: totalDistance(for: day), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
+                                    }
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("Jump to Date")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -226,47 +238,6 @@ struct MovesJumpToDateView: View {
                 activityFilter = .overall
             }
         }
-    }
-
-    private var activityFilterPickerContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Activity filter")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-
-            ForEach(availableActivityFilters) { filter in
-                Button {
-                    activityFilter = filter
-                    isShowingActivityFilterPicker = false
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: filter.symbolName)
-                            .foregroundStyle(filter.tint)
-                            .frame(width: 20)
-
-                        Text(filter.title)
-                            .foregroundStyle(.primary)
-
-                        Spacer()
-
-                        if activityFilter == filter {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(filter.tint)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.bottom, 12)
-        .frame(minWidth: 220)
-        .presentationCompactAdaptation(.popover)
     }
 
     private func activityScore(for day: DayTimeline, filter: ActivityFilter) -> Double {
@@ -287,6 +258,8 @@ struct MovesJumpToDateView: View {
             filteredMoves = day.moves.filter { $0.transportMode == .cycling }
         case .automotive:
             filteredMoves = day.moves.filter { $0.transportMode == .automotive }
+        case .motorcycle:
+            filteredMoves = day.moves.filter { $0.transportMode == .motorcycle }
         case .train:
             filteredMoves = day.moves.filter { $0.transportMode == .train }
         case .plane:
@@ -323,6 +296,8 @@ struct MovesJumpToDateView: View {
                     matches = move.transportMode == .cycling
                 case .automotive:
                     matches = move.transportMode == .automotive
+                case .motorcycle:
+                    matches = move.transportMode == .motorcycle
                 case .train:
                     matches = move.transportMode == .train
                 case .plane:

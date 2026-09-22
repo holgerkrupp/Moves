@@ -38,6 +38,8 @@ enum MovesPalette {
             return "MovesTransportCycling"
         case .automotive:
             return "MovesTransportAutomotive"
+        case .motorcycle:
+            return "MovesTransportAutomotive"
         case .train:
             return "MovesTransportTrain"
         case .plane:
@@ -94,8 +96,13 @@ struct RenderedRoute: Identifiable {
     let usesHealthWorkoutRoute: Bool
     let transportMode: TransportMode
 
+    var coordinateSegments: [[CLLocationCoordinate2D]] {
+        RouteCoordinateOps.mapPolylineSegments(coordinates)
+    }
+
     var shadowCoordinates: [CLLocationCoordinate2D] {
         guard transportMode == .plane,
+              !usesHighAccuracyRouteTracking,
               let start = coordinates.first,
               let end = coordinates.last else {
             return []
@@ -113,7 +120,7 @@ struct RenderedRoute: Identifiable {
         }
 
         switch transportMode {
-        case .stationary, .walking, .running, .cycling, .automotive, .unknown:
+        case .stationary, .walking, .running, .cycling, .automotive, .motorcycle, .unknown:
             return MovesPalette.move
         case .swimming, .train, .plane, .boat:
             return MovesPalette.transport(transportMode)
@@ -277,7 +284,8 @@ func routeDistance(for coordinates: [CLLocationCoordinate2D]) -> CLLocationDista
 
 enum MapRegionFactory {
     static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
-        guard let first = coordinates.first else {
+        let validCoordinates = coordinates.filter(CLLocationCoordinate2DIsValid)
+        guard let first = validCoordinates.first else {
             return MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: 37.3349, longitude: -122.0090),
                 span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
@@ -286,33 +294,70 @@ enum MapRegionFactory {
 
         var minLat = first.latitude
         var maxLat = first.latitude
-        var minLon = first.longitude
-        var maxLon = first.longitude
 
-        for coordinate in coordinates.dropFirst() {
+        for coordinate in validCoordinates.dropFirst() {
             minLat = min(minLat, coordinate.latitude)
             maxLat = max(maxLat, coordinate.latitude)
-            minLon = min(minLon, coordinate.longitude)
-            maxLon = max(maxLon, coordinate.longitude)
         }
+
+        let longitudeBounds = longitudeBounds(for: validCoordinates.map(\.longitude))
 
         let center = CLLocationCoordinate2D(
             latitude: (minLat + maxLat) / 2,
-            longitude: (minLon + maxLon) / 2
+            longitude: longitudeBounds.center
         )
 
-        let latitudeDelta = max((maxLat - minLat) * 1.5, 0.01)
-        let longitudeDelta = max((maxLon - minLon) * 1.5, 0.01)
+        // MapKit raises NSInvalidArgumentException instead of returning an error for
+        // oversized regions. Keep both spans strictly inside their global limits.
+        let latitudeDelta = min(max((maxLat - minLat) * 1.5, 0.01), 179)
+        let longitudeDelta = min(max(longitudeBounds.delta * 1.5, 0.01), 359)
 
         return MKCoordinateRegion(
             center: center,
             span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
         )
     }
+
+    private static func longitudeBounds(for longitudes: [CLLocationDegrees]) -> (
+        center: CLLocationDegrees,
+        delta: CLLocationDegrees
+    ) {
+        guard longitudes.count > 1 else {
+            return (normalizedLongitude(longitudes.first ?? 0), 0)
+        }
+
+        let sorted = longitudes
+            .map { value in value < 0 ? value + 360 : value }
+            .sorted()
+
+        var largestGap = -CLLocationDegrees.infinity
+        var arcStart = sorted[0]
+        for index in sorted.indices {
+            let current = sorted[index]
+            let next = index == sorted.index(before: sorted.endIndex)
+                ? sorted[0] + 360
+                : sorted[index + 1]
+            let gap = next - current
+            if gap > largestGap {
+                largestGap = gap
+                arcStart = next.truncatingRemainder(dividingBy: 360)
+            }
+        }
+
+        let delta = max(360 - largestGap, 0)
+        return (normalizedLongitude(arcStart + delta / 2), delta)
+    }
+
+    private static func normalizedLongitude(_ longitude: CLLocationDegrees) -> CLLocationDegrees {
+        var normalized = longitude.truncatingRemainder(dividingBy: 360)
+        if normalized > 180 { normalized -= 360 }
+        if normalized < -180 { normalized += 360 }
+        return normalized
+    }
 }
 
 enum MoveRouteGeometry {
-    private static let routeMatchingVersion = "route-v9-plausibility-fallback"
+    private static let routeMatchingVersion = "route-v10-sparse-automotive-detours"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         let sampleCoordinates = move.samples.preferredRouteDisplaySamples
@@ -419,6 +464,33 @@ extension MoveSegment {
 }
 
 enum RouteCoordinateOps {
+    static func mapPolylineSegments(
+        _ coordinates: [CLLocationCoordinate2D]
+    ) -> [[CLLocationCoordinate2D]] {
+        guard let first = coordinates.first else { return [] }
+        var segments: [[CLLocationCoordinate2D]] = []
+        var current = [first]
+
+        for coordinate in coordinates.dropFirst() {
+            if let previous = current.last, crossesAntimeridian(from: previous, to: coordinate) {
+                if current.count > 1 { segments.append(current) }
+                current = [coordinate]
+            } else {
+                current.append(coordinate)
+            }
+        }
+
+        if current.count > 1 { segments.append(current) }
+        return segments
+    }
+
+    static func crossesAntimeridian(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D
+    ) -> Bool {
+        abs(end.longitude - start.longitude) > 180
+    }
+
     static func dedupeSequentialCoordinates(
         _ coordinates: [CLLocationCoordinate2D],
         minimumDistanceMeters: CLLocationDistance
@@ -535,7 +607,10 @@ enum RouteMatchPlausibility {
 
         let matchedDistance = routeDistance(for: matched)
         let maximumDistance = max(
-            recordedDistance * maximumLengthRatio(for: transportMode),
+            recordedDistance * maximumLengthRatio(
+                for: transportMode,
+                averageRecordedSegmentDistance: recordedDistance / Double(recorded.count - 1)
+            ),
             recordedDistance + absoluteLengthAllowance(for: transportMode)
         )
         guard matchedDistance <= maximumDistance else {
@@ -616,14 +691,20 @@ enum RouteMatchPlausibility {
         return minimumDistance
     }
 
-    private static func maximumLengthRatio(for mode: TransportMode) -> Double {
+    private static func maximumLengthRatio(
+        for mode: TransportMode,
+        averageRecordedSegmentDistance: CLLocationDistance
+    ) -> Double {
         switch mode {
         case .walking, .running:
             return 1.45
         case .cycling:
             return 1.5
-        case .automotive:
-            return 1.5
+        case .automotive, .motorcycle:
+            // Significant-change tracks can have kilometre-scale gaps. Roads around
+            // rivers, harbours, and divided highways may legitimately be longer than
+            // the straight chords between those sparse samples.
+            return averageRecordedSegmentDistance >= 500 ? 1.75 : 1.5
         case .train:
             return 1.8
         case .swimming, .plane, .boat, .stationary, .unknown:
@@ -637,7 +718,7 @@ enum RouteMatchPlausibility {
             return 500
         case .cycling:
             return 800
-        case .automotive:
+        case .automotive, .motorcycle:
             return 1_500
         case .train:
             return 3_000
@@ -652,7 +733,7 @@ enum RouteMatchPlausibility {
             return 350
         case .cycling:
             return 500
-        case .automotive:
+        case .automotive, .motorcycle:
             return 1_000
         case .train:
             return 2_500
@@ -1182,7 +1263,7 @@ enum RoadRouteMatcher {
 
     private static func mapTransportTypes(for mode: TransportMode) -> [MKDirectionsTransportType] {
         switch mode {
-        case .automotive:
+        case .automotive, .motorcycle:
             // Some POI endpoints are not drivable; walking can still anchor to nearby roads/paths.
             return [.automobile, .walking]
         case .walking, .running:
@@ -1208,7 +1289,7 @@ enum RoadRouteMatcher {
             return 35
         case .swimming:
             return 45
-        case .automotive:
+        case .automotive, .motorcycle:
             // Keep car routes snappable for short urban hops (e.g. nearby hotels/blocks).
             return 20
         case .train:
@@ -1228,7 +1309,7 @@ enum RoadRouteMatcher {
             return 6
         case .swimming:
             return 4
-        case .automotive:
+        case .automotive, .motorcycle:
             return 6
         case .train:
             return 5

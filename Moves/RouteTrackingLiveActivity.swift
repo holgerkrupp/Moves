@@ -1,6 +1,17 @@
-import ActivityKit
 import CoreLocation
 import Foundation
+
+#if targetEnvironment(macCatalyst)
+/// Live Activities are unavailable on Mac Catalyst. Keep the tracking call sites
+/// platform-neutral while allowing the iOS implementation below to publish them.
+@MainActor
+final class RouteTrackingLiveActivityCoordinator {
+    func synchronize(startedAt: Date?, endsAt: Date?) async {}
+    func record(_ locations: [CLLocation], endsAt: Date?) async {}
+    func end() async {}
+}
+#else
+import ActivityKit
 
 @MainActor
 final class RouteTrackingLiveActivityCoordinator {
@@ -106,3 +117,4 @@ final class RouteTrackingLiveActivityCoordinator {
         lastPublishedAt = .now
     }
 }
+#endif

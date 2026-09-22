@@ -6,7 +6,9 @@ import WidgetKit
 struct MovesWidgets: WidgetBundle {
     var body: some Widget {
         MovesTodayWidget()
+        #if !targetEnvironment(macCatalyst)
         MovesRouteTrackingLiveActivityWidget()
+        #endif
     }
 }
 

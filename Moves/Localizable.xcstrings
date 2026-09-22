@@ -37,12 +37,42 @@
         }
       }
     },
+    "%@ · %lld imported points" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$lld imported points"
+          }
+        }
+      }
+    },
     "%@ → %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@, %lld visits" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$lld visits"
           }
         }
       }
@@ -60,12 +90,12 @@
         }
       }
     },
-    "%lld journey%@" : {
+    "%lld included journey%@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "%1$lld journey%2$@"
+            "value" : "%1$lld included journey%2$@"
           }
         }
       }
@@ -80,8 +110,21 @@
         }
       }
     },
+    "%lld matching route(s)" : {
+
+    },
     "%lld moves" : {
 
+    },
+    "%lld moves · %lld visits · Drag and zoom to frame your image" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld moves · %2$lld visits · Drag and zoom to frame your image"
+          }
+        }
+      }
     },
     "%lld places" : {
 
@@ -106,32 +149,12 @@
         }
       }
     },
-    "%lld saved location%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld saved location%2$@"
-          }
-        }
-      }
-    },
     "%lld visit%@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$lld visit%2$@"
-          }
-        }
-      }
-    },
-    "%lld visit%@ · %@ radius" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld visit%2$@ · %3$@ radius"
           }
         }
       }
@@ -145,9 +168,6 @@
           }
         }
       }
-    },
-    "%lld visits" : {
-
     },
     "1 hour" : {
 
@@ -164,13 +184,25 @@
     "A route is needed to share this move as GPX" : {
 
     },
-    "Activity filter" : {
+    "Accuracy ±%@ m" : {
+
+    },
+    "Adjust the filters to preview imported data." : {
+
+    },
+    "All matching journeys are excluded" : {
+
+    },
+    "All modes" : {
 
     },
     "All time" : {
 
     },
     "Always location access is needed to keep this running in the background." : {
+
+    },
+    "Another iPhone recorded a separate trip today. This timeline is showing this phone's journey." : {
 
     },
     "App Icon" : {
@@ -209,7 +241,16 @@
     "Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking." : {
 
     },
+    "Base Map" : {
+
+    },
     "Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap." : {
+
+    },
+    "Both tools open at %@. Choose another day or period inside the tool whenever you need it." : {
+
+    },
+    "Building optimized map cache…" : {
 
     },
     "Cancel" : {
@@ -218,13 +259,37 @@
     "Captured location" : {
 
     },
+    "Choose Date" : {
+
+    },
+    "Choose Date…" : {
+
+    },
+    "Choose files, folder, or ZIP" : {
+
+    },
     "Choose two different locations" : {
+
+    },
+    "Clear selection" : {
 
     },
     "Connection" : {
 
     },
+    "Connections" : {
+
+    },
+    "Contains imported data" : {
+
+    },
     "Controls on left in landscape" : {
+
+    },
+    "Copied Raw Data" : {
+
+    },
+    "Copy Raw Data" : {
 
     },
     "Could Not Delete Move" : {
@@ -239,19 +304,13 @@
     "Could Not Save Location" : {
 
     },
-    "Create" : {
+    "Could Not Update Statistics" : {
+
+    },
+    "Create & Share" : {
 
     },
     "Create Location" : {
-
-    },
-    "Create locations from frequent visits" : {
-
-    },
-    "Create one from a frequent visit below. Moves will use its name and proximity radius for future visits." : {
-
-    },
-    "Create visual summaries and export GPX tracks" : {
 
     },
     "Created in Buxtehude by" : {
@@ -261,6 +320,9 @@
 
     },
     "CSV (.csv)" : {
+
+    },
+    "Custom device name (optional)" : {
 
     },
     "Customize" : {
@@ -276,6 +338,9 @@
 
     },
     "Day Summary" : {
+
+    },
+    "Dedicated transport mode" : {
 
     },
     "Deduplicate" : {
@@ -305,6 +370,18 @@
     "Designs" : {
 
     },
+    "Details" : {
+
+    },
+    "Discard" : {
+
+    },
+    "Discard saved import" : {
+
+    },
+    "Discard this saved import?" : {
+
+    },
     "Disconnect" : {
 
     },
@@ -312,6 +389,9 @@
 
     },
     "Disconnect %@?" : {
+
+    },
+    "Display" : {
 
     },
     "Done" : {
@@ -332,6 +412,9 @@
     "Enable real route tracking" : {
 
     },
+    "Enable tracking" : {
+
+    },
     "Enabled" : {
 
     },
@@ -341,7 +424,16 @@
     "Every location sample stored in Moves will be sent to %@. Repeating this action may create duplicate points if the server does not deduplicate them." : {
 
     },
+    "Exclude from Calculations" : {
+
+    },
+    "Excluded from commute calculations" : {
+
+    },
     "Expand map" : {
+
+    },
+    "Explore" : {
 
     },
     "Export" : {
@@ -359,10 +451,31 @@
     "Exports timeline data as a GPX, GeoJSON, or CSV file." : {
 
     },
+    "Failed Imports" : {
+
+    },
+    "Failed Imports (%lld)" : {
+
+    },
     "File Route Import" : {
 
     },
+    "Files with ambiguous or missing timestamps will appear here before any timeline data is written." : {
+
+    },
+    "Filter by date" : {
+
+    },
+    "Filters" : {
+
+    },
+    "Flight endpoint" : {
+
+    },
     "Format" : {
+
+    },
+    "From" : {
 
     },
     "GeoJSON" : {
@@ -398,7 +511,43 @@
     "Grant location access first to use this feature." : {
 
     },
+    "History Map" : {
+
+    },
+    "History Map opens the same system share sheet after rendering the camera position you chose." : {
+
+    },
+    "iCloud sync in progress" : {
+
+    },
+    "If this journey is an inaccurate outlier, exclude it from minimum, average, and maximum commute times without deleting it." : {
+
+    },
+    "Import on selected date" : {
+
+    },
+    "Import Options" : {
+
+    },
+    "Imported Data" : {
+
+    },
+    "Imported GPS samples and routes with no remaining non-imported samples are removed, together with their unused generated endpoint places and empty days." : {
+
+    },
+    "Imported Route Data" : {
+
+    },
+    "Importing…" : {
+
+    },
     "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically." : {
+
+    },
+    "Include a journey below to use it in the minimum, average, and maximum calculations again." : {
+
+    },
+    "Include in Calculations" : {
 
     },
     "Include indirect connections" : {
@@ -425,9 +574,6 @@
     "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
 
     },
-    "Known Locations" : {
-
-    },
     "Label (Home, Work...)" : {
 
     },
@@ -437,7 +583,16 @@
     "Last successful upload %@." : {
 
     },
+    "Limit by date" : {
+
+    },
     "Listen for location changes" : {
+
+    },
+    "Location Access Required" : {
+
+    },
+    "Location access was denied. Open Settings to allow Moves to record visits and movement on this device." : {
 
     },
     "Location name" : {
@@ -452,16 +607,41 @@
     "Made with Moves" : {
 
     },
+    "Manage imported data" : {
+
+    },
+    "Manage Imported Data" : {
+
+    },
     "Manual route" : {
 
     },
     "Map Style" : {
 
     },
+    "Matching imported samples: %lld · routes: %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Matching imported samples: %1$lld · routes: %2$lld"
+          }
+        }
+      }
+    },
+    "Minimum distance (km)" : {
+
+    },
+    "Minimum imported points" : {
+
+    },
     "Most active days" : {
 
     },
     "Move" : {
+
+    },
+    "Move Details" : {
 
     },
     "Move remarks" : {
@@ -485,7 +665,19 @@
     "Moves needs to ask for location access before GPS tracking can start." : {
 
     },
+    "Moves uses the system name for this iPhone unless you set a custom name. Matching trips are combined silently; separately travelling phones keep separate journeys." : {
+
+    },
     "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo." : {
+
+    },
+    "Newest first" : {
+
+    },
+    "Next %@" : {
+
+    },
+    "Next Day" : {
 
     },
     "No activity" : {
@@ -494,10 +686,13 @@
     "No Connections Found" : {
 
     },
+    "No Failed Imports" : {
+
+    },
     "No GPX data in this time span" : {
 
     },
-    "No known locations yet" : {
+    "No imported routes" : {
 
     },
     "No matching days for this filter yet." : {
@@ -509,10 +704,10 @@
     "No movement summary available yet." : {
 
     },
-    "No new suggestions" : {
+    "No recorded visits fall inside the current proximity circle." : {
 
     },
-    "No recorded visits fall inside the current proximity circle." : {
+    "No saved place" : {
 
     },
     "No segments for this day yet." : {
@@ -527,6 +722,9 @@
     "No Visits Yet" : {
 
     },
+    "Not now" : {
+
+    },
     "Not Now" : {
 
     },
@@ -537,6 +735,9 @@
 
     },
     "OK" : {
+
+    },
+    "Oldest first" : {
 
     },
     "Open %@ setup documentation" : {
@@ -560,10 +761,16 @@
     "Organize in year/month folders" : {
 
     },
+    "Pause" : {
+
+    },
     "Period" : {
 
     },
     "Place" : {
+
+    },
+    "Place names are looked up after route data is imported and deliberately rate-limited to stay below Apple Maps request limits. You can leave Settings while this continues in the background." : {
 
     },
     "Place remarks" : {
@@ -576,6 +783,18 @@
 
     },
     "Preparing GPX export…" : {
+
+    },
+    "Preparing routes…" : {
+
+    },
+    "Preview" : {
+
+    },
+    "Previous %@" : {
+
+    },
+    "Previous Day" : {
 
     },
     "Proximity radius" : {
@@ -596,10 +815,31 @@
     "Real route tracking, %@ remaining" : {
 
     },
+    "Recent Dates" : {
+
+    },
     "Recorded visits remain in your timeline. Only the saved name and proximity area are removed." : {
 
     },
     "Remarks" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove all filtered routes" : {
+
+    },
+    "Remove imported data?" : {
+
+    },
+    "Remove imported routes?" : {
+
+    },
+    "Remove matching imported data" : {
+
+    },
+    "Remove selected (%lld)" : {
 
     },
     "Rendering %lld of %lld share images" : {
@@ -618,10 +858,25 @@
     "Reset to Default" : {
 
     },
+    "Restart" : {
+
+    },
+    "Resume" : {
+
+    },
     "Revert" : {
 
     },
-    "Review visits on a map, rename places, and adjust each location’s recognized area." : {
+    "Review imported data" : {
+
+    },
+    "Review or delete imported routes for this day" : {
+
+    },
+    "Route File Import" : {
+
+    },
+    "Routes are being saved and map-matched in the background. Large batches may take time because each file is parsed and checkpointed separately." : {
 
     },
     "Save" : {
@@ -636,6 +891,15 @@
     "Search locations" : {
 
     },
+    "Search mode" : {
+
+    },
+    "Search Visits" : {
+
+    },
+    "Select all" : {
+
+    },
     "Server" : {
 
     },
@@ -648,6 +912,9 @@
     "Settings" : {
 
     },
+    "Settings…" : {
+
+    },
     "Shaded circle is the recognized area" : {
 
     },
@@ -657,10 +924,16 @@
     "Share GPX" : {
 
     },
+    "Share Image Studio keeps the familiar image picker and multi-select share sheet." : {
+
+    },
     "Share Image Title" : {
 
     },
     "Share Images" : {
+
+    },
+    "Share Map Image" : {
 
     },
     "Share move as GPX" : {
@@ -675,7 +948,22 @@
     "Show big map markers" : {
 
     },
+    "Show Raw JSON" : {
+
+    },
+    "Shows iCloud activity for this copy of Moves. Other devices sync independently." : {
+
+    },
+    "Shows move details and raw location data" : {
+
+    },
     "Shrink map" : {
+
+    },
+    "Skip dates that already contain data" : {
+
+    },
+    "Sort" : {
 
     },
     "Start" : {
@@ -699,7 +987,10 @@
     "Starts real-route GPS tracking when it is off, or stops it when it is on." : {
 
     },
-    "Statistics & Search" : {
+    "Statistics" : {
+
+    },
+    "Statistics & Share" : {
 
     },
     "Stop editing route" : {
@@ -720,7 +1011,7 @@
     "Summarizes places, moves, distance, moving time, and steps." : {
 
     },
-    "Supports GPX, TCX, KML, and GeoJSON route files. You can select one or multiple files at once. Duplicate points are merged automatically, and imported route tracks are preferred over less accurate phone/watch samples." : {
+    "Supports individual files, folders, and ZIP archives. Duplicate points are merged automatically. Imports can continue in the background and resume after an interruption." : {
 
     },
     "Swap" : {
@@ -732,10 +1023,19 @@
     "Tap to open settings. Touch and hold to start tracking." : {
 
     },
+    "Target date" : {
+
+    },
     "Test and Save Connection" : {
 
     },
     "Testing…" : {
+
+    },
+    "The JSON below includes the persisted move, its endpoints, and every recorded location sample." : {
+
+    },
+    "The quarantined file will be deleted. No timeline data has been written from it." : {
 
     },
     "The saved server and credentials will be removed. Data already uploaded to %@ is not deleted." : {
@@ -744,16 +1044,37 @@
     "There are no recorded places or movements in this time span." : {
 
     },
+    "These journeys remain in your timeline but do not affect commute statistics." : {
+
+    },
     "These safeguards can end the session early if power gets tight." : {
 
     },
+    "This also removes unused generated endpoint places and empty imported days. Non-imported samples are preserved." : {
+
+    },
+    "This iPhone: %@" : {
+
+    },
+    "This journey still appears in your timeline and can be included again at any time." : {
+
+    },
     "This month" : {
+
+    },
+    "This removes imported GPS samples, route moves that contain no remaining samples, and their unused generated endpoint places. Empty imported days are removed too. Phone, watch, and Health samples are kept." : {
 
     },
     "This removes this move from the timeline. You can undo the deletion afterwards." : {
 
     },
     "This removes this place from the timeline. You can undo the deletion afterwards." : {
+
+    },
+    "Timeframe" : {
+
+    },
+    "Timeline" : {
 
     },
     "Timeline Period" : {
@@ -763,6 +1084,9 @@
 
     },
     "Title" : {
+
+    },
+    "To" : {
 
     },
     "Today" : {
@@ -786,13 +1110,13 @@
     "Tracking Modes" : {
 
     },
+    "Transport" : {
+
+    },
     "Transport mode" : {
 
     },
     "Try a location such as Hamburg, a note, or a date from your history." : {
-
-    },
-    "Turn a frequently visited place into a known location. You can name it and choose its proximity radius before saving." : {
 
     },
     "Turn off" : {
@@ -834,10 +1158,10 @@
     "Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on." : {
 
     },
-    "Used by Places Map, All Tracks, Heat Map, and Calendar." : {
+    "Use this device for tracking?" : {
 
     },
-    "View" : {
+    "Used by Places Map, All Tracks, Heat Map, and Calendar." : {
 
     },
     "Visited %@" : {

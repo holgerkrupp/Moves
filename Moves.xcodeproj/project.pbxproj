@@ -83,7 +83,7 @@
 		A20000012FA0000100000011 /* WatchMovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000010 /* WatchMovesApp.swift */; };
 		A20000012FA0000100000013 /* WatchMovesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000012 /* WatchMovesContentView.swift */; };
 		A20000012FA0000100000015 /* WatchLocationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000014 /* WatchLocationTracker.swift */; };
-		A20000012FA0000100000018 /* Moves Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000017 /* Moves Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A20000012FA0000100000018 /* Moves Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A20000012FA0000100000017 /* Moves Watch App.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A30000012FB0000100000001 /* TimelineWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000000 /* TimelineWidgetSnapshot.swift */; };
 		A30000012FB0000100000011 /* MovesWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000010 /* MovesWidgets.swift */; };
 		A30000012FB0000100000013 /* MovesWatchComplications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000012FB0000100000012 /* MovesWatchComplications.swift */; };
@@ -109,6 +109,8 @@
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; };
 		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; };
+		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; };
+		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -278,6 +280,7 @@
 		E10000013020000100000000 /* MovesStatisticsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchView.swift; sourceTree = "<group>"; };
 		E20000013020000100000000 /* MovesStatisticsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchTests.swift; sourceTree = "<group>"; };
 		E30000013030000100000000 /* MovesKnownLocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesKnownLocationsView.swift; sourceTree = "<group>"; };
+		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -286,6 +289,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A50000012FD0000100000002 /* CloudDataPresence in Frameworks */,
+				E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -369,6 +373,7 @@
 				A10000012F00000100000007 /* MovesSettingsView.swift */,
 				E10000013020000100000000 /* MovesStatisticsSearchView.swift */,
 				E30000013030000100000000 /* MovesKnownLocationsView.swift */,
+				E40000013040000100000000 /* MovesHistoryMapView.swift */,
 				A10000012F00000100000107 /* AppIconPicker.swift */,
 				A10000012F00000100000207 /* GeneratedAppIcons.swift */,
 				A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */,
@@ -496,7 +501,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 489A76412C4FC6F500F43B69 /* Build configuration list for PBXNativeTarget "Moves" */;
 			buildPhases = (
-				A10000012F00000100000209 /* Generate App Icon Previews */,
 				489A762D2C4FC6F300F43B69 /* Sources */,
 				489A762E2C4FC6F300F43B69 /* Frameworks */,
 				489A762F2C4FC6F300F43B69 /* Resources */,
@@ -512,6 +516,7 @@
 			name = Moves;
 			packageProductDependencies = (
 				A50000012FD0000100000004 /* CloudDataPresence */,
+				E50000013050000100000003 /* CloudKitSyncMonitor */,
 			);
 			productName = Moves;
 			productReference = 489A76312C4FC6F300F43B69 /* Moves.app */;
@@ -627,6 +632,7 @@
 			mainGroup = 489A76282C4FC6F300F43B69;
 			packageReferences = (
 				A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */,
+				E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */,
 			);
 			productRefGroup = 489A76322C4FC6F300F43B69 /* Products */;
 			projectDirPath = "";
@@ -737,25 +743,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		A10000012F00000100000209 /* Generate App Icon Previews */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Generate App Icon Previews";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Regenerates icon previews, the picker's icon list, and CFBundleAlternateIcons\n# from the .icon bundles in Moves/Icons. See the script for details.\n\"${SRCROOT}/Scripts/generate-icon-previews.sh\"\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -779,6 +766,7 @@
 				A10000012F00000100000008 /* MovesSettingsView.swift in Sources */,
 				E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */,
 				E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */,
+				E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */,
 				A10000012F00000100000108 /* AppIconPicker.swift in Sources */,
 				A10000012F00000100000208 /* GeneratedAppIcons.swift in Sources */,
 				489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */,
@@ -850,6 +838,7 @@
 		};
 		A20000012FA0000100000023 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = A20000012FA000010000001E /* Moves Watch App */;
 			targetProxy = A20000012FA0000100000022 /* PBXContainerItemProxy */;
 		};
@@ -1005,18 +994,16 @@
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Moves imports workout route GPS from Apple Health to improve your private daily timeline.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Moves writes your workouts to Apple Health when you choose to export your activity from your private daily timeline.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Moves can connect to self-hosted location servers on your local network.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSMotionUsageDescription = "Moves uses motion activity to infer transport modes on-device.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
-				INFOPLIST_KEY_NSSiriUsageDescription = "Use Siri to start or stop route tracking, hear timeline summaries, and export your private Moves data.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphonesimulator*]" = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_PREPROCESS = YES;
+				"INFOPLIST_PREPROCESSOR_DEFINITIONS[sdk=macosx*]" = "MAC_CATALYST=1";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1025,12 +1012,12 @@
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1053,18 +1040,16 @@
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Moves imports workout route GPS from Apple Health to improve your private daily timeline.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Moves writes your workouts to Apple Health when you choose to export your activity from your private daily timeline.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Moves can connect to self-hosted location servers on your local network.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
-				INFOPLIST_KEY_NSMotionUsageDescription = "Moves uses motion activity to infer transport modes on-device.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
-				INFOPLIST_KEY_NSSiriUsageDescription = "Use Siri to start or stop route tracking, hear timeline summaries, and export your private Moves data.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphonesimulator*]" = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_PREPROCESS = YES;
+				"INFOPLIST_PREPROCESSOR_DEFINITIONS[sdk=macosx*]" = "MAC_CATALYST=1";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1073,12 +1058,12 @@
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -1205,6 +1190,7 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1231,6 +1217,7 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1359,6 +1346,14 @@
 				kind = branch;
 			};
 		};
+		E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ggruen/CloudKitSyncMonitor.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1366,6 +1361,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */;
 			productName = CloudDataPresence;
+		};
+		E50000013050000100000003 /* CloudKitSyncMonitor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */;
+			productName = CloudKitSyncMonitor;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -273,7 +273,7 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         switch candidate {
         case .walking, .running, .swimming, .cycling, .train, .plane, .boat:
             return candidate
-        case .stationary, .automotive, .unknown:
+        case .stationary, .automotive, .motorcycle, .unknown:
             break
         }
 
@@ -585,6 +585,14 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private var temporaryRouteTrackingExpiryTask: Task<Void, Never>?
     private var temporaryRouteTrackingEnergyStateObserverTokens: [NSObjectProtocol] = []
 
+    var isLocationTrackingAvailable: Bool {
+        #if targetEnvironment(macCatalyst)
+        false
+        #else
+        true
+        #endif
+    }
+
     private enum TemporaryRouteTrackingStorageKey {
         static let duration = "Moves.temporaryRouteTracking.duration"
         static let startedAt = "Moves.temporaryRouteTracking.startedAt"
@@ -596,6 +604,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     enum BackgroundLocationListeningSettings {
         static let isEnabledKey = "Moves.backgroundLocationListening.isEnabled"
+        static let roleWasChosenKey = "Moves.backgroundLocationListening.roleWasChosen"
     }
 
     private static let stopNotificationIdentifier = "Moves.temporaryRouteTracking.stoppedNotification"
@@ -606,7 +615,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private static let highAccuracyDistanceFilter: CLLocationDistance = 10
 
     private var shouldSkipLiveTracking: Bool {
-        isDemoMode || ProcessInfo.processInfo.isRunningUnitTests
+        !isLocationTrackingAvailable || isDemoMode || ProcessInfo.processInfo.isRunningUnitTests
+    }
+
+    private var shouldSkipAuthorizationRequest: Bool {
+        !isLocationTrackingAvailable || ProcessInfo.processInfo.isRunningUnitTests
     }
 
     init(modelContainer: ModelContainer, userDefaults: UserDefaults = .standard) {
@@ -619,6 +632,12 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         )
 
         super.init()
+
+        guard isLocationTrackingAvailable else {
+            authorizationStatus = .restricted
+            isBackgroundLocationListeningEnabled = false
+            return
+        }
 
         manager.delegate = self
         manager.activityType = .otherNavigation
@@ -633,6 +652,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
             installTemporaryRouteTrackingEnergyObservers()
         }
         restoreTemporaryRouteTrackingState()
+        migrateExistingTrackingConsentIfNeeded()
         restoreBackgroundLocationListeningState()
         updateBackgroundLocationAllowance()
     }
@@ -678,6 +698,9 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
     func start() async {
         guard !shouldSkipLiveTracking else { return }
+        // The device role must be chosen before Moves can ask iOS for location
+        // access. This keeps the system prompt behind the app's own consent.
+        guard isTrackingRoleDecided else { return }
         guard isBackgroundLocationListeningEnabled else {
             stop()
             return
@@ -697,7 +720,9 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func requestTrackingAuthorization() {
-        guard !shouldSkipLiveTracking else { return }
+        // Simulator demo mode still needs to exercise the real permission
+        // flow; only live sample capture is disabled there.
+        guard !shouldSkipAuthorizationRequest else { return }
         guard isBackgroundLocationListeningEnabled else {
             stop()
             return
@@ -713,11 +738,13 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse:
             shouldChainToAlwaysAfterWhenInUse = false
+            guard !shouldSkipLiveTracking else { return }
             manager.requestAlwaysAuthorization()
             applyTrackingConfiguration()
             requestOneShotLocation(source: .authorizationGrant)
         case .authorizedAlways:
             shouldChainToAlwaysAfterWhenInUse = false
+            guard !shouldSkipLiveTracking else { return }
             applyTrackingConfiguration()
             requestOneShotLocation(source: .authorizationGrant)
         case .restricted, .denied:
@@ -742,8 +769,19 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func setBackgroundLocationListeningEnabled(_ isEnabled: Bool) {
+        guard isLocationTrackingAvailable else {
+            isBackgroundLocationListeningEnabled = false
+            return
+        }
+
         isBackgroundLocationListeningEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: BackgroundLocationListeningSettings.isEnabledKey)
+        userDefaults.set(true, forKey: BackgroundLocationListeningSettings.roleWasChosenKey)
+
+        if isEnabled && !isAuthorizedForTracking {
+            requestTrackingAuthorization()
+            return
+        }
 
         guard !shouldSkipLiveTracking else { return }
 
@@ -863,6 +901,9 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         switch role {
         case .tracking:
             setBackgroundLocationListeningEnabled(true)
+            // setBackgroundLocationListeningEnabled starts the permission flow
+            // when needed; this also resumes monitoring immediately for a
+            // previously authorized device.
             Task { await start() }
         case .management:
             pendingTemporaryRouteTrackingDuration = nil
@@ -880,10 +921,24 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         authorizationStatus == .authorizedAlways || authorizationStatus == .authorizedWhenInUse
     }
 
+    var isTrackingRoleDecided: Bool {
+        userDefaults.bool(forKey: BackgroundLocationListeningSettings.roleWasChosenKey)
+    }
+
     private func handleAuthorization(_ status: CLAuthorizationStatus) {
         authorizationStatus = status
         updateBackgroundLocationAllowance()
         refreshTemporaryRouteTrackingStateIfNeeded()
+
+        if shouldSkipLiveTracking {
+            if status == .authorizedWhenInUse && shouldChainToAlwaysAfterWhenInUse {
+                shouldChainToAlwaysAfterWhenInUse = false
+                manager.requestAlwaysAuthorization()
+            } else if status != .notDetermined {
+                shouldChainToAlwaysAfterWhenInUse = false
+            }
+            return
+        }
 
         switch status {
         case .notDetermined:
@@ -976,17 +1031,43 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     private func updateBackgroundLocationAllowance() {
+        guard !shouldSkipLiveTracking else {
+            manager.allowsBackgroundLocationUpdates = false
+            return
+        }
+
         manager.allowsBackgroundLocationUpdates = authorizationStatus == .authorizedAlways
             && (isBackgroundLocationListeningEnabled || isTemporaryRouteTrackingActive)
     }
 
     private func restoreBackgroundLocationListeningState() {
         if userDefaults.object(forKey: BackgroundLocationListeningSettings.isEnabledKey) == nil {
-            isBackgroundLocationListeningEnabled = true
+            // A fresh installation must first ask whether this device should
+            // track. Do not let startup trigger the iOS location prompt.
+            isBackgroundLocationListeningEnabled = false
         } else {
             isBackgroundLocationListeningEnabled = userDefaults.bool(
                 forKey: BackgroundLocationListeningSettings.isEnabledKey
             )
+        }
+    }
+
+    private func migrateExistingTrackingConsentIfNeeded() {
+        guard userDefaults.object(
+            forKey: BackgroundLocationListeningSettings.roleWasChosenKey
+        ) == nil else { return }
+
+        guard authorizationStatus == .authorizedAlways ||
+                authorizationStatus == .authorizedWhenInUse else {
+            return
+        }
+
+        // Existing installations may already have location permission but no
+        // value for the newly introduced device-role preference. Preserve the
+        // established behavior instead of showing onboarding again.
+        userDefaults.set(true, forKey: BackgroundLocationListeningSettings.roleWasChosenKey)
+        if userDefaults.object(forKey: BackgroundLocationListeningSettings.isEnabledKey) == nil {
+            userDefaults.set(true, forKey: BackgroundLocationListeningSettings.isEnabledKey)
         }
     }
 

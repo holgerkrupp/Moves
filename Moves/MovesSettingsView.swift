@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import CloudKitSyncMonitor
 import CoreLocation
 import HealthKit
 import SwiftData
@@ -44,15 +45,24 @@ struct MovesSettingsView: View {
     @State private var isShowingDailyBackupMessage = false
     @State private var isRunningDailyBackup = false
     @State private var dailyBackupDidFail = false
+    @State private var isShowingRouteFileImporter = false
+    @State private var isShowingRouteImportOptions = false
+    @State private var routeImportMessage = ""
+    @State private var isShowingRouteImportMessage = false
+    @State private var routeImportConfiguration = RouteFileImportConfiguration()
+    @ObservedObject private var routeFileImporter: RouteFileImporter
 
     init(
         dayTimelines: [DayTimeline],
         selectedDayKey: String,
-        captureManager: MovesLocationCaptureManager
+        captureManager: MovesLocationCaptureManager,
+        routeFileImporter: RouteFileImporter,
+        modelContext: ModelContext
     ) {
         self.dayTimelines = dayTimelines
         self.selectedDayKey = selectedDayKey
         self.captureManager = captureManager
+        _routeFileImporter = ObservedObject(wrappedValue: routeFileImporter)
     }
 
     private var selectedDay: DayTimeline? {
@@ -127,7 +137,24 @@ struct MovesSettingsView: View {
                         }
                     }
 
-                    MultiDeviceSettingsCard()
+                    CloudKitSyncStatusCard()
+
+                    if captureManager.isLocationTrackingAvailable {
+                        MultiDeviceSettingsCard()
+
+                        SettingsCard(title: "Tracking") {
+                            NavigationLink {
+                                RouteTrackingSettingsSheet(captureManager: captureManager)
+                            } label: {
+                                SettingsNavigationRow(
+                                    title: "Real Route Tracking",
+                                    systemImage: "location.viewfinder",
+                                    status: captureManager.isTemporaryRouteTrackingActive ? "Active" : nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
 
                     AppIconPickerSection()
 
@@ -208,16 +235,74 @@ struct MovesSettingsView: View {
                         }
                         .buttonStyle(.plain)
 
+                        SettingsActionRow(
+                            title: routeFileImporter.isImporting
+                                ? "Importing route files..."
+                                : "Import route files",
+                            systemImage: "square.and.arrow.down",
+                            isDisabled: routeFileImporter.isImporting
+                        ) {
+                            isShowingRouteImportOptions = true
+                        }
+
                         NavigationLink {
-                            RouteFileImportSettingsView(modelContext: modelContext)
+                            ImportedRouteDataView(modelContext: modelContext)
                         } label: {
                             SettingsNavigationRow(
-                                title: "Files (GPX, TCX, KML, GeoJSON)",
-                                systemImage: "square.and.arrow.down",
+                                title: "Manage imported route data",
+                                systemImage: "line.3.horizontal.decrease.circle",
                                 status: nil
                             )
                         }
                         .buttonStyle(.plain)
+
+                        NavigationLink {
+                            FailedRouteImportsView(importer: routeFileImporter)
+                        } label: {
+                            SettingsNavigationRow(
+                                title: "Failed Imports",
+                                systemImage: "calendar.badge.exclamationmark",
+                                status: routeFileImporter.failedImports.isEmpty
+                                    ? nil
+                                    : routeFileImporter.failedImports.count.formatted()
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if routeFileImporter.state != .idle {
+                            if !routeFileImporter.importPhase.isEmpty {
+                                Label(routeFileImporter.importPhase, systemImage: routeFileImporter.importPhase.contains("Naming") ? "mappin.and.ellipse" : "arrow.triangle.2.circlepath")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MovesPalette.routeTracking)
+                            }
+                            if let progress = routeFileImporter.importProgress {
+                                ProgressView(value: progress)
+                                    .tint(MovesPalette.routeTracking)
+                            } else {
+                                ProgressView().tint(MovesPalette.routeTracking)
+                            }
+                            Text(routeFileImporter.importProgressText)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                            if routeFileImporter.importPhase.contains("Naming") {
+                                Text("Place names are looked up after route data is imported and deliberately rate-limited to stay below Apple Maps request limits. You can leave Settings while this continues in the background.")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if routeFileImporter.importPhase.contains("Importing") {
+                                Text("Routes are being saved and map-matched in the background. Large batches may take time because each file is parsed and checkpointed separately.")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            HStack {
+                                Button(routeFileImporter.isImporting ? "Pause" : "Resume") {
+                                    routeFileImporter.isImporting ? routeFileImporter.pause() : routeFileImporter.resume()
+                                }
+                                Button("Restart") { routeFileImporter.restart() }
+                                Button("Cancel", role: .destructive) { routeFileImporter.cancel() }
+                            }
+                        }
 
                         Text("Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically.")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -252,6 +337,7 @@ struct MovesSettingsView: View {
                         Text("Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap.")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
+
                     }
 
                     CreatedByView()
@@ -295,6 +381,37 @@ struct MovesSettingsView: View {
             }
             isShowingExportMessage = true
         }
+        .sheet(isPresented: $isShowingRouteImportOptions) {
+            RouteFileImportOptionsView(configuration: $routeImportConfiguration) {
+                isShowingRouteImportOptions = false
+                Task { @MainActor in
+                    await Task.yield()
+                    isShowingRouteFileImporter = true
+                }
+            }
+        }
+        .fileImporter(
+            isPresented: $isShowingRouteFileImporter,
+            allowedContentTypes: RouteFileImportContentTypes.allowed,
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                Task { @MainActor in
+                    routeFileImporter.start(urls: urls, configuration: routeImportConfiguration)
+                    await routeFileImporter.resumeAndWait()
+                    if let report = routeFileImporter.lastReport {
+                        routeImportMessage = "Imported \(report.routeCount) route(s) from \(report.fileCount) file(s), covering \(report.sampleCount) GPS point(s)." + (report.failedFileCount > 0 ? " \(report.failedFileCount) file(s) need a target date in Failed Imports." : "")
+                    } else {
+                        routeImportMessage = routeFileImporter.lastErrorMessage ?? "No route data was imported."
+                    }
+                    isShowingRouteImportMessage = true
+                }
+            case .failure(let error):
+                routeImportMessage = "File import failed: \(error.localizedDescription)"
+                isShowingRouteImportMessage = true
+            }
+        }
         .onAppear {
             hasDedupeUndoSnapshot = TimelineDeduplicationSnapshotStore.hasSnapshot
             DailyTimelineBackup.scheduleNextRun()
@@ -333,6 +450,11 @@ struct MovesSettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(maintenanceMessage)
+        }
+        .alert("Route File Import", isPresented: $isShowingRouteImportMessage) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(routeImportMessage)
         }
         .alert("Daily iCloud Backup", isPresented: $isShowingDailyBackupMessage) {
             Button("OK", role: .cancel) {}
@@ -422,7 +544,7 @@ struct MovesSettingsView: View {
                 if report.totalRemovedCount == 0 {
                     maintenanceMessage = "No duplicates were found in existing data. A restore snapshot is still available."
                 } else {
-                    maintenanceMessage = "Deduplication removed \(report.removedPlaceCount) place duplicate(s) and \(report.removedMoveCount) move duplicate(s). Duplicate stays now keep the best-fitting entry (or the longer one without move context). You can undo this run from Settings."
+                    maintenanceMessage = "Deduplication merged \(report.removedDayTimelineCount) duplicate day record(s), removed \(report.removedPlaceCount) place duplicate(s), and removed \(report.removedMoveCount) move duplicate(s). Duplicate stays now keep the best-fitting entry (or the longer one without move context). You can undo this run from Settings."
                 }
             } catch {
                 maintenanceMessage = "Deduplication failed: \(error.localizedDescription)"
@@ -458,6 +580,71 @@ struct MovesSettingsView: View {
         }
     }
 
+}
+
+private struct CloudKitSyncStatusCard: View {
+    @StateObject private var syncMonitor = SyncMonitor.default
+
+    private var isSetupInProgress: Bool {
+        if case .inProgress = syncMonitor.setupState { return true }
+        return false
+    }
+
+    private var isImportInProgress: Bool {
+        if case .inProgress = syncMonitor.importState { return true }
+        return false
+    }
+
+    private var isExportInProgress: Bool {
+        if case .inProgress = syncMonitor.exportState { return true }
+        return false
+    }
+
+    private var isSyncing: Bool {
+        isSetupInProgress || isImportInProgress || isExportInProgress
+    }
+
+    private var statusText: String {
+        if isSetupInProgress {
+            return "Preparing iCloud"
+        }
+        if isImportInProgress && isExportInProgress {
+            return "Uploading and downloading"
+        }
+        if isImportInProgress {
+            return "Downloading from iCloud"
+        }
+        if isExportInProgress {
+            return "Uploading to iCloud"
+        }
+        return syncMonitor.syncStateSummary.description
+    }
+
+    var body: some View {
+        SettingsCard(title: "iCloud Sync") {
+            HStack(spacing: 12) {
+                Image(systemName: syncMonitor.syncStateSummary.symbolName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(syncMonitor.syncStateSummary.symbolColor)
+                    .frame(width: 24)
+
+                Text(statusText)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                Spacer(minLength: 8)
+
+                if isSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("iCloud sync in progress")
+                }
+            }
+
+            Text("Shows iCloud activity for this copy of Moves. Other devices sync independently.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 private struct MultiDeviceSettingsCard: View {
@@ -830,16 +1017,18 @@ private func routeTrackingBannerData(
     case .notDetermined:
         return TrackingStatusBannerData(
             title: "Location access needed",
-            message: "Open Moves to allow location access and start recording.",
+            message: "Allow location access to start recording on this device.",
             systemImage: "location.slash",
-            tint: .secondary
+            tint: .secondary,
+            buttonTitle: "Allow Location"
         )
     case .denied:
         return TrackingStatusBannerData(
             title: "Location access denied",
             message: "Enable location in Settings if you want Moves to record visits and movement.",
             systemImage: "location.slash",
-            tint: .secondary
+            tint: .secondary,
+            buttonTitle: "Open Settings"
         )
     case .restricted:
         return TrackingStatusBannerData(
@@ -927,6 +1116,7 @@ private struct RouteTrackingSettingsSection: View {
     @State private var routeTrackingStopNotificationEnabled: Bool
     @State private var isBackgroundLocationListeningEnabled: Bool
     @State private var isShowingNotificationPermissionAlert = false
+    @State private var isShowingLocationPermissionAlert = false
 
     init(captureManager: MovesLocationCaptureManager) {
         self.captureManager = captureManager
@@ -1018,10 +1208,37 @@ private struct RouteTrackingSettingsSection: View {
         }
     }
 
+    private func performLocationPermissionAction() {
+        switch routeTrackingAuthorizationStatus {
+        case .notDetermined:
+            if isBackgroundLocationListeningEnabled {
+                captureManager.requestTrackingAuthorization()
+            } else {
+                isBackgroundLocationListeningEnabled = true
+            }
+        case .denied:
+            openAppSettings()
+        case .authorizedWhenInUse:
+            captureManager.requestTrackingAuthorization()
+        case .authorizedAlways, .restricted:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let bannerData {
-                TrackingStatusBanner(data: bannerData)
+                TrackingStatusBanner(
+                    data: bannerData,
+                    buttonAction: performLocationPermissionAction
+                )
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -1163,6 +1380,17 @@ private struct RouteTrackingSettingsSection: View {
         .onReceive(captureManager.$isBackgroundLocationListeningEnabled.removeDuplicates()) { isBackgroundLocationListeningEnabled = $0 }
         .onChange(of: isBackgroundLocationListeningEnabled) { _, isEnabled in
             captureManager.setBackgroundLocationListeningEnabled(isEnabled)
+            if isEnabled && routeTrackingAuthorizationStatus == .denied {
+                isShowingLocationPermissionAlert = true
+            }
+        }
+        .alert("Location Access Required", isPresented: $isShowingLocationPermissionAlert) {
+            Button("Open Settings") {
+                openAppSettings()
+            }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("Location access was denied. Open Settings to allow Moves to record visits and movement on this device.")
         }
         .alert("Notification Access", isPresented: $isShowingNotificationPermissionAlert) {
             Button("Open Settings") {

@@ -6,13 +6,14 @@ import Security
 import SwiftData
 import UIKit
 
-enum TransportMode: String, Codable, CaseIterable, Identifiable {
+enum TransportMode: String, Codable, CaseIterable, Identifiable, Hashable {
     case stationary
     case walking
     case running
     case swimming
     case cycling
     case automotive
+    case motorcycle
     case train
     case plane
     case boat
@@ -28,6 +29,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .swimming: return "Swimming"
         case .cycling: return "Cycling"
         case .automotive: return "Automotive"
+        case .motorcycle: return "Motorcycle"
         case .train: return "Train"
         case .plane: return "Plane"
         case .boat: return "Boat"
@@ -43,6 +45,7 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable {
         case .swimming: return "figure.pool.swim"
         case .cycling: return "figure.outdoor.cycle"
         case .automotive: return "car.fill"
+        case .motorcycle: return "motorcycle.fill"
         case .train: return "tram.fill"
         case .plane: return "airplane"
         case .boat: return "ferry.fill"
@@ -498,11 +501,12 @@ protocol TimelineRepository {
 }
 
 struct HistoricalDeduplicationReport {
+    let removedDayTimelineCount: Int
     let removedPlaceCount: Int
     let removedMoveCount: Int
 
     var totalRemovedCount: Int {
-        removedPlaceCount + removedMoveCount
+        removedDayTimelineCount + removedPlaceCount + removedMoveCount
     }
 }
 
@@ -856,6 +860,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 
     func runHistoricalDeduplication() throws -> HistoricalDeduplicationReport {
+        let removedDayTimelineCount = try mergeDuplicateDayTimelines()
         let placeCountBefore = try modelContext.fetchCount(FetchDescriptor<VisitPlace>())
         let moveCountBefore = try modelContext.fetchCount(FetchDescriptor<MoveSegment>())
 
@@ -890,9 +895,54 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         let moveCountAfter = try modelContext.fetchCount(FetchDescriptor<MoveSegment>())
 
         return HistoricalDeduplicationReport(
+            removedDayTimelineCount: removedDayTimelineCount,
             removedPlaceCount: max(placeCountBefore - placeCountAfter, 0),
             removedMoveCount: max(moveCountBefore - moveCountAfter, 0)
         )
+    }
+
+    /// CloudKit identifies model objects by record identity, not by `dayKey`. Two devices can
+    /// therefore create the same calendar day before either sees the other's record. Reparent
+    /// every child before deleting the redundant records so cascade deletion cannot remove data.
+    @discardableResult
+    func mergeDuplicateDayTimelines() throws -> Int {
+        let timelines = try modelContext.fetch(
+            FetchDescriptor<DayTimeline>(
+                sortBy: [
+                    SortDescriptor(\DayTimeline.createdAt, order: .forward),
+                    SortDescriptor(\DayTimeline.dayStart, order: .forward),
+                ]
+            )
+        )
+
+        let groups = Dictionary(grouping: timelines) { timeline in
+            timeline.dayKey.isEmpty
+                ? DayTimeline.makeDayKey(for: timeline.dayStart)
+                : timeline.dayKey
+        }
+        var duplicatesToDelete: [DayTimeline] = []
+
+        for (dayKey, group) in groups where group.count > 1 {
+            guard let canonical = group.first else { continue }
+            canonical.dayKey = dayKey
+            canonical.dayStart = group.map(\.dayStart).min() ?? canonical.dayStart
+            canonical.createdAt = group.map(\.createdAt).min() ?? canonical.createdAt
+
+            for duplicate in group.dropFirst() {
+                Array(duplicate.places).forEach { $0.dayTimeline = canonical }
+                Array(duplicate.moves).forEach { $0.dayTimeline = canonical }
+                Array(duplicate.samples).forEach { $0.dayTimeline = canonical }
+                duplicatesToDelete.append(duplicate)
+            }
+        }
+
+        guard !duplicatesToDelete.isEmpty else { return 0 }
+
+        // Persist the new parents before applying the cascade deletes.
+        try saveIfNeeded()
+        duplicatesToDelete.forEach(modelContext.delete)
+        try saveIfNeeded()
+        return duplicatesToDelete.count
     }
 
     func addOrUpdateVisit(from visit: CLVisit) throws -> VisitPlace {
@@ -930,6 +980,13 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 
     func appendSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample] {
+        let inserted = try insertSamples(from: locations, source: source)
+        try saveIfNeeded()
+        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        return inserted
+    }
+
+    private func insertSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample] {
         guard !locations.isEmpty else { return [] }
 
         var inserted: [LocationSample] = []
@@ -956,8 +1013,6 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             inserted.append(sample)
         }
 
-        try saveIfNeeded()
-        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
         return inserted
     }
 
@@ -965,7 +1020,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     func importRouteTrack(
         locations: [CLLocation],
         source: LocationSampleSource,
-        transportMode: TransportMode
+        transportMode: TransportMode,
+        resolvePlaceNames: Bool = true,
+        continuingFrom visit: VisitPlace? = nil
     ) throws -> MoveSegment? {
         let orderedLocations = locations
             .filter { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= 200 }
@@ -974,22 +1031,31 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         guard let firstLocation = orderedLocations.first,
               let lastLocation = orderedLocations.last,
               lastLocation.timestamp > firstLocation.timestamp else {
-            _ = try appendSamples(from: orderedLocations, source: source)
             return nil
         }
 
-        let samples = try appendSamples(from: orderedLocations, source: source)
+        // Route samples stay unsaved until they have been attached to their move. This keeps
+        // an interrupted import from leaving a list of independent timeline samples behind.
+        let samples = try insertSamples(from: orderedLocations, source: source)
         let distance = Self.totalDistance(for: orderedLocations)
 
-        let startPlace = try routeEndpointPlace(
-            at: firstLocation,
-            arrivalDate: firstLocation.timestamp,
-            departureDate: firstLocation.timestamp
-        )
+        let startPlace: VisitPlace
+        if let visit {
+            visit.departureDate = firstLocation.timestamp
+            startPlace = visit
+        } else {
+            startPlace = try routeEndpointPlace(
+                at: firstLocation,
+                arrivalDate: firstLocation.timestamp,
+                departureDate: firstLocation.timestamp,
+                resolvePlaceName: resolvePlaceNames
+            )
+        }
         let endPlace = try routeEndpointPlace(
             at: lastLocation,
             arrivalDate: lastLocation.timestamp,
-            departureDate: nil
+            departureDate: nil,
+            resolvePlaceName: resolvePlaceNames
         )
 
         let move = try upsertMove(
@@ -1009,6 +1075,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         )
 
         try saveIfNeeded()
+        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
         return move
     }
 
@@ -1161,7 +1228,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     private func routeEndpointPlace(
         at location: CLLocation,
         arrivalDate: Date,
-        departureDate: Date?
+        departureDate: Date?,
+        resolvePlaceName: Bool = true
     ) throws -> VisitPlace {
         if let existing = try existingVisit(near: arrivalDate, coordinate: location.coordinate) {
             existing.horizontalAccuracy = min(existing.horizontalAccuracy, max(location.horizontalAccuracy, 20))
@@ -1178,7 +1246,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             latitude: location.coordinate.latitude,
             longitude: location.coordinate.longitude,
             horizontalAccuracy: max(location.horizontalAccuracy, 20),
-            userLabel: try inferredUserLabel(near: location.coordinate)
+            userLabel: resolvePlaceName ? try inferredUserLabel(near: location.coordinate) : nil
         )
         place.deviceIdentifier = deviceIdentifier
         place.dayTimeline = try timeline(for: arrivalDate)
@@ -2037,9 +2105,12 @@ final class MultiDevicePresenceManager: ObservableObject {
     }
 
     var promptMessage: String {
+        guard !otherDeviceNames.isEmpty else {
+            return "Should this device record location changes for your timeline, or remain read-only and manage the shared timeline?"
+        }
+
         let names = otherDeviceNames.joined(separator: ", ")
-        let subject = names.isEmpty ? "another iPhone" : names
-        return "Moves found \(subject) in this iCloud account. Should this device record location changes, or only manage and view the shared timeline?"
+        return "Moves found \(names) in this iCloud account. Should this device record location changes, or only manage and view the shared timeline?"
     }
 
     func refreshPresence() {
@@ -2069,10 +2140,9 @@ final class MultiDevicePresenceManager: ObservableObject {
                 }
                 .sorted()
 
-            if !otherDeviceNames.isEmpty,
-               UserDefaults.standard.object(
-                forKey: MovesLocationCaptureManager.BackgroundLocationListeningSettings.isEnabledKey
-               ) == nil {
+            if UserDefaults.standard.object(
+                forKey: MovesLocationCaptureManager.BackgroundLocationListeningSettings.roleWasChosenKey
+            ) == nil {
                 shouldChooseLocationRole = true
             }
         } catch {
@@ -2593,7 +2663,7 @@ enum SimulatorDemoDataSeeder {
         case .swimming:
             metersPerMinute = 55
             minimumMinutes = 12
-        case .automotive:
+        case .automotive, .motorcycle:
             metersPerMinute = 700
             minimumMinutes = 12
         case .train:
@@ -2620,7 +2690,7 @@ enum SimulatorDemoDataSeeder {
             return max(Int((distanceMeters / 0.76).rounded()), 0)
         case .running:
             return max(Int((distanceMeters / 1.02).rounded()), 0)
-        case .swimming, .cycling, .automotive, .train, .plane, .boat, .stationary, .unknown:
+        case .swimming, .cycling, .automotive, .motorcycle, .train, .plane, .boat, .stationary, .unknown:
             return nil
         }
     }
@@ -2635,7 +2705,7 @@ enum SimulatorDemoDataSeeder {
             return 1.2
         case .cycling:
             return 4.6
-        case .automotive:
+        case .automotive, .motorcycle:
             return 11.5
         case .train:
             return 28
@@ -2654,7 +2724,7 @@ enum SimulatorDemoDataSeeder {
             return 22
         case .cycling:
             return 20
-        case .automotive:
+        case .automotive, .motorcycle:
             return 24
         case .train:
             return 28
@@ -2680,7 +2750,7 @@ enum SimulatorDemoDataSeeder {
             baseMinutes = 9 * 60 + 5
         case .swimming:
             baseMinutes = 12 * 60 + 25
-        case .automotive:
+        case .automotive, .motorcycle:
             baseMinutes = 10 * 60 + 20
         case .train:
             baseMinutes = 7 * 60 + 50
@@ -3023,7 +3093,7 @@ enum SimulatorDemoDataSeeder {
 
     private static func mapTransportTypes(for mode: TransportMode) -> [MKDirectionsTransportType] {
         switch mode {
-        case .automotive:
+        case .automotive, .motorcycle:
             // Some POI points are inside buildings, so walking fallback improves route seeding.
             return [.automobile, .walking]
         case .walking, .running:

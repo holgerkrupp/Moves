@@ -10,6 +10,7 @@ import Foundation
 import MapKit
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct PlaceMapDetailView: View {
     @EnvironmentObject private var undoController: AppUndoController
@@ -284,6 +285,7 @@ struct MoveMapDetailView: View {
     @State private var deleteErrorMessage = ""
     @State private var isShowingDeleteError = false
     @State private var isShowingHealthOpenError = false
+    @State private var isShowingDetails = false
 
     private var activeRenderedRoute: RenderedRoute {
         RenderedRoute(
@@ -368,7 +370,6 @@ struct MoveMapDetailView: View {
                     Image(systemName: segment.transportMode.symbolName)
                         .frame(width: 40, height: 40)
                         .contentShape(Circle())
-                        .glassEffect(in: Circle())
                 }
                 .buttonStyle(.glass)
                 .popover(isPresented: $isShowingTransportPicker, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
@@ -431,6 +432,9 @@ struct MoveMapDetailView: View {
         } message: {
             Text("Apple Health could not be opened from this device.")
         }
+        .sheet(isPresented: $isShowingDetails) {
+            MoveDetailsView(segment: segment, displayedRouteCoordinates: routeCoordinates)
+        }
         .task(id: routeRefreshKey) {
             await refreshRouteCoordinates()
         }
@@ -455,8 +459,8 @@ struct MoveMapDetailView: View {
                         .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
                 }
 
-                if activeRenderedRoute.coordinates.count > 1 {
-                    MapPolyline(coordinates: activeRenderedRoute.coordinates)
+                ForEach(Array(activeRenderedRoute.coordinateSegments.enumerated()), id: \.offset) { _, coordinates in
+                    MapPolyline(coordinates: coordinates)
                         .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
                 }
 
@@ -515,9 +519,22 @@ struct MoveMapDetailView: View {
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(activeRenderedRoute.tint)
                 }
-                Text("\(DurationFormatter.text(for: segment.timelineDuration))   \(Measurement(value: max(routeDistance(for: routeCoordinates), 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.primary.opacity(0.75))
+                HStack(spacing: 10) {
+                    Text("\(DurationFormatter.text(for: segment.timelineDuration))   \(Measurement(value: max(routeDistance(for: routeCoordinates), 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.primary.opacity(0.75))
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        isShowingDetails = true
+                    } label: {
+                        Label("Details", systemImage: "info.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityHint("Shows move details and raw location data")
+                }
 
                 HStack(alignment: .bottom, spacing: 8) {
                     TextField("Remarks", text: $draftComment, axis: .vertical)
@@ -947,6 +964,285 @@ struct MoveMapDetailView: View {
             deleteErrorMessage = error.localizedDescription
             isShowingDeleteError = true
         }
+    }
+}
+
+private struct MoveDetailsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let segment: MoveSegment
+    let displayedRouteCoordinates: [CLLocationCoordinate2D]
+
+    @State private var copiedRawData = false
+    @State private var isShowingRawData = false
+
+    private var sortedSamples: [LocationSample] {
+        segment.samples.sorted { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return lhs.dedupeKey < rhs.dedupeKey
+        }
+    }
+
+    private var sourceSummary: [(name: String, count: Int)] {
+        Dictionary(grouping: sortedSamples, by: \.sourceRawValue)
+            .map { (name: $0.key, count: $0.value.count) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private var renderedDistance: CLLocationDistance {
+        routeDistance(for: displayedRouteCoordinates)
+    }
+
+    private var averageSpeed: String? {
+        guard segment.timelineDuration > 0 else { return nil }
+        let kilometersPerHour = (segment.distanceMeters / segment.timelineDuration) * 3.6
+        guard kilometersPerHour.isFinite else { return nil }
+        return "\(kilometersPerHour.formatted(.number.precision(.fractionLength(1)))) km/h"
+    }
+
+    private var rawData: String {
+        let payload = RawMoveData(
+            id: segment.id.uuidString,
+            deviceIdentifier: segment.deviceIdentifier,
+            dedupeKey: segment.dedupeKey,
+            startDate: segment.startDate,
+            timelineStartDate: segment.timelineStartDate,
+            endDate: segment.endDate,
+            transportMode: segment.transportModeRawValue,
+            distanceMeters: segment.distanceMeters,
+            stepCount: segment.stepCount,
+            comment: segment.comment,
+            isExcludedFromConnectionStatistics: segment.isExcludedFromConnectionStatistics,
+            createdAt: segment.createdAt,
+            dayKey: segment.dayTimeline?.dayKey,
+            startPlace: RawPlaceData(place: segment.startPlace),
+            endPlace: RawPlaceData(place: segment.endPlace),
+            routeCacheSignature: segment.routeCacheSignature,
+            routeCacheByteCount: segment.routeCacheCoordinatesData?.count,
+            manualRouteByteCount: segment.manualRouteCoordinatesData?.count,
+            displayedRouteCoordinateCount: displayedRouteCoordinates.count,
+            samples: sortedSamples.map(RawLocationSampleData.init)
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(payload),
+              let text = String(data: data, encoding: .utf8) else {
+            return "Raw data could not be encoded."
+        }
+        return text
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 14) {
+                    SettingsCard(title: "Move") {
+                        Text("\(segment.startPlace?.displayTitle ?? "Unknown start") → \(segment.endPlace?.displayTitle ?? "Unknown destination")")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+
+                        MoveDetailRow("Mode", segment.transportMode.title)
+                        MoveDetailRow("Started", segment.timelineStartDate.formatted(date: .complete, time: .complete))
+                        MoveDetailRow("Finished", segment.endDate.formatted(date: .complete, time: .complete))
+                        MoveDetailRow("Duration", DurationFormatter.text(for: segment.timelineDuration))
+                        MoveDetailRow("Recorded distance", Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
+                        MoveDetailRow("Displayed route", Measurement(value: max(renderedDistance, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
+                        if let averageSpeed {
+                            MoveDetailRow("Average speed", averageSpeed)
+                        }
+                    }
+
+                    SettingsCard(title: "Capture") {
+                        MoveDetailRow("Recorded samples", sortedSamples.count.formatted())
+                        MoveDetailRow("Route coordinates", displayedRouteCoordinates.count.formatted())
+                        MoveDetailRow("Source", segment.usesHealthWorkoutRoute ? "Apple Health workout route" : segment.usesHighAccuracyRouteTracking ? "Route tracking" : "Location history")
+
+                        if !sourceSummary.isEmpty {
+                            Divider()
+                            ForEach(sourceSummary, id: \.name) { source in
+                                MoveDetailRow(source.name, source.count.formatted())
+                            }
+                        }
+                    }
+
+                    SettingsCard(title: "Endpoints") {
+                        MoveEndpointDetail(title: "Start", place: segment.startPlace)
+                        Divider()
+                        MoveEndpointDetail(title: "End", place: segment.endPlace)
+                    }
+
+                    SettingsCard(title: "Raw Data") {
+                        Text("The JSON below includes the persisted move, its endpoints, and every recorded location sample.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        Button {
+                            UIPasteboard.general.string = rawData
+                            copiedRawData = true
+                        } label: {
+                            Label(copiedRawData ? "Copied Raw Data" : "Copy Raw Data", systemImage: copiedRawData ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.bordered)
+
+                        DisclosureGroup("Show Raw JSON", isExpanded: $isShowingRawData) {
+                            ScrollView([.horizontal, .vertical]) {
+                                Text(rawData)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(10)
+                            }
+                            .frame(height: 360)
+                            .background(MovesPalette.textFieldBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+                }
+                .padding(14)
+            }
+            .background {
+                LinearGradient(
+                    colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
+            .navigationTitle("Move Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+private struct MoveDetailRow: View {
+    let title: String
+    let value: String
+
+    init(_ title: String, _ value: String) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: 13, weight: .medium, design: .rounded))
+    }
+}
+
+private struct MoveEndpointDetail: View {
+    let title: String
+    let place: VisitPlace?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+            if let place {
+                Text(place.displayTitle)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text("\(place.latitude.formatted(.number.precision(.fractionLength(6)))), \(place.longitude.formatted(.number.precision(.fractionLength(6))))")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text("Accuracy ±\(max(place.horizontalAccuracy, 0).formatted(.number.precision(.fractionLength(1)))) m")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No saved place")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct RawMoveData: Encodable {
+    let id: String
+    let deviceIdentifier: String
+    let dedupeKey: String
+    let startDate: Date
+    let timelineStartDate: Date
+    let endDate: Date
+    let transportMode: String
+    let distanceMeters: Double
+    let stepCount: Int?
+    let comment: String?
+    let isExcludedFromConnectionStatistics: Bool
+    let createdAt: Date
+    let dayKey: String?
+    let startPlace: RawPlaceData?
+    let endPlace: RawPlaceData?
+    let routeCacheSignature: String?
+    let routeCacheByteCount: Int?
+    let manualRouteByteCount: Int?
+    let displayedRouteCoordinateCount: Int
+    let samples: [RawLocationSampleData]
+}
+
+private struct RawPlaceData: Encodable {
+    let id: String
+    let arrivalDate: Date
+    let departureDate: Date?
+    let latitude: Double
+    let longitude: Double
+    let horizontalAccuracy: Double
+    let userLabel: String?
+    let autoLabel: String?
+    let comment: String?
+    let createdAt: Date
+
+    init?(place: VisitPlace?) {
+        guard let place else { return nil }
+        id = place.id.uuidString
+        arrivalDate = place.arrivalDate
+        departureDate = place.departureDate
+        latitude = place.latitude
+        longitude = place.longitude
+        horizontalAccuracy = place.horizontalAccuracy
+        userLabel = place.userLabel
+        autoLabel = place.autoLabel
+        comment = place.comment
+        createdAt = place.createdAt
+    }
+}
+
+private struct RawLocationSampleData: Encodable {
+    let dedupeKey: String
+    let deviceIdentifier: String
+    let timestamp: Date
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let horizontalAccuracy: Double
+    let speed: Double
+    let source: String
+    let createdAt: Date
+
+    init(_ sample: LocationSample) {
+        dedupeKey = sample.dedupeKey
+        deviceIdentifier = sample.deviceIdentifier
+        timestamp = sample.timestamp
+        latitude = sample.latitude
+        longitude = sample.longitude
+        altitude = sample.altitude
+        horizontalAccuracy = sample.horizontalAccuracy
+        speed = sample.speed
+        source = sample.sourceRawValue
+        createdAt = sample.createdAt
     }
 }
 

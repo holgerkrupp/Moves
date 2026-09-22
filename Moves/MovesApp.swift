@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import AppIntents
+import CloudKitSyncMonitor
 import UIKit
 import UserNotifications
 
@@ -20,6 +21,7 @@ final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
         UNUserNotificationCenter.current().delegate = self
         DailyTimelineBackup.registerBackgroundTask()
         ShareMapAggregateBackgroundTask.register()
+        RouteFileImportBackgroundTask.register()
         return true
     }
 
@@ -37,6 +39,69 @@ final class AppUndoController: ObservableObject {
     let manager = UndoManager()
 }
 
+struct MovesCommandActions {
+    let showSettings: () -> Void
+    let chooseDate: () -> Void
+    let selectToday: () -> Void
+    let selectOlderDay: () -> Void
+    let selectNewerDay: () -> Void
+    let canSelectOlderDay: Bool
+    let canSelectNewerDay: Bool
+}
+
+private struct MovesCommandActionsKey: FocusedValueKey {
+    typealias Value = MovesCommandActions
+}
+
+extension FocusedValues {
+    var movesCommandActions: MovesCommandActions? {
+        get { self[MovesCommandActionsKey.self] }
+        set { self[MovesCommandActionsKey.self] = newValue }
+    }
+}
+
+struct MovesCommands: Commands {
+    @FocusedValue(\.movesCommandActions) private var actions
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                actions?.showSettings()
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .disabled(actions == nil)
+        }
+
+        CommandMenu("Timeline") {
+            Button("Today") {
+                actions?.selectToday()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(actions == nil)
+
+            Button("Choose Date…") {
+                actions?.chooseDate()
+            }
+            .keyboardShortcut("l", modifiers: .command)
+            .disabled(actions == nil)
+
+            Divider()
+
+            Button("Previous Day") {
+                actions?.selectOlderDay()
+            }
+            .keyboardShortcut("[", modifiers: .command)
+            .disabled(actions?.canSelectOlderDay != true)
+
+            Button("Next Day") {
+                actions?.selectNewerDay()
+            }
+            .keyboardShortcut("]", modifiers: .command)
+            .disabled(actions?.canSelectNewerDay != true)
+        }
+    }
+}
+
 @main
 struct MovesApp: App {
     @UIApplicationDelegateAdaptor(MovesAppDelegate.self) private var appDelegate
@@ -51,8 +116,11 @@ struct MovesApp: App {
     @StateObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @StateObject private var locationServiceSyncManager: LocationServiceSyncManager
     @StateObject private var multiDevicePresenceManager: MultiDevicePresenceManager
+    @StateObject private var routeFileImporter: RouteFileImporter
 
     init() {
+        SyncMonitor.default.startMonitoring()
+
         do {
             let container = try Self.makeModelContainer()
             let captureManager = MovesLocationCaptureManager(modelContainer: container)
@@ -74,6 +142,9 @@ struct MovesApp: App {
             )
             _multiDevicePresenceManager = StateObject(
                 wrappedValue: MultiDevicePresenceManager(modelContainer: container)
+            )
+            _routeFileImporter = StateObject(
+                wrappedValue: RouteFileImporter(modelContext: ModelContext(container))
             )
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
@@ -145,23 +216,46 @@ struct MovesApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                #if targetEnvironment(macCatalyst)
+                ContentView()
+                    .frame(
+                        minWidth: 720,
+                        maxWidth: .infinity,
+                        minHeight: 520,
+                        maxHeight: .infinity
+                    )
+                #else
+                ContentView()
+                #endif
+            }
                 .environmentObject(captureManager)
                 .environmentObject(undoController)
                 .environmentObject(healthWorkoutRouteAutoImporter)
                 .environmentObject(cloudDataPresencePublisher)
                 .environmentObject(locationServiceSyncManager)
                 .environmentObject(multiDevicePresenceManager)
+                .environmentObject(routeFileImporter)
         }
         .modelContainer(sharedModelContainer)
+        #if targetEnvironment(macCatalyst)
+        .windowResizability(.contentSize)
+        #endif
+        .defaultSize(width: 1_100, height: 760)
+        .commands {
+            MovesCommands()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 DailyTimelineBackup.scheduleNextRun()
                 ShareMapAggregateBackgroundTask.scheduleNextRun()
+                RouteFileImportBackgroundTask.schedule()
                 Task {
-                    multiDevicePresenceManager.refreshPresence()
-                    await captureManager.start()
-                    await captureManager.refreshHistoricalBackfill()
+                    if captureManager.isLocationTrackingAvailable {
+                        multiDevicePresenceManager.refreshPresence()
+                        await captureManager.start()
+                        await captureManager.refreshHistoricalBackfill()
+                    }
                     healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()
                     await healthWorkoutRouteAutoImporter.startIfNeeded()
                     await cloudDataPresencePublisher.publishNow()

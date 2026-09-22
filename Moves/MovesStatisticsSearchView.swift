@@ -216,6 +216,7 @@ struct MovesStatisticsSearchView: View {
         case overview = "Statistics"
         case visits = "Visits"
         case connections = "Connections"
+        case createShare = "Create & Share"
 
         var id: String { rawValue }
     }
@@ -227,8 +228,6 @@ struct MovesStatisticsSearchView: View {
         var id: String { rawValue }
     }
 
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query(sort: \KnownLocation.name, order: .forward)
     private var knownLocations: [KnownLocation]
 
@@ -236,14 +235,12 @@ struct MovesStatisticsSearchView: View {
     private let initialDate: Date
     private let snapshot: MovesStatisticsSnapshot
 
-    @State private var selectedSection = Section.overview
     @State private var visitSearchText = ""
     @State private var originKey: String?
     @State private var destinationKey: String?
     @State private var includesIndirectConnections = true
     @State private var includesReturnTrips = false
     @State private var endpointBeingSelected: ConnectionEndpoint?
-    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     init(dayTimelines: [DayTimeline], initialDate: Date = .now) {
         self.dayTimelines = dayTimelines
@@ -252,15 +249,7 @@ struct MovesStatisticsSearchView: View {
     }
 
     var body: some View {
-        Group {
-            if usesSplitNavigation {
-                statisticsSplitWorkspace
-            } else {
-                NavigationStack {
-                    statisticsContent(showsSectionPicker: true)
-                }
-            }
-        }
+        compactWorkspace
         .sheet(item: $endpointBeingSelected) { endpoint in
             LocationSelectionView(
                 title: endpoint == .origin ? "Choose Start" : "Choose Destination",
@@ -271,62 +260,49 @@ struct MovesStatisticsSearchView: View {
         .onAppear(perform: selectCommuteDefaultsIfAvailable)
     }
 
-    private var usesSplitNavigation: Bool {
-        horizontalSizeClass == .regular
-    }
-
-    private var statisticsSplitWorkspace: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            statisticsSidebar
-        } detail: {
-            statisticsContent(showsSectionPicker: false)
-        }
-        .navigationSplitViewStyle(.balanced)
-    }
-
-    private var statisticsSidebar: some View {
-        List(selection: sectionSelection) {
+    private var compactWorkspace: some View {
+        List {
             SwiftUI.Section("Explore") {
-                Label("Statistics", systemImage: "chart.bar.xaxis")
-                    .tag(Section.overview)
-                Label("Search Visits", systemImage: "magnifyingglass")
-                    .tag(Section.visits)
-                Label("Connections", systemImage: "arrow.triangle.branch")
-                    .tag(Section.connections)
+                NavigationLink {
+                    sectionContent(for: .overview)
+                } label: {
+                    Label("Statistics", systemImage: "chart.bar.xaxis")
+                }
+                NavigationLink {
+                    sectionContent(for: .visits)
+                } label: {
+                    Label("Search Visits", systemImage: "magnifyingglass")
+                }
+                NavigationLink {
+                    sectionContent(for: .connections)
+                } label: {
+                    Label("Connections", systemImage: "arrow.triangle.branch")
+                }
+            }
+
+            SwiftUI.Section("Create & Share") {
+                NavigationLink {
+                    sectionContent(for: .createShare)
+                } label: {
+                    Label("Create & Share", systemImage: "square.and.arrow.up.on.square")
+                }
             }
         }
-        .navigationTitle("Statistics & Search")
+        .navigationTitle("Statistics & Share")
     }
 
-    private var sectionSelection: Binding<Section?> {
-        Binding(
-            get: { selectedSection },
-            set: { selectedSection = $0 ?? selectedSection }
-        )
-    }
-
-    private func statisticsContent(showsSectionPicker: Bool) -> some View {
-        VStack(spacing: 0) {
-            if showsSectionPicker {
-                Picker("View", selection: $selectedSection) {
-                    ForEach(Section.allCases) { section in
-                        Text(section.rawValue).tag(section)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-
-            Group {
-                switch selectedSection {
-                case .overview:
-                    statisticsView
-                case .visits:
-                    visitsView
-                case .connections:
-                    connectionsView
-                }
+    @ViewBuilder
+    private func sectionContent(for section: Section) -> some View {
+        Group {
+            switch section {
+            case .overview:
+                statisticsView
+            case .visits:
+                visitsView
+            case .connections:
+                connectionsView
+            case .createShare:
+                createShareView
             }
         }
         .background {
@@ -337,13 +313,8 @@ struct MovesStatisticsSearchView: View {
             )
             .ignoresSafeArea()
         }
-        .navigationTitle("Statistics & Search")
+        .navigationTitle(section.rawValue)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") { dismiss() }
-            }
-        }
     }
 
     private var statisticsView: some View {
@@ -355,39 +326,6 @@ struct MovesStatisticsSearchView: View {
                         StatisticsMetric(title: "Places", value: snapshot.locations.count.formatted())
                         StatisticsMetric(title: "Moves", value: snapshot.moves.count.formatted())
                     }
-                }
-
-                SettingsCard(title: "Create & Share") {
-                    NavigationLink {
-                        MovesShareGalleryView(
-                            dayTimelines: dayTimelines,
-                            initialDate: initialDate,
-                            showsDismissButton: false
-                        )
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "photo.stack")
-                                .foregroundStyle(MovesPalette.move)
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Share Images")
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                Text("Create visual summaries and export GPX tracks")
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer(minLength: 8)
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                        .padding(.vertical, 5)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(dayTimelines.allSatisfy { !$0.hasRecordedActivity })
                 }
 
                 SettingsCard(title: "Most Visited Locations") {
@@ -420,6 +358,97 @@ struct MovesStatisticsSearchView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 18)
         }
+    }
+
+    private var createShareView: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "Create") {
+                    NavigationLink {
+                        MovesHistoryMapView(
+                            dayTimelines: dayTimelines,
+                            initialDate: initialDate
+                        )
+                    } label: {
+                        createShareRow(
+                            title: "History Map",
+                            detail: "Explore every route and visit, then share the exact map framing.",
+                            symbol: "map",
+                            tint: MovesPalette.place
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(dayTimelines.allSatisfy { !$0.hasRecordedActivity })
+
+                    Divider()
+
+                    NavigationLink {
+                        MovesShareGalleryView(
+                            dayTimelines: dayTimelines,
+                            initialDate: initialDate,
+                            showsDismissButton: false
+                        )
+                    } label: {
+                        createShareRow(
+                            title: "Share Image Studio",
+                            detail: "Build visual summaries, maps, and a calendar from a selected period.",
+                            symbol: "photo.stack",
+                            tint: MovesPalette.move
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(dayTimelines.allSatisfy { !$0.hasRecordedActivity })
+                }
+
+                SettingsCard(title: "Share") {
+                    Label("Share Image Studio keeps the familiar image picker and multi-select share sheet.", systemImage: "square.and.arrow.up")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+
+                    Label("History Map opens the same system share sheet after rendering the camera position you chose.", systemImage: "viewfinder")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                SettingsCard(title: "Choose a Starting Date") {
+                    Text("Both tools open at \(initialDate, format: .dateTime.day().month(.abbreviated).year()). Choose another day or period inside the tool whenever you need it.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 18)
+        }
+    }
+
+    private func createShareRow(
+        title: String,
+        detail: String,
+        symbol: String,
+        tint: Color
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 5)
     }
 
     private var visitsView: some View {

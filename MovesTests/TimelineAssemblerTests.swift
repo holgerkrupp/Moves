@@ -416,6 +416,279 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertLessThan(arcMidPoint.latitude, shadowMidLatitude)
     }
 
+    func testDetailedPlaneRouteDoesNotAddSyntheticShadow() {
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 21.30645, longitude: -157.91229),
+            CLLocationCoordinate2D(latitude: -17.75539, longitude: 177.44338),
+        ]
+        let route = RenderedRoute(
+            id: "imported-flight",
+            coordinates: coordinates,
+            usesHighAccuracyRouteTracking: true,
+            usesHealthWorkoutRoute: false,
+            transportMode: .plane
+        )
+
+        XCTAssertTrue(route.shadowCoordinates.isEmpty)
+        XCTAssertEqual(route.coordinates.count, 2)
+    }
+
+    func testDetailedRouteIsSplitAtTheAntimeridian() {
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 10, longitude: -170),
+            CLLocationCoordinate2D(latitude: 11, longitude: -174),
+            CLLocationCoordinate2D(latitude: 12, longitude: 178),
+            CLLocationCoordinate2D(latitude: 13, longitude: 174),
+        ]
+
+        let segments = RouteCoordinateOps.mapPolylineSegments(coordinates)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].map(\.longitude), [-170, -174])
+        XCTAssertEqual(segments[1].map(\.longitude), [178, 174])
+    }
+
+    func testMapRegionUsesShortArcAcrossAntimeridian() {
+        let region = MapRegionFactory.region(for: [
+            CLLocationCoordinate2D(latitude: 35.4, longitude: -176.3),
+            CLLocationCoordinate2D(latitude: 61.8, longitude: 178.1),
+        ])
+
+        XCTAssertLessThan(region.span.longitudeDelta, 10)
+        XCTAssertLessThanOrEqual(region.span.latitudeDelta, 179)
+        XCTAssertGreaterThan(abs(region.center.longitude), 170)
+    }
+
+    func testMapRegionClampsGlobalSpanToMapKitLimits() {
+        let region = MapRegionFactory.region(for: stride(from: -180.0, through: 180.0, by: 30).map {
+            CLLocationCoordinate2D(latitude: $0 / 2, longitude: $0)
+        })
+
+        XCTAssertLessThan(region.span.longitudeDelta, 360)
+        XCTAssertLessThan(region.span.latitudeDelta, 180)
+    }
+
+    func testFlightDesignatorsAreInferredAsPlaneRoutes() {
+        XCTAssertEqual(inferTransportMode(from: "OZ610-2276b3db.kml"), .plane)
+        XCTAssertEqual(inferTransportMode(from: "FJI821.gpx"), .plane)
+        XCTAssertEqual(inferTransportMode(from: "FlightAware_VOZ176_NFFN_YBBN_20200324.kml"), .plane)
+    }
+
+    func testGXTrackPreservesDetailedFlightCoordinatesAndTimes() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+          <Document><name>VOZ176</name><Placemark><gx:Track>
+            <when>2020-03-24T03:53:11Z</when>
+            <when>2020-03-24T03:53:27Z</when>
+            <gx:coord>177.42361 -17.77998 343</gx:coord>
+            <gx:coord>177.41479 -17.79149 503</gx:coord>
+          </gx:Track></Placemark></Document>
+        </kml>
+        """
+
+        let tracks = try XMLRouteTrackParser.parse(data: Data(xml.utf8), fileName: "route.kml")
+        let track = try XCTUnwrap(tracks.first)
+        XCTAssertEqual(tracks.count, 1)
+        XCTAssertEqual(track.transportMode, .plane)
+        XCTAssertEqual(track.locations.count, 2)
+        XCTAssertTrue(track.hasOriginalTimestamps)
+        XCTAssertEqual(track.locations[0].coordinate.longitude, 177.42361, accuracy: 0.000_001)
+        XCTAssertEqual(track.locations[1].timestamp.timeIntervalSince(track.locations[0].timestamp), 16, accuracy: 0.01)
+    }
+
+    func testTimestampedKMLPointsAreCombinedWithoutDuplicatingRouteLines() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>OZ610/AAR610</name>
+          <Placemark><TimeStamp><when>2019-10-13T23:12:36Z</when></TimeStamp>
+            <Point><coordinates>132.111023,29.151152,10965.18</coordinates></Point></Placemark>
+          <Placemark><TimeStamp><when>2019-10-13T23:13:36Z</when></TimeStamp>
+            <Point><coordinates>132.023026,29.257849,10965.18</coordinates></Point></Placemark>
+          <Placemark><LineString><coordinates>
+            132.111023,29.151152,10965.18 132.023026,29.257849,10965.18
+          </coordinates></LineString></Placemark>
+        </Document></kml>
+        """
+
+        let tracks = try XMLRouteTrackParser.parse(data: Data(xml.utf8), fileName: "route.kml")
+        let track = try XCTUnwrap(tracks.first)
+        XCTAssertEqual(tracks.count, 1)
+        XCTAssertEqual(track.transportMode, .plane)
+        XCTAssertEqual(track.locations.count, 2)
+        XCTAssertTrue(track.hasOriginalTimestamps)
+        XCTAssertEqual(track.locations[1].timestamp.timeIntervalSince(track.locations[0].timestamp), 60, accuracy: 0.01)
+    }
+
+    func testKMLPointTimestampsCanBeReadFromPlacemarkNames() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+          <Placemark><name>2019-10-15 07:08:59 UTC</name>
+            <Point><coordinates>140.38298,35.76150,0</coordinates></Point></Placemark>
+          <Placemark><name>2019-10-15 07:09:59 UTC</name>
+            <Point><coordinates>140.38384,35.76194,0</coordinates></Point></Placemark>
+        </Document></kml>
+        """
+
+        let tracks = try XMLRouteTrackParser.parse(data: Data(xml.utf8), fileName: "UA804.kml")
+        let track = try XCTUnwrap(tracks.first)
+        XCTAssertTrue(track.hasOriginalTimestamps)
+        XCTAssertEqual(track.locations.count, 2)
+        XCTAssertEqual(track.locations[1].timestamp.timeIntervalSince(track.locations[0].timestamp), 60, accuracy: 0.01)
+    }
+
+    func testKMLTimestampAfterPointStillAppliesToThatPlacemark() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+          <Placemark><Point><coordinates>140.38298,35.76150,0</coordinates></Point>
+            <TimeStamp><when>2019-10-15T07:08:59+00:00</when></TimeStamp></Placemark>
+          <Placemark><Point><coordinates>140.38384,35.76194,0</coordinates></Point>
+            <TimeStamp><when>2019-10-15T07:09:59+00:00</when></TimeStamp></Placemark>
+        </Document></kml>
+        """
+
+        let tracks = try XMLRouteTrackParser.parse(data: Data(xml.utf8), fileName: "UA804.kml")
+        let track = try XCTUnwrap(tracks.first)
+        XCTAssertTrue(track.hasOriginalTimestamps)
+        XCTAssertEqual(track.locations[1].timestamp.timeIntervalSince(track.locations[0].timestamp), 60, accuracy: 0.01)
+    }
+
+    func testGPXSingleSegmentIsSplitIntoMovesAroundAVisitGap() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>
+          <trkpt lat="53.50749" lon="9.72955"><time>2026-09-07T05:20:54Z</time></trkpt>
+          <trkpt lat="53.53766" lon="9.86435"><time>2026-09-07T05:40:56Z</time></trkpt>
+          <trkpt lat="53.53525" lon="9.85789"><time>2026-09-07T10:09:53Z</time></trkpt>
+          <trkpt lat="53.50407" lon="9.72819"><time>2026-09-07T10:29:54Z</time></trkpt>
+        </trkseg></trk></gpx>
+        """
+
+        let tracks = try XMLRouteTrackParser.parse(data: Data(xml.utf8), fileName: "commute.gpx")
+
+        XCTAssertEqual(tracks.count, 2)
+        XCTAssertEqual(tracks.map(\.locations.count), [2, 2])
+        XCTAssertFalse(tracks[0].startsAfterVisitGap)
+        XCTAssertTrue(tracks[1].startsAfterVisitGap)
+        XCTAssertTrue(tracks.allSatisfy(\.hasOriginalTimestamps))
+    }
+
+    func testUntimestampedKMLLineIsMarkedUnsafeForTimelineImport() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+          <Placemark><LineString><coordinates>
+            140.38298,35.76150,0 140.38384,35.76194,0
+          </coordinates></LineString></Placemark>
+        </Document></kml>
+        """
+
+        let tracks = try XMLRouteTrackParser.parse(data: Data(xml.utf8), fileName: "flight.kml")
+        let track = try XCTUnwrap(tracks.first)
+        XCTAssertFalse(track.hasOriginalTimestamps)
+    }
+
+    func testRemovingImportedRouteAlsoRemovesGeneratedPlacesAndEmptyDay() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = SwiftDataTimelineRepository(modelContext: context)
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let locations = [
+            makeLocation(latitude: 35.76150, longitude: 140.38298, speed: 100, timestamp: start),
+            makeLocation(latitude: 35.76035, longitude: 140.38342, speed: 100, timestamp: start.addingTimeInterval(60)),
+            makeLocation(latitude: 35.75865, longitude: 140.38467, speed: 100, timestamp: start.addingTimeInterval(120)),
+        ]
+
+        _ = try repository.importRouteTrack(
+            locations: locations,
+            source: .fileRouteImport,
+            transportMode: .plane,
+            resolvePlaceNames: false
+        )
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocationSample>()), 3)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<VisitPlace>()), 2)
+        XCTAssertTrue(try XCTUnwrap(context.fetch(FetchDescriptor<DayTimeline>()).first).hasImportedRouteData)
+        let importedSamples = try context.fetch(FetchDescriptor<LocationSample>())
+        let importedMoves = try context.fetch(FetchDescriptor<MoveSegment>())
+        let importedMoveID = try XCTUnwrap(importedMoves.first?.persistentModelID)
+        XCTAssertTrue(importedSamples.allSatisfy {
+            $0.moveSegment?.persistentModelID == importedMoveID
+        })
+
+        let manager = ImportedRouteDataManager(modelContext: context)
+        try manager.remove(using: ImportedRouteDataFilter())
+
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocationSample>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<VisitPlace>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<DayTimeline>()), 0)
+    }
+
+    func testInvalidImportedTrackDoesNotCreateIndependentSamplesOrVisits() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = SwiftDataTimelineRepository(modelContext: context)
+        let location = makeLocation(
+            latitude: 35.76150,
+            longitude: 140.38298,
+            speed: 0,
+            timestamp: Date(timeIntervalSince1970: 1_710_000_000)
+        )
+
+        let move = try repository.importRouteTrack(
+            locations: [location],
+            source: .fileRouteImport,
+            transportMode: .unknown,
+            resolvePlaceNames: false
+        )
+
+        XCTAssertNil(move)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocationSample>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<VisitPlace>()), 0)
+    }
+
+    func testConsecutiveImportedTracksShareTheVisitBetweenMoves() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = SwiftDataTimelineRepository(modelContext: context)
+        let start = Date(timeIntervalSince1970: 1_789_000_000)
+        let outbound = [
+            makeLocation(latitude: 53.50749, longitude: 9.72955, speed: 8, timestamp: start),
+            makeLocation(latitude: 53.53766, longitude: 9.86435, speed: 8, timestamp: start.addingTimeInterval(20 * 60)),
+        ]
+        let returnStart = start.addingTimeInterval(5 * 60 * 60)
+        let inbound = [
+            makeLocation(latitude: 53.53525, longitude: 9.85789, speed: 8, timestamp: returnStart),
+            makeLocation(latitude: 53.50407, longitude: 9.72819, speed: 8, timestamp: returnStart.addingTimeInterval(20 * 60)),
+        ]
+
+        let firstMove = try XCTUnwrap(repository.importRouteTrack(
+            locations: outbound,
+            source: .fileRouteImport,
+            transportMode: .automotive,
+            resolvePlaceNames: false
+        ))
+        let sharedVisit = try XCTUnwrap(firstMove.endPlace)
+        let secondMove = try XCTUnwrap(repository.importRouteTrack(
+            locations: inbound,
+            source: .fileRouteImport,
+            transportMode: .automotive,
+            resolvePlaceNames: false,
+            continuingFrom: sharedVisit
+        ))
+
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocationSample>()), 4)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 2)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<VisitPlace>()), 3)
+        XCTAssertEqual(firstMove.endPlace?.persistentModelID, secondMove.startPlace?.persistentModelID)
+        XCTAssertEqual(sharedVisit.arrivalDate, outbound.last?.timestamp)
+        XCTAssertEqual(sharedVisit.departureDate, inbound.first?.timestamp)
+    }
+
     func testMoveRouteCacheSignatureIsStableForTheSameCoordinates() {
         let segment = MoveSegment(
             dedupeKey: "move-signature",
@@ -482,6 +755,37 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertFalse(
             RouteMatchPlausibility.isAcceptable(
                 detour,
+                comparedTo: recorded,
+                transportMode: .automotive
+            )
+        )
+    }
+
+    func testRouteMatchAcceptsHamburgHarbourDetourForSparseAutomotiveSamples() {
+        let recorded = [
+            CLLocationCoordinate2D(latitude: 53.454711, longitude: 10.005495),
+            CLLocationCoordinate2D(latitude: 53.456483, longitude: 9.998037),
+            CLLocationCoordinate2D(latitude: 53.469600, longitude: 9.962907),
+            CLLocationCoordinate2D(latitude: 53.477734, longitude: 9.926796),
+            CLLocationCoordinate2D(latitude: 53.500552, longitude: 9.910364),
+            CLLocationCoordinate2D(latitude: 53.516257, longitude: 9.894392),
+            CLLocationCoordinate2D(latitude: 53.534548, longitude: 9.875896),
+            CLLocationCoordinate2D(latitude: 53.536387, longitude: 9.867895),
+        ]
+        var matched = recorded
+        matched.insert(
+            CLLocationCoordinate2D(latitude: 53.477734, longitude: 9.985000),
+            at: 4
+        )
+        matched.insert(
+            CLLocationCoordinate2D(latitude: 53.500552, longitude: 9.985000),
+            at: 5
+        )
+
+        XCTAssertGreaterThan(routeDistance(for: matched), routeDistance(for: recorded) * 1.5)
+        XCTAssertTrue(
+            RouteMatchPlausibility.isAcceptable(
+                matched,
                 comparedTo: recorded,
                 transportMode: .automotive
             )
@@ -1271,6 +1575,47 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(restoredMoves.first?.transportMode, .cycling)
     }
 
+    func testDuplicateDayTimelinesAreMergedWithoutDeletingChildren() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let date = Date(timeIntervalSince1970: 1_710_000_000)
+        let first = DayTimeline(dayStart: date)
+        let duplicate = DayTimeline(dayStart: date)
+        duplicate.dayKey = first.dayKey
+        context.insert(first)
+        context.insert(duplicate)
+
+        let firstPlace = VisitPlace(
+            arrivalDate: date,
+            departureDate: date.addingTimeInterval(60),
+            latitude: 53.5,
+            longitude: 9.9,
+            horizontalAccuracy: 10
+        )
+        firstPlace.dayTimeline = first
+        context.insert(firstPlace)
+
+        let duplicatePlace = VisitPlace(
+            arrivalDate: date.addingTimeInterval(120),
+            departureDate: nil,
+            latitude: 35.7,
+            longitude: 140.3,
+            horizontalAccuracy: 10
+        )
+        duplicatePlace.dayTimeline = duplicate
+        context.insert(duplicatePlace)
+        try context.save()
+
+        let repository = SwiftDataTimelineRepository(modelContext: context)
+        XCTAssertEqual(try repository.mergeDuplicateDayTimelines(), 1)
+
+        let timelines = try context.fetch(FetchDescriptor<DayTimeline>())
+        let places = try context.fetch(FetchDescriptor<VisitPlace>())
+        XCTAssertEqual(timelines.count, 1)
+        XCTAssertEqual(places.count, 2)
+        XCTAssertTrue(places.allSatisfy { $0.dayTimeline?.persistentModelID == timelines[0].persistentModelID })
+    }
+
     func testDeleteMoveUndoRegistrationRestoresMoveSnapshot() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -1498,7 +1843,8 @@ final class TimelineAssemblerTests: XCTestCase {
                 coordinates: [
                     CLLocationCoordinate2D(latitude: 53.55, longitude: 9.99),
                     CLLocationCoordinate2D(latitude: 53.56, longitude: 10.01)
-                ]
+                ],
+                usesDetailedRoute: true
             )
         ]
         let key = try XCTUnwrap(
@@ -1523,6 +1869,7 @@ final class TimelineAssemblerTests: XCTestCase {
         let restoredTrack = try XCTUnwrap(restored.first)
         XCTAssertEqual(restoredTrack.transportMode, .cycling)
         XCTAssertEqual(restoredTrack.coordinates.count, 2)
+        XCTAssertTrue(restoredTrack.usesDetailedRoute)
         XCTAssertEqual(restoredTrack.coordinates.first?.latitude ?? 0, 53.55, accuracy: 0.000_001)
     }
 

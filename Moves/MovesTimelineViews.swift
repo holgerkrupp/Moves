@@ -141,6 +141,7 @@ struct DayTimelinePage: View {
 }
 
 struct DayTimelinePageContent: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
     let isActive: Bool
@@ -150,6 +151,7 @@ struct DayTimelinePageContent: View {
     @State private var provisionalSampleResolvedTitle: String?
     @State private var provisionalSampleResolvedKey: String?
     @State private var presentationCache: DayTimelinePresentationCache
+    @State private var isReviewingImportedData = false
     @Binding private var mapSelection: TimelineMapSelection?
 
     init(
@@ -311,12 +313,18 @@ struct DayTimelinePageContent: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            if LandscapeLayoutSettings.isLandscapePhone(proxy.size) {
-                landscapeContent
-            } else {
-                portraitContent
+        Group {
+            #if targetEnvironment(macCatalyst)
+            macContent
+            #else
+            GeometryReader { proxy in
+                if LandscapeLayoutSettings.isLandscapePhone(proxy.size) {
+                    landscapeContent
+                } else {
+                    portraitContent
+                }
             }
+            #endif
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .task(id: provisionalSampleLookupKey) {
@@ -328,6 +336,41 @@ struct DayTimelinePageContent: View {
         }
         .onChange(of: transportSummaryRefreshKey) { _, _ in
             presentationCache = Self.makePresentationCache(for: dayTimeline)
+        }
+        .sheet(isPresented: $isReviewingImportedData) {
+            NavigationStack {
+                ImportedRouteDataView(
+                    modelContext: modelContext,
+                    initialDate: dayTimeline.dayStart
+                )
+            }
+        }
+    }
+
+    private var macContent: some View {
+        VStack(spacing: 10) {
+            DayMapStrip(
+                dayTimeline: dayTimeline,
+                isActive: isActive,
+                selection: $mapSelection
+            )
+
+            MultiDeviceActivityBanner(resolution: deviceResolution)
+
+            importedDataReviewButton
+
+            ScrollView {
+                timelinePanel(usesSelection: true)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollEdgeEffectStyle(.soft, for: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .safeAreaPadding(.horizontal, 14)
+        .safeAreaInset(edge: .bottom, spacing: 10) {
+            daySummaryPanel
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
         }
     }
 
@@ -342,13 +385,11 @@ struct DayTimelinePageContent: View {
 
                 MultiDeviceActivityBanner(resolution: deviceResolution)
 
+                importedDataReviewButton
+
                 timelinePanel(usesSelection: false)
 
-                DayTransportSummaryView(
-                    metrics: transportSummaryMetrics,
-                    hasData: hasTransportSummaryData
-                )
-                .panelSurface()
+                daySummaryPanel
             }
             .safeAreaPadding(.horizontal, 14)
             .safeAreaPadding(.bottom, 24)
@@ -381,11 +422,9 @@ struct DayTimelinePageContent: View {
 
                     MultiDeviceActivityBanner(resolution: deviceResolution)
 
-                    DayTransportSummaryView(
-                        metrics: transportSummaryMetrics,
-                        hasData: hasTransportSummaryData
-                    )
-                    .panelSurface()
+                    importedDataReviewButton
+
+                    daySummaryPanel
                 }
                 .safeAreaPadding(.bottom, 12)
             }
@@ -393,6 +432,47 @@ struct DayTimelinePageContent: View {
             .scrollEdgeEffectStyle(.soft, for: .top)
         }
         .safeAreaPadding(.horizontal, 14)
+    }
+
+    private var daySummaryPanel: some View {
+        DayTransportSummaryView(
+            metrics: transportSummaryMetrics,
+            hasData: hasTransportSummaryData
+        )
+        .panelSurface()
+    }
+
+    @ViewBuilder
+    private var importedDataReviewButton: some View {
+        if dayTimeline.hasImportedRouteData {
+            Button {
+                isReviewingImportedData = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .foregroundStyle(MovesPalette.routeTracking)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Review imported data")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
+                        Text("Review or delete imported routes for this day")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .panelSurface()
+        }
     }
 
     @ViewBuilder
@@ -627,6 +707,7 @@ enum DayTransportBucket: String, CaseIterable {
     case swimming
     case cycling
     case automotive
+    case motorcycle
     case train
     case plane
     case boat
@@ -641,6 +722,8 @@ enum DayTransportBucket: String, CaseIterable {
             self = .cycling
         case .automotive:
             self = .automotive
+        case .motorcycle:
+            self = .motorcycle
         case .train:
             self = .train
         case .plane:
@@ -662,6 +745,8 @@ enum DayTransportBucket: String, CaseIterable {
             return "Bike"
         case .automotive:
             return "Car"
+        case .motorcycle:
+            return "Motorcycle"
         case .train:
             return "Train"
         case .plane:
@@ -681,6 +766,8 @@ enum DayTransportBucket: String, CaseIterable {
             return "figure.outdoor.cycle"
         case .automotive:
             return "car.fill"
+        case .motorcycle:
+            return "motorcycle.fill"
         case .train:
             return "tram.fill"
         case .plane:
@@ -700,6 +787,8 @@ enum DayTransportBucket: String, CaseIterable {
             return .cycling
         case .automotive:
             return .automotive
+        case .motorcycle:
+            return .motorcycle
         case .train:
             return .train
         case .plane:
@@ -930,15 +1019,10 @@ struct DayMapStrip: View {
                 RoundedRectangle(cornerRadius: Self.collapsedMapCornerRadius, style: .continuous)
                     .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
             }
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: isShowingFullScreenMap ? .topTrailing : .bottomTrailing) {
                 if !fillsAvailableSpace {
-                    if isShowingFullScreenMap {
-                        fullScreenToggleButton(isFullScreen: true)
-                            .safeAreaPadding([.bottom, .trailing], 18)
-                    } else {
-                        fullScreenToggleButton(isFullScreen: false)
-                            .padding(10)
-                    }
+                    fullScreenToggleButton(isFullScreen: isShowingFullScreenMap)
+                        .padding(isShowingFullScreenMap ? 18 : 10)
                 }
             }
             .shadow(color: .black.opacity(isShowingFullScreenMap ? 0.12 : 0), radius: 18, x: 0, y: 8)
@@ -1016,8 +1100,8 @@ struct DayMapStrip: View {
                     )
             }
 
-            if route.coordinates.count > 1 {
-                MapPolyline(coordinates: route.coordinates)
+            ForEach(Array(route.coordinateSegments.enumerated()), id: \.offset) { _, coordinates in
+                MapPolyline(coordinates: coordinates)
                     .stroke(
                         route.tint.opacity(dimsForOtherSelection ? 0.28 : 0.95),
                         lineWidth: isSelected ? route.lineWidth + 4 : route.lineWidth
@@ -1106,7 +1190,7 @@ struct DayMapStrip: View {
     }
 
     private static var expandedMapHeight: CGFloat {
-        max(360, screenBounds.height - expandedMapVerticalMargin)
+        max(360, windowBounds.height - expandedMapVerticalMargin)
     }
 
     private var collapsedSnapshotRouteKey: String {
@@ -1271,7 +1355,11 @@ struct DayMapStrip: View {
 
         for (index, coordinate) in coordinates.enumerated() {
             let point = snapshot.point(for: coordinate)
-            if index == 0 {
+            if index == 0
+                || RouteCoordinateOps.crossesAntimeridian(
+                    from: coordinates[index - 1],
+                    to: coordinate
+                ) {
                 path.move(to: point)
             } else {
                 path.addLine(to: point)
@@ -1313,14 +1401,22 @@ struct DayMapStrip: View {
         path.stroke()
     }
 
-    private static var screenBounds: CGRect {
+    private static var windowBounds: CGRect {
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
 
         if let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive }) {
-            return windowScene.screen.bounds
+            return windowScene.windows.first(where: { $0.isKeyWindow })?.bounds
+                ?? windowScene.windows.first?.bounds
+                ?? windowScene.screen.bounds
         }
 
-        return windowScenes.first?.screen.bounds ?? CGRect(x: 0, y: 0, width: 393, height: 852)
+        if let windowScene = windowScenes.first {
+            return windowScene.windows.first(where: { $0.isKeyWindow })?.bounds
+                ?? windowScene.windows.first?.bounds
+                ?? windowScene.screen.bounds
+        }
+
+        return CGRect(x: 0, y: 0, width: 393, height: 852)
     }
 
     private static var screenScale: CGFloat {

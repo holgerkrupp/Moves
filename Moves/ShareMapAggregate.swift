@@ -9,6 +9,7 @@ struct ShareMapAggregateTrack {
     let id: UUID
     let transportMode: TransportMode
     let coordinates: [CLLocationCoordinate2D]
+    let usesDetailedRoute: Bool
 }
 
 @Model
@@ -43,6 +44,7 @@ enum ShareMapAggregateStore {
         let id: UUID
         let transportModeRawValue: String
         let coordinatesData: Data
+        let usesDetailedRoute: Bool?
     }
 
     static func supports(_ period: MovesSharePeriod) -> Bool {
@@ -80,7 +82,8 @@ enum ShareMapAggregateStore {
                         String(move.endDate.timeIntervalSinceReferenceDate),
                         String(Int(move.distanceMeters.rounded())),
                         move.routeCacheSignature ?? "",
-                        String(storedRouteBytes)
+                        String(storedRouteBytes),
+                        move.usesHighAccuracyRouteTracking ? "detailed" : "synthetic"
                     ].joined(separator: ":")
                 }
                 .joined(separator: ",")
@@ -127,7 +130,8 @@ enum ShareMapAggregateStore {
             StoredTrack(
                 id: $0.id,
                 transportModeRawValue: $0.transportMode.rawValue,
-                coordinatesData: RouteCoordinateStorage.encode($0.coordinates) ?? Data()
+                coordinatesData: RouteCoordinateStorage.encode($0.coordinates) ?? Data(),
+                usesDetailedRoute: $0.usesDetailedRoute
             )
         }
         let encoder = PropertyListEncoder()
@@ -145,7 +149,8 @@ enum ShareMapAggregateStore {
             return ShareMapAggregateTrack(
                 id: track.id,
                 transportMode: TransportMode(rawValue: track.transportModeRawValue) ?? .unknown,
-                coordinates: coordinates
+                coordinates: coordinates,
+                usesDetailedRoute: track.usesDetailedRoute ?? false
             )
         }
     }
@@ -175,16 +180,20 @@ enum ShareMapAggregateBuilder {
     static func refresh(
         period: MovesSharePeriod,
         periodStart: Date,
-        in modelContainer: ModelContainer
+        in modelContainer: ModelContainer,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async {
         guard ShareMapAggregateStore.supports(period) else { return }
+        progress(0)
         let work = Task.detached(priority: .userInitiated) {
             do {
                 try Task.checkCancellation()
+                progress(0.05)
                 let context = ModelContext(modelContainer)
                 let timelines = try context.fetch(
                     FetchDescriptor<DayTimeline>(sortBy: [SortDescriptor(\.dayStart, order: .forward)])
                 )
+                progress(0.12)
                 let selected = selectedTimelines(
                     from: timelines,
                     period: period,
@@ -194,8 +203,10 @@ enum ShareMapAggregateBuilder {
                     timelines: selected,
                     period: period,
                     periodStart: period.start(for: periodStart),
-                    in: context
+                    in: context,
+                    progress: progress
                 )
+                progress(1)
             } catch is CancellationError {
                 return
             } catch {
@@ -228,10 +239,12 @@ enum ShareMapAggregateBuilder {
         timelines: [DayTimeline],
         period: MovesSharePeriod,
         periodStart: Date,
-        in context: ModelContext
+        in context: ModelContext,
+        progress: (@Sendable (Double) -> Void)? = nil
     ) throws {
         guard !timelines.isEmpty,
               let key = ShareMapAggregateStore.periodKey(for: period, date: periodStart) else { return }
+        progress?(0.16)
         let signature = ShareMapAggregateStore.sourceSignature(for: timelines)
         let descriptor = FetchDescriptor<ShareMapAggregate>(
             predicate: #Predicate { $0.periodKey == key },
@@ -239,28 +252,38 @@ enum ShareMapAggregateBuilder {
         )
         let existing = try context.fetch(descriptor)
         if existing.first?.sourceSignature == signature, existing.first?.tracksData != nil {
+            progress?(1)
             return
         }
 
         let maximumCoordinateCount = period == .year ? 80 : 120
-        let tracks = timelines
+        let moves = timelines
             .flatMap(\.moves)
             .sorted { $0.startDate < $1.startDate }
-            .compactMap { move -> ShareMapAggregateTrack? in
-                guard !Task.isCancelled else { return nil }
-                let fallback = MoveRouteGeometry.rawCoordinates(for: move)
-                let routeSignature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
-                let coordinates = move.manualRouteCoordinates
-                    ?? move.cachedRouteCoordinates(for: routeSignature)
-                    ?? fallback
-                guard coordinates.count > 1 else { return nil }
-                return ShareMapAggregateTrack(
+        var tracks: [ShareMapAggregateTrack] = []
+        tracks.reserveCapacity(moves.count)
+        for (index, move) in moves.enumerated() {
+            try Task.checkCancellation()
+            let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+            let routeSignature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+            let coordinates = move.manualRouteCoordinates
+                ?? move.cachedRouteCoordinates(for: routeSignature)
+                ?? fallback
+            if coordinates.count > 1 {
+                tracks.append(ShareMapAggregateTrack(
                     id: move.id,
                     transportMode: move.transportMode,
-                    coordinates: downsampled(coordinates, maximumCount: maximumCoordinateCount)
-                )
+                    coordinates: downsampled(coordinates, maximumCount: maximumCoordinateCount),
+                    usesDetailedRoute: move.usesHighAccuracyRouteTracking
+                ))
             }
+            if index % 8 == 0 || index == moves.count - 1 {
+                let completed = Double(index + 1) / Double(max(moves.count, 1))
+                progress?(0.18 + completed * 0.74)
+            }
+        }
         try Task.checkCancellation()
+        progress?(0.94)
         let data = try ShareMapAggregateStore.encodeTracks(tracks)
 
         let aggregate: ShareMapAggregate
@@ -285,6 +308,7 @@ enum ShareMapAggregateBuilder {
             context.delete(duplicate)
         }
         try context.save()
+        progress?(1)
         log.info("Stored \(tracks.count) tracks for \(key, privacy: .public)")
     }
 

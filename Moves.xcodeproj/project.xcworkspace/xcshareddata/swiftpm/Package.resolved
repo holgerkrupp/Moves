@@ -1,5 +1,5 @@
 {
-  "originHash" : "5c615c8df8332a9b6a79cd3f38cee4415ff8d973ecbf430b52e2b098a95d8797",
+  "originHash" : "0c3631f9b1915cf33a564660a09fb7a7fe7fb72e0dd67984638c1c1538dd72f9",
   "pins" : [
     {
       "identity" : "clouddatapresence",
@@ -8,6 +8,15 @@
       "state" : {
         "branch" : "main",
         "revision" : "822dbe3ccaaed19c09d9a54b22347a5c06ca8efe"
+      }
+    },
+    {
+      "identity" : "cloudkitsyncmonitor",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ggruen/CloudKitSyncMonitor.git",
+      "state" : {
+        "revision" : "a421ba7b38fa2e37bb78fc1425db491ca5e93c9a",
+        "version" : "3.1.0"
       }
     }
   ],

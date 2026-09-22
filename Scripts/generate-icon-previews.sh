@@ -119,13 +119,57 @@ def write_if_changed(path, data):
 
 write_if_changed(swift_path, swift.encode())
 
-with open(plist_path, "rb") as handle:
-    info = plistlib.load(handle)
+# Update only the generated CFBundleIcons block. Re-serializing the complete plist would
+# discard the C preprocessor directives used for platform-specific metadata.
+from xml.sax.saxutils import escape
 
-info["CFBundleIcons"] = {
-    "CFBundleAlternateIcons": {name: {"CFBundleIconName": name} for name in names}
-}
-write_if_changed(plist_path, plistlib.dumps(info, sort_keys=True))
+lines = pathlib.Path(plist_path).read_text().splitlines(keepends=True)
+fragment = [
+    "\t<key>CFBundleIcons</key>\n",
+    "\t<dict>\n",
+    "\t\t<key>CFBundleAlternateIcons</key>\n",
+    "\t\t<dict>\n",
+]
+for name in names:
+    escaped_name = escape(name)
+    fragment.extend([
+        f"\t\t\t<key>{escaped_name}</key>\n",
+        "\t\t\t<dict>\n",
+        "\t\t\t\t<key>CFBundleIconName</key>\n",
+        f"\t\t\t\t<string>{escaped_name}</string>\n",
+        "\t\t\t</dict>\n",
+    ])
+fragment.extend(["\t\t</dict>\n", "\t</dict>\n"])
+
+key_index = next(
+    (index for index, line in enumerate(lines) if line.strip() == "<key>CFBundleIcons</key>"),
+    None,
+)
+if key_index is None:
+    # Insert before the root dictionary's closing tag.
+    end_index = max(index for index, line in enumerate(lines) if line.strip() == "</dict>")
+    lines[end_index:end_index] = fragment
+else:
+    value_index = key_index + 1
+    if value_index >= len(lines) or lines[value_index].strip() != "<dict>":
+        raise RuntimeError("CFBundleIcons does not contain a dictionary in Info.plist")
+
+    depth = 0
+    end_index = None
+    for index in range(value_index, len(lines)):
+        stripped = lines[index].strip()
+        if stripped == "<dict>":
+            depth += 1
+        elif stripped == "</dict>":
+            depth -= 1
+            if depth == 0:
+                end_index = index + 1
+                break
+    if end_index is None:
+        raise RuntimeError("Could not find the end of CFBundleIcons in Info.plist")
+    lines[key_index:end_index] = fragment
+
+write_if_changed(plist_path, "".join(lines).encode())
 PY
 
 # --- 2. Which previews need generating? --------------------------------------------------

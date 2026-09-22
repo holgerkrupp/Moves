@@ -80,6 +80,7 @@ final class WatchLocationTracker: NSObject, ObservableObject {
     private var activeSamples: [CLLocation] = []
     private var activeStartedAt: Date?
     private var syncedRouteCoordinates: [CLLocationCoordinate2D] = []
+    private var routeTransferInProgress = false
 
     override init() {
         super.init()
@@ -109,11 +110,13 @@ final class WatchLocationTracker: NSObject, ObservableObject {
     func flushStoredRoutes() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
-        guard session.activationState == .activated else { return }
+        guard session.activationState == .activated, !routeTransferInProgress else { return }
+        guard let fileURL = storedRouteFileURLs().sorted(by: { $0.path < $1.path }).first else { return }
 
-        for fileURL in storedRouteFileURLs() {
-            session.transferFile(fileURL, metadata: nil)
-        }
+        // WatchConnectivity delivers this app as a short-lived background task.
+        // Queue only one file so a backlog cannot exhaust the 2-second watchdog.
+        routeTransferInProgress = true
+        session.transferFile(fileURL, metadata: nil)
     }
 
     private func startHighAccuracyTracking() {
@@ -302,14 +305,16 @@ extension WatchLocationTracker: WCSessionDelegate {
     ) {
         Task { @MainActor in
             self.flushStoredRoutes()
-            self.refreshDaySummary()
-            self.refreshTodayRouteCoordinates()
         }
     }
 
     nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        guard error == nil else { return }
-        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        Task { @MainActor in
+            self.routeTransferInProgress = false
+            guard error == nil else { return }
+            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+            self.flushStoredRoutes()
+        }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
@@ -317,7 +322,6 @@ extension WatchLocationTracker: WCSessionDelegate {
         WatchWidgetSharedStore.userDefaults.set(data, forKey: WatchWidgetSharedStore.snapshotKey)
         Task { @MainActor in
             self.refreshDaySummary()
-            self.refreshTodayRouteCoordinates()
         }
     }
 }

@@ -1,3 +1,4 @@
+#if !targetEnvironment(macCatalyst)
 import ActivityKit
 import SwiftUI
 import WidgetKit
@@ -66,3 +67,4 @@ struct MovesRouteTrackingLiveActivityWidget: Widget {
         }
     }
 }
+#endif

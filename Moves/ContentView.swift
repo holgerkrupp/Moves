@@ -172,6 +172,8 @@ func trackingStatusBannerData(
     for captureManager: MovesLocationCaptureManager,
     context: TrackingStatusBannerContext
 ) -> TrackingStatusBannerData? {
+    guard captureManager.isLocationTrackingAvailable else { return nil }
+
     if captureManager.isDemoMode {
         return nil
     }
@@ -245,7 +247,7 @@ func trackingStatusBannerData(
     case .notDetermined:
         return TrackingStatusBannerData(
             title: captureManager.trackingStatusText,
-            message: "Open Moves to allow location access and start recording.",
+            message: "Allow location access to start recording on this device.",
             systemImage: "location.slash",
             tint: .secondary
         )
@@ -329,6 +331,7 @@ private func temporaryRouteTrackingAutoStopText(
 
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
+    @EnvironmentObject private var routeFileImporter: RouteFileImporter
     @EnvironmentObject private var undoController: AppUndoController
     @EnvironmentObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @EnvironmentObject private var multiDevicePresenceManager: MultiDevicePresenceManager
@@ -343,11 +346,14 @@ struct ContentView: View {
     @State private var selectedDayKey = ""
     @State private var selectedPageIndex = 0
     @State private var isShowingSettings = false
-    @State private var isShowingStatisticsSearch = false
     @State private var isShowingRouteTrackingSettings = false
     @State private var isShowingDatePicker = false
     @State private var timelineColumnVisibility = NavigationSplitViewVisibility.all
     @State private var timelineMapSelection: TimelineMapSelection?
+    @State private var pendingRouteImportURLs: [URL] = []
+    @State private var routeImportFlushTask: Task<Void, Never>?
+    @State private var isShowingDroppedRouteImportOptions = false
+    @State private var droppedRouteImportConfiguration = RouteFileImportConfiguration()
 
     private var selectedDay: DayTimeline? {
         guard dayTimelines.indices.contains(selectedPageIndex) else { return nil }
@@ -383,7 +389,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {
             if usesSplitNavigation {
                 timelineSplitWorkspace
             } else {
@@ -392,17 +398,15 @@ struct ContentView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
         .sheet(isPresented: $isShowingSettings) {
             MovesSettingsView(
                 dayTimelines: dayTimelines,
                 selectedDayKey: selectedDayKey,
-                captureManager: captureManager
-            )
-        }
-        .sheet(isPresented: $isShowingStatisticsSearch) {
-            MovesStatisticsSearchView(
-                dayTimelines: dayTimelines,
-                initialDate: selectedDay?.dayStart ?? .now
+                captureManager: captureManager,
+                routeFileImporter: routeFileImporter,
+                modelContext: modelContext
             )
         }
         .sheet(isPresented: $isShowingRouteTrackingSettings) {
@@ -411,14 +415,31 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingDatePicker) {
             datePickerSheet
         }
+        .sheet(isPresented: $isShowingDroppedRouteImportOptions, onDismiss: {
+            pendingRouteImportURLs.removeAll()
+        }) {
+            RouteFileImportOptionsView(
+                configuration: $droppedRouteImportConfiguration,
+                actionTitle: "Import Dropped Items",
+                actionSystemImage: "square.and.arrow.down"
+            ) {
+                let urls = pendingRouteImportURLs
+                pendingRouteImportURLs.removeAll()
+                isShowingDroppedRouteImportOptions = false
+                Task { @MainActor in
+                    await Task.yield()
+                    routeFileImporter.start(urls: urls, configuration: droppedRouteImportConfiguration)
+                }
+            }
+        }
         .alert(
-            "Use location on this device?",
+            "Use this device for tracking?",
             isPresented: $multiDevicePresenceManager.shouldChooseLocationRole
         ) {
-            Button("Listen for location changes") {
+            Button("Enable tracking") {
                 multiDevicePresenceManager.choose(.tracking, captureManager: captureManager)
             }
-            Button("Read-only / management") {
+            Button("Not now") {
                 multiDevicePresenceManager.choose(.management, captureManager: captureManager)
             }
         } message: {
@@ -426,17 +447,21 @@ struct ContentView: View {
         }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
-            multiDevicePresenceManager.refreshPresence()
-            await captureManager.start()
+            if captureManager.isLocationTrackingAvailable {
+                multiDevicePresenceManager.refreshPresence()
+                await captureManager.start()
+            }
         }
         .onAppear {
             openCurrentDay()
+            repairDuplicateDayTimelinesIfNeeded()
             modelContext.undoManager = undoController.manager
             publishWidgetSnapshot()
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
         .onChange(of: dayTimelines.map(\.dayKey)) { _, _ in
+            repairDuplicateDayTimelinesIfNeeded()
             syncSelectedDayIfNeeded()
             publishWidgetSnapshot()
         }
@@ -454,13 +479,18 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            multiDevicePresenceManager.refreshPresence()
+            if captureManager.isLocationTrackingAvailable {
+                multiDevicePresenceManager.refreshPresence()
+            }
             openCurrentDay()
             publishWidgetSnapshot()
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
         .onOpenURL(perform: handleDeepLink)
+        .dropDestination(for: RouteFileDropItem.self) { items, _ in
+            enqueueRouteImport(items.map(\.url))
+        }
         .onChange(of: selectedPageIndex) { _, newIndex in
             guard dayTimelines.indices.contains(newIndex) else { return }
             selectedDayKey = dayTimelines[newIndex].dayKey
@@ -479,6 +509,18 @@ struct ContentView: View {
             .opacity(0.01)
             .accessibilityHidden(true)
         }
+        .focusedSceneValue(
+            \.movesCommandActions,
+            MovesCommandActions(
+                showSettings: { isShowingSettings = true },
+                chooseDate: { isShowingDatePicker = true },
+                selectToday: openCurrentDay,
+                selectOlderDay: selectOlderDay,
+                selectNewerDay: selectNewerDay,
+                canSelectOlderDay: canGoOlder,
+                canSelectNewerDay: canGoNewer
+            )
+        )
     }
 
     private var usesSplitNavigation: Bool {
@@ -489,7 +531,9 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $timelineColumnVisibility) {
             recentDatesSidebar
         } detail: {
-            compactTimelineContent
+            NavigationStack {
+                compactTimelineContent
+            }
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -504,6 +548,8 @@ struct ContentView: View {
             }
         }
         .navigationTitle("Moves")
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 190, ideal: 240, max: 320)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -531,22 +577,24 @@ struct ContentView: View {
             background
 
             VStack(spacing: 12) {
-                if let trackingPermissionPrompt {
-                    trackingPermissionBanner(trackingPermissionPrompt)
-                        .safeAreaPadding(.horizontal, 14)
-                }
+                if captureManager.isLocationTrackingAvailable {
+                    if let trackingPermissionPrompt {
+                        trackingPermissionBanner(trackingPermissionPrompt)
+                            .safeAreaPadding(.horizontal, 14)
+                    }
 
-                if let bannerData = trackingStatusBannerData(
-                    for: captureManager,
-                    context: .timeline
-                ) {
-                    TrackingStatusBanner(
-                        data: bannerData,
-                        buttonAction: {
-                            captureManager.disableTemporaryRouteTracking()
-                        }
-                    )
-                    .safeAreaPadding(.horizontal, 14)
+                    if let bannerData = trackingStatusBannerData(
+                        for: captureManager,
+                        context: .timeline
+                    ) {
+                        TrackingStatusBanner(
+                            data: bannerData,
+                            buttonAction: {
+                                captureManager.disableTemporaryRouteTracking()
+                            }
+                        )
+                        .safeAreaPadding(.horizontal, 14)
+                    }
                 }
 
                 if dayTimelines.isEmpty {
@@ -581,31 +629,37 @@ struct ContentView: View {
                 } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
+                .keyboardShortcut(",", modifiers: .command)
                 .help("Settings")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingStatisticsSearch = true
+                NavigationLink {
+                    MovesStatisticsSearchView(
+                        dayTimelines: dayTimelines,
+                        initialDate: selectedDay?.dayStart ?? .now
+                    )
                 } label: {
-                    Label("Statistics & Search", systemImage: "magnifyingglass")
+                    Label("Statistics & Share", systemImage: "chart.bar.xaxis")
                 }
-                .help("Statistics & Search")
+                .help("Statistics & Share")
             }
 
-            ToolbarItem(placement: .topBarTrailing) {
-                RouteTrackingToolbarButton(
-                    endsAt: captureManager.temporaryRouteTrackingEndsAt,
-                    authorizationStatus: captureManager.authorizationStatus,
-                    tapAction: {
-                        isShowingRouteTrackingSettings = true
-                    },
-                    longPressAction: {
-                        captureManager.enableTemporaryRouteTracking(
-                            duration: captureManager.temporaryRouteTrackingDuration
-                        )
-                    }
-                )
+            if captureManager.isLocationTrackingAvailable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    RouteTrackingToolbarButton(
+                        endsAt: captureManager.temporaryRouteTrackingEndsAt,
+                        authorizationStatus: captureManager.authorizationStatus,
+                        tapAction: {
+                            isShowingRouteTrackingSettings = true
+                        },
+                        longPressAction: {
+                            captureManager.enableTemporaryRouteTracking(
+                                duration: captureManager.temporaryRouteTrackingDuration
+                            )
+                        }
+                    )
+                }
             }
         }
     }
@@ -658,6 +712,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .frostedCircle(enabled: canGoOlder)
+            .hoverEffect(.highlight)
             .disabled(!canGoOlder)
 
             VStack(spacing: 2) {
@@ -665,11 +720,20 @@ struct ContentView: View {
                     Button {
                         isShowingDatePicker = true
                     } label: {
-                        Text(selectedDay.dayStart, format: .dateTime.weekday(.wide).day().month(.wide))
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.primary.opacity(0.92))
+                        HStack(spacing: 6) {
+                            Text(selectedDay.dayStart, format: .dateTime.weekday(.wide).day().month(.wide))
+                            if selectedDay.hasImportedRouteData {
+                                Image(systemName: "tray.and.arrow.down.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(MovesPalette.routeTracking)
+                                    .accessibilityLabel("Contains imported data")
+                            }
+                        }
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.primary.opacity(0.92))
                     }
                     .buttonStyle(.plain)
+                    .hoverEffect(.highlight)
 
                     Text("\(selectedDay.uniqueLocationCount) places   \(selectedDay.moves.count) moves")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -687,6 +751,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .frostedCircle(enabled: canGoNewer)
+            .hoverEffect(.highlight)
             .disabled(!canGoNewer)
         }
         .padding(.horizontal, 4)
@@ -712,7 +777,16 @@ struct ContentView: View {
     }
 
     private var trackingPermissionPrompt: TrackingPermissionPrompt? {
+        guard captureManager.isLocationTrackingAvailable else { return nil }
+
         if captureManager.isDemoMode {
+            return nil
+        }
+
+        // Location permission is only relevant after the user has opted this
+        // device into tracking.
+        guard captureManager.isTrackingRoleDecided,
+              captureManager.isBackgroundLocationListeningEnabled else {
             return nil
         }
 
@@ -769,6 +843,20 @@ struct ContentView: View {
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
+
+        #if targetEnvironment(macCatalyst)
+        // Catalyst is a review/import client. Never manufacture placeholder records while
+        // CloudKit is still populating a fresh local store.
+        if let todayIndex = dayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
+            selectedDayKey = todayKey
+            selectedPageIndex = todayIndex
+        } else if let latestIndex = dayTimelines.indices.last {
+            selectedDayKey = dayTimelines[latestIndex].dayKey
+            selectedPageIndex = latestIndex
+        }
+        return
+        #endif
+
         var existingKeys = Set(dayTimelines.map(\.dayKey))
         var didInsertDay = false
 
@@ -810,6 +898,19 @@ struct ContentView: View {
         }
     }
 
+    private func repairDuplicateDayTimelinesIfNeeded() {
+        let hasDuplicates = Dictionary(grouping: dayTimelines, by: \.dayKey)
+            .contains { $0.value.count > 1 }
+        guard hasDuplicates else { return }
+
+        do {
+            let repository = SwiftDataTimelineRepository(modelContext: modelContext)
+            _ = try repository.mergeDuplicateDayTimelines()
+        } catch {
+            print("Failed to merge duplicate day timelines: \(error.localizedDescription)")
+        }
+    }
+
     private func publishWidgetSnapshot() {
         guard let dayTimeline = selectedDay ?? dayTimelines.last else { return }
         TimelineWidgetSnapshotStore.save(.make(from: dayTimeline))
@@ -825,13 +926,20 @@ struct ContentView: View {
     }
 
     private func handleDeepLink(_ url: URL) {
+        if url.isFileURL {
+            enqueueRouteImport([url])
+            return
+        }
+
         guard url.scheme?.lowercased() == "moves" else { return }
 
         switch url.host?.lowercased() {
         case "today":
             openCurrentDay()
         case "tracking":
-            isShowingRouteTrackingSettings = true
+            if captureManager.isLocationTrackingAvailable {
+                isShowingRouteTrackingSettings = true
+            }
         case "place":
             guard let identifier = url.pathComponents.dropFirst().first,
                   let placeID = UUID(uuidString: identifier),
@@ -842,6 +950,20 @@ struct ContentView: View {
             selectedDayKey = dayTimelines[dayIndex].dayKey
         default:
             break
+        }
+    }
+
+    private func enqueueRouteImport(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        pendingRouteImportURLs.append(contentsOf: urls)
+        routeImportFlushTask?.cancel()
+        routeImportFlushTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let urls = pendingRouteImportURLs
+            guard !urls.isEmpty else { return }
+            droppedRouteImportConfiguration = RouteFileImportConfiguration()
+            isShowingDroppedRouteImportOptions = true
         }
     }
 
@@ -955,9 +1077,20 @@ private struct DaySidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(day.dayStart, format: .dateTime.weekday(.wide).day().month(.abbreviated))
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary)
+            HStack(spacing: 6) {
+                Text(day.dayStart, format: .dateTime.weekday(.wide).day().month(.abbreviated))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 4)
+
+                if day.hasImportedRouteData {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(MovesPalette.routeTracking)
+                        .accessibilityLabel("Contains imported data")
+                }
+            }
 
             Text(summary)
                 .font(.system(size: 12, weight: .medium, design: .rounded))

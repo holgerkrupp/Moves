@@ -1380,7 +1380,7 @@ private struct MovesSharePreviewTile: View {
     }
 }
 
-private struct MovesActivityView: UIViewControllerRepresentable {
+struct MovesActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
@@ -1633,7 +1633,15 @@ private enum MovesShareMapRenderer {
                 let path = CGMutablePath()
                 for (index, coordinate) in track.coordinates.enumerated() {
                     let point = snapshot.point(for: coordinate)
-                    index == 0 ? path.move(to: point) : path.addLine(to: point)
+                    if index == 0
+                        || RouteCoordinateOps.crossesAntimeridian(
+                            from: track.coordinates[index - 1],
+                            to: coordinate
+                        ) {
+                        path.move(to: point)
+                    } else {
+                        path.addLine(to: point)
+                    }
                 }
                 return HeatPath(
                     path: path,
@@ -1748,7 +1756,11 @@ private enum MovesShareMapRenderer {
             let path = CGMutablePath()
             for (index, coordinate) in track.coordinates.enumerated() {
                 let point = snapshot.point(for: coordinate)
-                if index == 0 {
+                if index == 0
+                    || RouteCoordinateOps.crossesAntimeridian(
+                        from: track.coordinates[index - 1],
+                        to: coordinate
+                    ) {
                     path.move(to: point)
                 } else {
                     path.addLine(to: point)
@@ -1780,7 +1792,15 @@ private enum MovesShareMapRenderer {
             let path = CGMutablePath()
             for (index, coordinate) in track.coordinates.enumerated() {
                 let point = snapshot.point(for: coordinate)
-                index == 0 ? path.move(to: point) : path.addLine(to: point)
+                if index == 0
+                    || RouteCoordinateOps.crossesAntimeridian(
+                        from: track.coordinates[index - 1],
+                        to: coordinate
+                    ) {
+                    path.move(to: point)
+                } else {
+                    path.addLine(to: point)
+                }
             }
 
             context.addPath(path)
@@ -1887,6 +1907,7 @@ private enum MovesShareMapRenderer {
         case .swimming: return .systemCyan
         case .cycling: return .systemTeal
         case .automotive: return .systemBlue
+        case .motorcycle: return .systemBlue
         case .train: return .systemPurple
         case .plane: return .systemIndigo
         case .boat: return .systemMint

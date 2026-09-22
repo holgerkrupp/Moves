@@ -1,5 +1,7 @@
-import ActivityKit
 import Foundation
+
+#if !targetEnvironment(macCatalyst)
+import ActivityKit
 
 /// Shared between the app and widget extension so ActivityKit decodes one stable schema.
 struct MovesRouteTrackingAttributes: ActivityAttributes {
@@ -12,3 +14,4 @@ struct MovesRouteTrackingAttributes: ActivityAttributes {
 
     let startedAt: Date
 }
+#endif
