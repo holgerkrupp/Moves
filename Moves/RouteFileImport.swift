@@ -2306,7 +2306,7 @@ struct RouteTrackDTO: Sendable {
     }
 }
 
-private enum RouteTrackParserWorker {
+enum RouteTrackParserWorker {
     private static let pointChunkSize = 4_096
 
     static func parse(url: URL) throws -> [RouteTrackDTO] {

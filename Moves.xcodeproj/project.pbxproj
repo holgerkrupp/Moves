@@ -117,6 +117,7 @@
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; };
 		E21000013020000100000001 /* ImportQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21000013020000100000000 /* ImportQueueTests.swift */; };
+		E22000013020000100000001 /* ImportStressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22000013020000100000000 /* ImportStressTests.swift */; };
 		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; };
 		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; };
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
@@ -297,6 +298,7 @@
 		E10000013020000100000000 /* MovesStatisticsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchView.swift; sourceTree = "<group>"; };
 		E20000013020000100000000 /* MovesStatisticsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchTests.swift; sourceTree = "<group>"; };
 		E21000013020000100000000 /* ImportQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueTests.swift; sourceTree = "<group>"; };
+		E22000013020000100000000 /* ImportStressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportStressTests.swift; sourceTree = "<group>"; };
 		E30000013030000100000000 /* MovesKnownLocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesKnownLocationsView.swift; sourceTree = "<group>"; };
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
@@ -501,6 +503,7 @@
 				D10000013010000100000002 /* DawarichSyncTests.swift */,
 				E20000013020000100000000 /* MovesStatisticsSearchTests.swift */,
 				E21000013020000100000000 /* ImportQueueTests.swift */,
+				E22000013020000100000000 /* ImportStressTests.swift */,
 				9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */,
 			);
 			path = MovesTests;
@@ -862,6 +865,7 @@
 				D10000013010000100000003 /* DawarichSyncTests.swift in Sources */,
 				E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */,
 				E21000013020000100000001 /* ImportQueueTests.swift in Sources */,
+				E22000013020000100000001 /* ImportStressTests.swift in Sources */,
 				9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
