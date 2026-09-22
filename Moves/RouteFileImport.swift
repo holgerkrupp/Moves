@@ -695,7 +695,12 @@ final class RouteFileImporter: ObservableObject {
                 await Task.yield()
                 let url = URL(fileURLWithPath: persisted.files[persisted.nextIndex])
                 importProgressText = "Importing \(persisted.nextIndex + 1) of \(persisted.files.count): \(url.lastPathComponent)"
-                let tracks = try loadTracks(from: url)
+                let parsedDTOs = try await Task.detached(priority: .utility) {
+                    try Task.checkCancellation()
+                    return try RouteTrackParserWorker.parse(url: url)
+                }.value
+                try Task.checkCancellation()
+                let tracks = parsedDTOs.map { $0.makeImportedTrack() }
                 if tracks.contains(where: { !$0.hasOriginalTimestamps }) {
                     try quarantineFailedImport(url, configuration: persisted.configuration)
                     persisted.failedFileCount = (persisted.failedFileCount ?? 0) + 1
@@ -784,7 +789,11 @@ final class RouteFileImporter: ObservableObject {
 
         let url = RouteFileImportStore.failedImportsDirectory
             .appendingPathComponent(failedImport.storedFileName)
-        let tracks = try loadTracks(from: url)
+        let parsedDTOs = try await Task.detached(priority: .utility) {
+            try Task.checkCancellation()
+            return try RouteTrackParserWorker.parse(url: url)
+        }.value
+        let tracks = parsedDTOs.map { $0.makeImportedTrack() }
         guard !tracks.isEmpty else { throw RouteFileImportError.noRouteGeometry }
 
         let retargetedTracks = retarget(tracks, to: targetDate)
@@ -1056,7 +1065,10 @@ final class RouteFileImporter: ObservableObject {
             let name = String(data: data[nameStart..<(nameStart + nameLength)], encoding: .utf8) ?? ""
             cursor = nameStart + nameLength + extraLength + commentLength
             let nameURL = URL(fileURLWithPath: name)
-            guard isSupportedRouteFile(nameURL), !name.hasSuffix("/") else { continue }
+            guard isSupportedRouteFile(nameURL), !name.hasSuffix("/"), isSafeArchivePath(name) else {
+                if name.hasPrefix("/") || name.split(separator: "/").contains("..") { throw RouteFileImportError.invalidArchive }
+                continue
+            }
             guard localOffset + 30 <= data.count, data.uint32LE(at: localOffset) == 0x04034B50 else { throw RouteFileImportError.invalidArchive }
             let localNameLength = Int(data.uint16LE(at: localOffset + 26))
             let localExtraLength = Int(data.uint16LE(at: localOffset + 28))
@@ -1078,6 +1090,7 @@ final class RouteFileImporter: ObservableObject {
     }
 
     private func inflateZipDeflate(_ data: Data) throws -> Data {
+        let maximumInflatedEntrySize = 128 * 1024 * 1024
         let emptyDestination = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
         let emptySource = UnsafePointer<UInt8>(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
         defer {
@@ -1103,7 +1116,12 @@ final class RouteFileImporter: ObservableObject {
                 stream.dst_ptr = buffer
                 stream.dst_size = bufferSize
                 let status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
-                output.append(buffer, count: bufferSize - stream.dst_size)
+                let produced = bufferSize - stream.dst_size
+                guard output.count + produced <= maximumInflatedEntrySize else {
+                    throw RouteFileImportError.invalidArchive
+                }
+                output.append(buffer, count: produced)
+                try Task.checkCancellation()
                 if status == COMPRESSION_STATUS_ERROR { throw RouteFileImportError.invalidArchive }
                 if status == COMPRESSION_STATUS_END { break }
                 if stream.src_size == 0 && stream.dst_size == bufferSize { break }
@@ -1114,6 +1132,10 @@ final class RouteFileImporter: ObservableObject {
 
     private func isSupportedRouteFile(_ url: URL) -> Bool {
         ["gpx", "tcx", "kml", "geojson", "json"].contains(url.pathExtension.lowercased())
+    }
+
+    private func isSafeArchivePath(_ name: String) -> Bool {
+        !name.hasPrefix("/") && !name.split(separator: "/").contains("..")
     }
 
     private enum RouteFileImportError: LocalizedError {
@@ -1931,6 +1953,83 @@ struct ImportedRouteTrack {
     var startsAfterVisitGap: Bool = false
 }
 
+/// The parser boundary deliberately contains only value types.  In particular, CLLocation is
+/// Foundation/UIKit state and must not cross the worker task boundary.
+struct RouteTrackPointDTO: Sendable, Hashable {
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let timestamp: Date
+}
+
+struct RouteTrackDTO: Sendable {
+    let points: [RouteTrackPointDTO]
+    let transportMode: TransportMode
+    let hasOriginalTimestamps: Bool
+    var startsAfterVisitGap = false
+
+    func makeImportedTrack() -> ImportedRouteTrack {
+        ImportedRouteTrack(
+            locations: points.map {
+                CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude),
+                    altitude: $0.altitude,
+                    horizontalAccuracy: 5,
+                    verticalAccuracy: $0.altitude == 0 ? -1 : 5,
+                    course: -1,
+                    speed: -1,
+                    timestamp: $0.timestamp
+                )
+            },
+            transportMode: transportMode,
+            hasOriginalTimestamps: hasOriginalTimestamps,
+            startsAfterVisitGap: startsAfterVisitGap
+        )
+    }
+}
+
+private enum RouteTrackParserWorker {
+    private static let pointChunkSize = 4_096
+
+    static func parse(url: URL) throws -> [RouteTrackDTO] {
+        let name = url.lastPathComponent
+        let lowercasedName = name.lowercased()
+        if lowercasedName.hasSuffix(".gpx") || lowercasedName.hasSuffix(".tcx") || lowercasedName.hasSuffix(".kml") {
+            return try XMLRouteTrackParser.parse(url: url, fileName: name).flatMap {
+                chunk(RouteTrackDTO(points: $0.locations.map {
+                    RouteTrackPointDTO(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude,
+                                       altitude: $0.altitude, timestamp: $0.timestamp)
+                }, transportMode: $0.transportMode, hasOriginalTimestamps: $0.hasOriginalTimestamps
+                ))
+            }
+        }
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        if lowercasedName.hasSuffix(".geojson") || lowercasedName.hasSuffix(".json") {
+            return try GeoJSONRouteTrackParser.parse(data: data, fileName: name).flatMap { track in
+                chunk(RouteTrackDTO(points: track.locations.map {
+                    RouteTrackPointDTO(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude,
+                                       altitude: $0.altitude, timestamp: $0.timestamp)
+                }, transportMode: track.transportMode, hasOriginalTimestamps: track.hasOriginalTimestamps,
+                    startsAfterVisitGap: track.startsAfterVisitGap
+                ))
+            }
+        }
+        return []
+    }
+
+    private static func chunk(_ track: RouteTrackDTO) -> [RouteTrackDTO] {
+        guard track.points.count > pointChunkSize else { return [track] }
+        return stride(from: 0, to: track.points.count, by: pointChunkSize).compactMap { start in
+            let end = min(start + pointChunkSize, track.points.count)
+            guard end - start >= 2 else { return nil }
+            return RouteTrackDTO(points: Array(track.points[start..<end]),
+                                 transportMode: track.transportMode,
+                                 hasOriginalTimestamps: track.hasOriginalTimestamps,
+                                 startsAfterVisitGap: start == 0 && track.startsAfterVisitGap)
+        }
+    }
+}
+
 private enum ImportedRouteTrackSegmentation {
     static func split(_ tracks: [ImportedRouteTrack]) -> [ImportedRouteTrack] {
         var result: [ImportedRouteTrack] = []
@@ -2112,6 +2211,21 @@ final class XMLRouteTrackParser: NSObject, XMLParserDelegate {
                 transportMode: delegate.transportMode,
                 hasOriginalTimestamps: $0.hasOriginalTimestamps
             ) }
+        return ImportedRouteTrackSegmentation.split(parsedTracks)
+    }
+
+    static func parse(url: URL, fileName: String) throws -> [ImportedRouteTrack] {
+        guard let stream = InputStream(url: url) else { throw CocoaError(.fileReadUnknown) }
+        let parser = XMLParser(stream: stream)
+        let delegate = XMLRouteTrackParser(fileName: fileName)
+        parser.delegate = delegate
+        guard parser.parse() else { throw parser.parserError ?? CocoaError(.fileReadCorruptFile) }
+        delegate.finalizeCurrentTrack()
+        delegate.finalizeKMLGeometry()
+        let parsedTracks = delegate.tracks
+            .filter { $0.locations.count >= 2 }
+            .map { ImportedRouteTrack(locations: $0.locations, transportMode: delegate.transportMode,
+                                      hasOriginalTimestamps: $0.hasOriginalTimestamps) }
         return ImportedRouteTrackSegmentation.split(parsedTracks)
     }
 
