@@ -44,6 +44,21 @@ final class ImportQueueTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotIncludesQueueSummaryAndCounters() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = ImportCoordinator(store: store)
+        var job = ImportJobRecord(displayName: "Routes", state: .importing, phase: .parsing)
+        job.counters = ImportJobCounters(itemCount: 4, completedItemCount: 3, routeCount: 2, sampleCount: 18)
+        try coordinator.enqueue(job)
+
+        XCTAssertEqual(coordinator.snapshot.unfinishedJobs.map(\.id), [job.id])
+        XCTAssertEqual(coordinator.snapshot.aggregateProgress ?? -1, 0.75, accuracy: 0.001)
+        XCTAssertEqual(coordinator.snapshot.jobs.first?.phase, .parsing)
+        XCTAssertEqual(coordinator.snapshot.jobs.first?.counters.sampleCount, 18)
+    }
+
+    @MainActor
     func testRetryClearsRecoverableError() throws {
         let (store, directory) = try makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }

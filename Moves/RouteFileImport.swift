@@ -23,42 +23,6 @@ struct FailedRouteImport: Codable, Identifiable, Hashable {
     let configuration: RouteFileImportConfiguration
 }
 
-enum RouteFileImportMappingMode: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
-    case automatic
-    case dedicatedTransport
-    case raw
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .automatic: "Automatic map mapping"
-        case .dedicatedTransport: "Use dedicated transport mode"
-        case .raw: "Import raw data"
-        }
-    }
-}
-
-enum RouteFileExistingDataPolicy: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
-    case skipDate
-    case expandAroundExisting
-    case overwriteExisting
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .skipDate: "Skip dates that already contain data"
-        case .expandAroundExisting: "Expand around existing time ranges"
-        case .overwriteExisting: "Overwrite existing time ranges"
-        }
-    }
-}
-
-struct RouteFileImportConfiguration: Codable, Hashable, Sendable {
-    var mappingMode: RouteFileImportMappingMode = .automatic
-    var dedicatedTransportMode: TransportMode = .unknown
-    var existingDataPolicy: RouteFileExistingDataPolicy = .skipDate
-}
-
 struct ImportedRouteDataFilter {
     var startDate: Date?
     var endDate: Date?
@@ -518,14 +482,18 @@ final class RouteFileImporter: ObservableObject {
     /// Compatibility facade for the existing Settings UI. Durable queue records are owned by
     /// ImportCoordinator; this class remains responsible only for presenting route-file progress
     /// while its worker is migrated incrementally.
-    private let importCoordinator: ImportCoordinator
+    let importCoordinator: ImportCoordinator
     private var activeJobID: UUID?
     private var importTask: Task<Void, Never>?
     private var shouldPause = false
 
-    init(modelContext: ModelContext) {
+    convenience init(modelContext: ModelContext) {
+        self.init(modelContext: modelContext, importCoordinator: ImportCoordinator())
+    }
+
+    init(modelContext: ModelContext, importCoordinator: ImportCoordinator) {
         self.modelContainer = modelContext.container
-        self.importCoordinator = ImportCoordinator()
+        self.importCoordinator = importCoordinator
         self.failedImports = RouteFileImportStore.failedImports
         let persistedState = RouteFileImportStore.state?.state ?? .idle
         state = persistedState == .running ? .paused : persistedState
@@ -686,6 +654,11 @@ final class RouteFileImporter: ObservableObject {
         importPhase = "Importing route data"
         persisted.state = .running
         RouteFileImportStore.state = persisted
+        updateActiveJob { job in
+            job.state = .importing
+            job.phase = .importing
+            job.updatedAt = .now
+        }
         let context = ModelContext(modelContainer)
         let repository = SwiftDataTimelineRepository(modelContext: context)
         do {
@@ -719,6 +692,15 @@ final class RouteFileImporter: ObservableObject {
                 persisted.updatedAt = .now
                 RouteFileImportStore.state = persisted
                 importProgress = Double(persisted.nextIndex) / Double(max(persisted.files.count, 1))
+                updateActiveJob { job in
+                    job.state = .importing
+                    job.phase = .importing
+                    job.counters.completedItemCount = persisted.importedFileCount
+                    job.counters.routeCount = persisted.routeCount
+                    job.counters.sampleCount = persisted.sampleCount
+                    job.counters.failedItemCount = persisted.failedFileCount ?? 0
+                    job.updatedAt = .now
+                }
             }
             try repository.saveIfNeeded()
             importPhase = "Naming imported places (throttled)"
@@ -779,6 +761,13 @@ final class RouteFileImporter: ObservableObject {
             lastErrorMessage = error.localizedDescription
             importPhase = "Import failed"
         }
+    }
+
+    private func updateActiveJob(_ update: (inout ImportJobRecord) -> Void) {
+        guard let activeJobID,
+              var job = importCoordinator.jobs.first(where: { $0.id == activeJobID }) else { return }
+        update(&job)
+        try? importCoordinator.update(job)
     }
 
     func resolveFailedImport(_ id: UUID, targetDate: Date) async throws {

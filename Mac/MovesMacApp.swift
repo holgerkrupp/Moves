@@ -7,6 +7,7 @@ import SwiftUI
 struct MovesMacApp: App {
     private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
     private let modelContainer: ModelContainer
+    @StateObject private var importCoordinator = ImportCoordinator()
 
     init() {
         do { modelContainer = try Self.makeModelContainer() }
@@ -62,10 +63,12 @@ private struct MacRecentItem: Identifiable {
 }
 
 private struct MovesMacBrowser: View {
+    @EnvironmentObject private var importCoordinator: ImportCoordinator
     @Query(sort: \DayTimeline.dayStart, order: .reverse) private var timelines: [DayTimeline]
     @State private var selection: MacSelection?
     @State private var isInspectorPresented = true
     @State private var searchText = ""
+    @State private var isShowingImportQueue = false
 
     private var years: [MacYear] {
         let calendar = Calendar.autoupdatingCurrent
@@ -106,6 +109,18 @@ private struct MovesMacBrowser: View {
         .onReceive(NotificationCenter.default.publisher(for: .movesMacToggleInspector)) { _ in isInspectorPresented.toggle() }
         .onChange(of: timelines) { _, current in
             if case let .day(key) = selection, !current.contains(where: { $0.dayKey == key }) { selection = nil }
+        }
+        .toolbar {
+            ToolbarItem {
+                ImportQueueToolbarButton(
+                    coordinator: importCoordinator,
+                    isPresented: $isShowingImportQueue
+                )
+            }
+        }
+        .popover(isPresented: $isShowingImportQueue) {
+            ImportQueueView(coordinator: importCoordinator)
+                .frame(minWidth: 420, minHeight: 420)
         }
     }
 

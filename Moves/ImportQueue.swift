@@ -108,6 +108,24 @@ struct ImportJobRecord: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+struct ImportQueueSnapshot: Equatable, Sendable {
+    var jobs: [ImportJobRecord]
+
+    var aggregateProgress: Double? {
+        let active = jobs.filter { $0.state != .cancelled }
+        guard !active.isEmpty else { return nil }
+        let known = active.compactMap { $0.counters.progress }
+        guard known.count == active.count else { return nil }
+        return known.reduce(0, +) / Double(known.count)
+    }
+
+    var unfinishedJobs: [ImportJobRecord] {
+        jobs.filter { ![.completed, .cancelled].contains($0.state) }
+    }
+
+    var hasVisibleWork: Bool { !unfinishedJobs.isEmpty }
+}
+
 /// JSON-backed local queue. `fileURL` is injectable so persistence and migration can be tested
 /// without touching the user's Application Support directory.
 struct ImportQueueStore: Sendable {
@@ -174,38 +192,38 @@ enum ImportQueueStoreError: LocalizedError, Sendable {
 /// work belong to a worker supplied by the importer and must not be added here.
 @MainActor
 final class ImportCoordinator: ObservableObject {
-    @Published private(set) var jobs: [ImportJobRecord] = []
+    @Published private(set) var snapshot: ImportQueueSnapshot
     @Published private(set) var lastErrorMessage: String?
 
     private let store: ImportQueueStore
 
     init(store: ImportQueueStore = ImportQueueStore()) {
         self.store = store
+        var restoredJobs: [ImportJobRecord] = []
         do {
-            jobs = try store.load()
+            restoredJobs = try store.load()
         } catch {
             lastErrorMessage = error.localizedDescription
         }
+        snapshot = ImportQueueSnapshot(jobs: restoredJobs)
     }
 
+    var jobs: [ImportJobRecord] { snapshot.jobs }
+
     var aggregateProgress: Double? {
-        let active = jobs.filter { $0.state != .cancelled }
-        guard !active.isEmpty else { return nil }
-        let known = active.compactMap { $0.counters.progress }
-        guard known.count == active.count else { return nil }
-        return known.reduce(0, +) / Double(known.count)
+        snapshot.aggregateProgress
     }
 
     @discardableResult
     func enqueue(_ job: ImportJobRecord) throws -> UUID {
-        jobs.append(job)
+        snapshot.jobs.append(job)
         try persist()
         return job.id
     }
 
     func update(_ job: ImportJobRecord) throws {
-        guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { return }
-        jobs[index] = job
+        guard let index = snapshot.jobs.firstIndex(where: { $0.id == job.id }) else { return }
+        snapshot.jobs[index] = job
         try persist()
     }
 
@@ -215,10 +233,10 @@ final class ImportCoordinator: ObservableObject {
     func retry(id: UUID) throws { try transition(id: id, to: .queued, clearError: true) }
 
     private func transition(id: UUID, to state: ImportJobState, clearError: Bool = false) throws {
-        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
-        jobs[index].state = state
-        jobs[index].updatedAt = .now
-        if clearError { jobs[index].lastError = nil }
+        guard let index = snapshot.jobs.firstIndex(where: { $0.id == id }) else { return }
+        snapshot.jobs[index].state = state
+        snapshot.jobs[index].updatedAt = .now
+        if clearError { snapshot.jobs[index].lastError = nil }
         try persist()
     }
 

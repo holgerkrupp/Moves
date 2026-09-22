@@ -116,6 +116,7 @@ struct MovesApp: App {
     @StateObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @StateObject private var locationServiceSyncManager: LocationServiceSyncManager
     @StateObject private var multiDevicePresenceManager: MultiDevicePresenceManager
+    @StateObject private var importCoordinator: ImportCoordinator
     @StateObject private var routeFileImporter: RouteFileImporter
 
     init() {
@@ -143,8 +144,13 @@ struct MovesApp: App {
             _multiDevicePresenceManager = StateObject(
                 wrappedValue: MultiDevicePresenceManager(modelContainer: container)
             )
+            let importCoordinator = ImportCoordinator()
+            _importCoordinator = StateObject(wrappedValue: importCoordinator)
             _routeFileImporter = StateObject(
-                wrappedValue: RouteFileImporter(modelContext: ModelContext(container))
+                wrappedValue: RouteFileImporter(
+                    modelContext: ModelContext(container),
+                    importCoordinator: importCoordinator
+                )
             )
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
@@ -235,6 +241,7 @@ struct MovesApp: App {
                 .environmentObject(cloudDataPresencePublisher)
                 .environmentObject(locationServiceSyncManager)
                 .environmentObject(multiDevicePresenceManager)
+                .environmentObject(importCoordinator)
                 .environmentObject(routeFileImporter)
         }
         .modelContainer(sharedModelContainer)

@@ -332,6 +332,7 @@ private func temporaryRouteTrackingAutoStopText(
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @EnvironmentObject private var routeFileImporter: RouteFileImporter
+    @EnvironmentObject private var importCoordinator: ImportCoordinator
     @EnvironmentObject private var undoController: AppUndoController
     @EnvironmentObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @EnvironmentObject private var multiDevicePresenceManager: MultiDevicePresenceManager
@@ -354,6 +355,7 @@ struct ContentView: View {
     @State private var routeImportFlushTask: Task<Void, Never>?
     @State private var isShowingDroppedRouteImportOptions = false
     @State private var droppedRouteImportConfiguration = RouteFileImportConfiguration()
+    @State private var isShowingImportQueue = false
 
     private var selectedDay: DayTimeline? {
         guard dayTimelines.indices.contains(selectedPageIndex) else { return nil }
@@ -431,6 +433,16 @@ struct ContentView: View {
                     routeFileImporter.start(urls: urls, configuration: droppedRouteImportConfiguration)
                 }
             }
+        }
+        .sheet(isPresented: $isShowingImportQueue) {
+            ImportQueueView(coordinator: importCoordinator) { _ in
+                routeFileImporter.resume()
+            } onPause: { _ in
+                routeFileImporter.pause()
+            } onCancel: { _ in
+                routeFileImporter.cancel()
+            }
+            .presentationDetents([.medium, .large])
         }
         .alert(
             "Use this device for tracking?",
@@ -643,6 +655,13 @@ struct ContentView: View {
                     Label("Statistics & Share", systemImage: "chart.bar.xaxis")
                 }
                 .help("Statistics & Share")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                ImportQueueToolbarButton(
+                    coordinator: importCoordinator,
+                    isPresented: $isShowingImportQueue
+                )
             }
 
             if captureManager.isLocationTrackingAvailable {
