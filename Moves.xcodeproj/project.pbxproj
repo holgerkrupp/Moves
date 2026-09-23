@@ -101,7 +101,7 @@
 		A50000012FD0000100000002 /* CloudDataPresence in Frameworks */ = {isa = PBXBuildFile; productRef = A50000012FD0000100000004 /* CloudDataPresence */; };
 		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; platformFilter = ios; };
 		A70000012FF0000100000001 /* MovesShareViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000012FF0000100000000 /* MovesShareViews.swift */; platformFilter = ios; };
-		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; platformFilter = ios; };
+		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; };
 		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; platformFilter = ios; };
 		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; platformFilter = ios; };
 		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };

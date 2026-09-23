@@ -216,6 +216,9 @@
     "Accuracy ±%@" : {
 
     },
+    "Actions" : {
+
+    },
     "Actions for (job.displayName)" : {
 
     },
@@ -303,6 +306,9 @@
     "Captured location" : {
 
     },
+    "Change Transport" : {
+
+    },
     "Changes apply to open Moves windows and are remembered the next time the app starts." : {
 
     },
@@ -346,6 +352,9 @@
 
     },
     "Copy Raw Data" : {
+
+    },
+    "Could Not Change Transport Mode" : {
 
     },
     "Could Not Delete Data" : {
@@ -438,6 +447,9 @@
     "Delete" : {
 
     },
+    "Delete Activity" : {
+
+    },
     "Delete all data for the selected day" : {
 
     },
@@ -468,7 +480,7 @@
     "Delete Place?" : {
 
     },
-    "Delete the selected timeline entry" : {
+    "Delete Sample" : {
 
     },
     "Departed" : {
@@ -510,6 +522,9 @@
     "Drag the route line to adjust it" : {
 
     },
+    "Duplicate Activity" : {
+
+    },
     "Duration" : {
 
     },
@@ -537,6 +552,9 @@
     "Exclude from Calculations" : {
 
     },
+    "Exclude from Statistics" : {
+
+    },
     "Excluded from commute calculations" : {
 
     },
@@ -550,6 +568,12 @@
 
     },
     "Export" : {
+
+    },
+    "Export %@" : {
+
+    },
+    "Export %@ unavailable" : {
 
     },
     "Export ${period} as ${format}" : {
@@ -708,9 +732,6 @@
     "Import Route Files…" : {
 
     },
-    "Import Route Files… (⌘O)" : {
-
-    },
     "Imported Data" : {
 
     },
@@ -742,6 +763,9 @@
 
     },
     "Include in Calculations" : {
+
+    },
+    "Include in Statistics" : {
 
     },
     "Include indirect connections" : {
@@ -922,9 +946,6 @@
     "Next Day" : {
 
     },
-    "Next Day (⌘])" : {
-
-    },
     "No activity" : {
 
     },
@@ -1060,9 +1081,6 @@
     "Previous Day" : {
 
     },
-    "Previous Day (⌘[)" : {
-
-    },
     "Privacy" : {
 
     },
@@ -1137,6 +1155,9 @@
       }
     },
     "Reports whether real route and background tracking are active." : {
+
+    },
+    "Reset Route Edits" : {
 
     },
     "Reset to Default" : {
@@ -1293,6 +1314,9 @@
 
     },
     "Shrink map" : {
+
+    },
+    "Simplify Route" : {
 
     },
     "Skip dates that already contain data" : {
@@ -1455,9 +1479,6 @@
 
     },
     "Today" : {
-
-    },
-    "Today (⇧⌘T)" : {
 
     },
     "Toggle Real Route Tracking" : {

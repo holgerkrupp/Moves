@@ -543,6 +543,7 @@ struct DayTimelinePageContent: View {
                     isLast: index == timelineEntries.count - 1
                 )
                 .timelineDeletionSwipeAction(entry: entry) { pendingDeletionEntry = entry }
+                .timelineContextMenu(entry: entry) { pendingDeletionEntry = entry }
 
                 if index < timelineEntries.count - 1 {
                     Divider()
@@ -573,6 +574,7 @@ struct DayTimelinePageContent: View {
                     timelineDetailLink(for: entry)
                 }
                 .timelineDeletionSwipeAction(entry: entry) { pendingDeletionEntry = entry }
+                .timelineContextMenu(entry: entry) { pendingDeletionEntry = entry }
                 .background {
                     if mapSelection == entry.mapSelection {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -719,6 +721,166 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+private extension View {
+    func timelineContextMenu(entry: TimelineEntry, requestDelete: @escaping () -> Void) -> some View {
+        modifier(TimelineEntryContextMenu(entry: entry, requestDelete: requestDelete))
+    }
+}
+
+/// Keep contextual choices local to the selected activity. This mirrors the
+/// discoverable, lightweight actions recommended for context menus while
+/// leaving longer editing flows in the detail screen.
+private struct TimelineEntryContextMenu: ViewModifier {
+    @Environment(\.modelContext) private var modelContext
+    let entry: TimelineEntry
+    let requestDelete: () -> Void
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            switch entry {
+            case .move(let move):
+                exportActions(for: move)
+
+                Divider()
+
+                Menu("Activity", systemImage: "figure.walk") {
+                    Button("Duplicate Activity", systemImage: "plus.square.on.square") {
+                        duplicate(move)
+                    }
+
+                    Button("Simplify Route", systemImage: "point.3.connected.trianglepath.dotted") {
+                        simplifyRoute(for: move)
+                    }
+                    .disabled(routeCoordinates(for: move).count < 3)
+
+                    Button("Reset Route Edits", systemImage: "arrow.uturn.backward") {
+                        move.clearManualRouteCoordinates()
+                        try? modelContext.save()
+                    }
+                    .disabled(!move.hasManualRouteCoordinates)
+
+                    Menu("Change Transport", systemImage: "arrow.triangle.branch") {
+                        ForEach(TransportMode.allCases) { mode in
+                            Button {
+                                move.transportMode = mode
+                                move.clearCachedRouteCoordinates()
+                                try? modelContext.save()
+                            } label: {
+                                Label(mode.title, systemImage: mode.symbolName)
+                            }
+                        }
+                    }
+
+                    Button(move.isExcludedFromConnectionStatistics ? "Include in Statistics" : "Exclude from Statistics", systemImage: "chart.bar") {
+                        move.isExcludedFromConnectionStatistics.toggle()
+                        try? modelContext.save()
+                    }
+                }
+
+                Divider()
+                Button("Delete Activity", systemImage: "trash", role: .destructive, action: requestDelete)
+
+            case .place(let place):
+                exportActions(for: place)
+                Divider()
+                Button("Delete Place", systemImage: "trash", role: .destructive, action: requestDelete)
+
+            case .sample:
+                Button("Delete Sample", systemImage: "trash", role: .destructive, action: requestDelete)
+
+            case .liveRoute, .start:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func exportActions(for move: MoveSegment) -> some View {
+        ForEach(TimelineExportFormat.allCases, id: \.self) { format in
+            if let payload = TimelineExporter.makePayload(
+                move: move,
+                format: format,
+                fileStem: "moves-\(move.timelineStartDate.formatted(.iso8601.year().month().day()))-\(move.transportMode.rawValue)"
+            ) {
+                ShareLink(
+                    item: TimelineShareFile(data: payload.data, filename: payload.filename),
+                    preview: SharePreview(payload.filename)
+                ) {
+                    Label("Export \(format.title)", systemImage: "doc.badge.arrow.up")
+                }
+            } else {
+                Label("Export \(format.title) unavailable", systemImage: "exclamationmark.triangle")
+                    .disabled(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func exportActions(for place: VisitPlace) -> some View {
+        ForEach(TimelineExportFormat.allCases, id: \.self) { format in
+            if let payload = TimelineExporter.makePayload(
+                place: place,
+                format: format,
+                fileStem: "moves-\(place.arrivalDate.formatted(.iso8601.year().month().day()))-place"
+            ) {
+                ShareLink(
+                    item: TimelineShareFile(data: payload.data, filename: payload.filename),
+                    preview: SharePreview(payload.filename)
+                ) {
+                    Label("Export \(format.title)", systemImage: "doc.badge.arrow.up")
+                }
+            }
+        }
+    }
+
+    private func duplicate(_ move: MoveSegment) {
+        let duplicate = MoveSegment(
+            dedupeKey: "manual-duplicate-\(UUID().uuidString)",
+            startDate: move.startDate,
+            endDate: move.endDate,
+            transportMode: move.transportMode,
+            distanceMeters: move.distanceMeters,
+            stepCount: move.stepCount,
+            comment: move.comment
+        )
+        duplicate.deviceIdentifier = move.deviceIdentifier
+        duplicate.startPlace = move.startPlace
+        duplicate.endPlace = move.endPlace
+        duplicate.dayTimeline = move.dayTimeline
+
+        let route = move.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: move)
+        if route.count > 1 {
+            duplicate.storeManualRouteCoordinates(route)
+        }
+
+        modelContext.insert(duplicate)
+        try? modelContext.save()
+    }
+
+    private func simplifyRoute(for move: MoveSegment) {
+        let coordinates = routeCoordinates(for: move)
+        guard coordinates.count > 2 else { return }
+
+        // Retain turns that are at least 15 m apart, always keeping both ends.
+        // This is intentionally non-destructive: reset returns to the captured route.
+        var simplified = [coordinates[0]]
+        for coordinate in coordinates.dropFirst().dropLast() {
+            if RouteCoordinateOps.distanceMeters(from: simplified[simplified.count - 1], to: coordinate) >= 15 {
+                simplified.append(coordinate)
+            }
+        }
+        simplified.append(coordinates[coordinates.count - 1])
+        guard simplified.count < coordinates.count else { return }
+
+        move.storeManualRouteCoordinates(simplified)
+        try? modelContext.save()
+    }
+
+    private func routeCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
+        move.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: move)
     }
 }
 

@@ -106,6 +106,17 @@ struct MovesJumpToDateView: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        navigationContent
+            .frame(width: 440, height: 620)
+        #else
+        navigationContent
+            .navigationBarTitleDisplayMode(.inline)
+            .presentationDetents([.large])
+        #endif
+    }
+
+    private var navigationContent: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
@@ -225,14 +236,12 @@ struct MovesJumpToDateView: View {
                 .padding()
             }
             .navigationTitle("Jump to Date")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Done", action: onDismiss)
                 }
             }
         }
-        .presentationDetents([.large])
         .onChange(of: availableActivityFilters) { _, filters in
             if !filters.contains(activityFilter) {
                 activityFilter = .overall

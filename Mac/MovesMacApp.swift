@@ -141,7 +141,7 @@ private enum MacTimelineExportScope {
     case allDays
 }
 
-private enum MacTimelineExportFormat {
+private enum MacTimelineExportFormat: CaseIterable, Hashable {
     case gpx
     case geoJSON
     case csv
@@ -584,6 +584,7 @@ private struct MovesMacBrowser: View {
     @AppStorage(MovesMacSettingsKey.exportIncludesPlaces) private var exportIncludesPlaces = true
     @AppStorage(MovesMacSettingsKey.exportIncludesComments) private var exportIncludesComments = true
     @State private var searchText = ""
+    @State private var isShowingDatePicker = false
     @State private var isShowingImportQueue = false
     @State private var importRequest: MacImportRequest?
     @State private var isShowingFileImporter = false
@@ -595,6 +596,9 @@ private struct MovesMacBrowser: View {
     @State private var exportMessage = ""
     @State private var isShowingExportMessage = false
     @State private var importErrorMessage: String?
+    @State private var isConfirmingEntryDeletion = false
+    @State private var isConfirmingDayDeletion = false
+    @State private var deletionErrorMessage: String?
 
     init(importCoordinator: ImportCoordinator, importer: RouteFileImporter, isDemoMode: Binding<Bool>) {
         _importCoordinator = ObservedObject(wrappedValue: importCoordinator)
@@ -675,12 +679,22 @@ private struct MovesMacBrowser: View {
             case .recovery:
                 FailedRouteImportsView(importer: importer)
             default:
-                MacWorkspace(timelines: filteredTimelines, selection: $selection, searchText: searchText)
+                MacWorkspace(
+                    timelines: filteredTimelines,
+                    selection: $selection,
+                    searchText: searchText,
+                    exportActivity: exportActivity
+                )
             }
         }
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search places, moves, or dates")
         .inspector(isPresented: $isInspectorPresented) {
-            MacInspector(selection: selection, timelines: timelines)
+            MacInspector(
+                selection: selection,
+                timelines: timelines,
+                requestEntryDeletion: { isConfirmingEntryDeletion = true },
+                requestDayDeletion: { isConfirmingDayDeletion = true }
+            )
                 .inspectorColumnWidth(min: 230, ideal: 280, max: 360)
         }
         .onChange(of: timelines) { _, current in
@@ -701,26 +715,25 @@ private struct MovesMacBrowser: View {
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                Button("Previous Day", action: selectOlderDay)
-                .disabled(!canSelectOlderDay)
-                .help("Previous Day (⌘[)")
-
-                Button("Next Day", action: selectNewerDay)
-                .disabled(!canSelectNewerDay)
-                .help("Next Day (⌘])")
-
-                Button("Today", action: selectToday)
-                .disabled(todayTimeline == nil)
-                .help("Today (⇧⌘T)")
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    isShowingDatePicker.toggle()
+                } label: {
+                    Label(datePickerToolbarTitle, systemImage: "calendar")
+                }
+                .help("Jump to Date")
+                .disabled(recordedTimelines.isEmpty)
+                .popover(isPresented: $isShowingDatePicker, arrowEdge: .bottom) {
+                    MovesJumpToDateView(
+                        dayTimelines: recordedTimelines.sorted { $0.dayStart < $1.dayStart },
+                        selectedDate: selectedTimelineForExport?.dayStart ?? .now,
+                        onSelectDate: jumpToDate,
+                        onDismiss: { isShowingDatePicker = false }
+                    )
+                }
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: beginImport) {
-                    Label("Import Route Files", systemImage: "square.and.arrow.down")
-                }
-                .help("Import Route Files… (⌘O)")
-
                 ImportQueueToolbarButton(
                     coordinator: importCoordinator,
                     isPresented: $isShowingImportQueue
@@ -760,6 +773,29 @@ private struct MovesMacBrowser: View {
                 isDemoMode: isDemoMode
             )
         )
+        .confirmationDialog("Delete Entry?", isPresented: $isConfirmingEntryDeletion, titleVisibility: .visible) {
+            Button("Delete", role: .destructive, action: deleteSelectedEntry)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the selected entry from the timeline. You can undo the deletion afterwards.")
+        }
+        .confirmationDialog("Delete Day?", isPresented: $isConfirmingDayDeletion, titleVisibility: .visible) {
+            Button("Delete Day", role: .destructive, action: deleteSelectedDay)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all places, moves, and location samples for the selected day. You can undo the deletion afterwards.")
+        }
+        .alert(
+            "Could Not Delete Data",
+            isPresented: Binding(
+                get: { deletionErrorMessage != nil },
+                set: { if !$0 { deletionErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { deletionErrorMessage = nil }
+        } message: {
+            Text(deletionErrorMessage ?? "The selected timeline data could not be deleted.")
+        }
         .popover(isPresented: $isShowingImportQueue) {
             ImportQueueView(coordinator: importCoordinator)
                 .frame(minWidth: 420, minHeight: 420)
@@ -895,6 +931,54 @@ private struct MovesMacBrowser: View {
         isExporting = true
     }
 
+    private func exportActivity(_ selection: MacSelection, _ format: MacTimelineExportFormat) {
+        guard let day = selectedDay(for: selection) else { return }
+        let payload: MacTimelineExportPayload?
+
+        switch selection {
+        case .move(let id):
+            payload = day.moves.first(where: { $0.id == id }).flatMap {
+                MacTimelineExporter.makePayload(move: $0, format: format, fileStem: "moves-\(day.dayKey)-\($0.transportMode.rawValue)")
+            }
+        case .place(let id):
+            payload = day.places.first(where: { $0.id == id }).flatMap {
+                MacTimelineExporter.makePayload(place: $0, format: format, fileStem: "moves-\(day.dayKey)-place")
+            }
+        default:
+            payload = nil
+        }
+
+        guard let payload else { return }
+        exportDocument = MacTimelineExportDocument(data: payload.data)
+        exportContentType = payload.contentType
+        exportFilename = payload.filename
+        isExporting = true
+    }
+
+    private func exportDay(_ day: DayTimeline, format: MacTimelineExportFormat) {
+        guard let payload = MacTimelineExporter.makePayload(
+            days: [day],
+            format: format,
+            fileStem: "moves-\(day.dayKey)",
+            includesPlaces: exportIncludesPlaces,
+            includesComments: exportIncludesComments
+        ) else { return }
+
+        exportDocument = MacTimelineExportDocument(data: payload.data)
+        exportContentType = payload.contentType
+        exportFilename = payload.filename
+        isExporting = true
+    }
+
+    private func selectedDay(for selection: MacSelection) -> DayTimeline? {
+        switch selection {
+        case .day(let key): timelines.first { $0.dayKey == key }
+        case .place(let id): timelines.first { $0.places.contains { $0.id == id } }
+        case .move(let id): timelines.first { $0.moves.contains { $0.id == id } }
+        default: nil
+        }
+    }
+
     private func enqueueRouteFiles(_ urls: [URL]) {
         guard !urls.isEmpty else {
             importErrorMessage = "No route files were selected."
@@ -958,6 +1042,68 @@ private struct MovesMacBrowser: View {
         selection = .day(timeline.dayKey)
     }
 
+    private var datePickerToolbarTitle: String {
+        selectedTimelineForExport?.dayStart.formatted(.dateTime.month(.abbreviated).day()) ?? "Jump to Date"
+    }
+
+    private func jumpToDate(_ date: Date) {
+        guard !recordedTimelines.isEmpty else { return }
+
+        let calendar = Calendar.autoupdatingCurrent
+        let targetStart = calendar.startOfDay(for: date)
+        guard let closest = recordedTimelines.min(by: { lhs, rhs in
+            let lhsDistance = abs(calendar.startOfDay(for: lhs.dayStart).timeIntervalSince(targetStart))
+            let rhsDistance = abs(calendar.startOfDay(for: rhs.dayStart).timeIntervalSince(targetStart))
+            return lhsDistance < rhsDistance
+        }) else { return }
+
+        select(timeline: closest)
+    }
+
+    private var selectedDayForDeletion: DayTimeline? {
+        switch selection {
+        case .day(let key):
+            timelines.first { $0.dayKey == key }
+        case .place(let id):
+            timelines.first { $0.places.contains { $0.id == id } }
+        case .move(let id):
+            timelines.first { $0.moves.contains { $0.id == id } }
+        default:
+            nil
+        }
+    }
+
+    private func deleteSelectedEntry() {
+        guard let selectedDay = selectedDayForDeletion else { return }
+
+        do {
+            switch selection {
+            case .place(let id):
+                guard let place = selectedDay.places.first(where: { $0.id == id }) else { return }
+                try TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoManager)
+            case .move(let id):
+                guard let move = selectedDay.moves.first(where: { $0.id == id }) else { return }
+                try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoManager)
+            default:
+                return
+            }
+            selection = .day(selectedDay.dayKey)
+        } catch {
+            deletionErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteSelectedDay() {
+        guard let selectedDay = selectedDayForDeletion else { return }
+
+        do {
+            try TimelineDeletion.delete(day: selectedDay, in: modelContext, undoManager: undoManager)
+            selection = nil
+        } catch {
+            deletionErrorMessage = error.localizedDescription
+        }
+    }
+
 
     private var sidebar: some View {
         List(selection: $selection) {
@@ -969,7 +1115,12 @@ private struct MovesMacBrowser: View {
             }
             Section("Recent") {
                 if recentItems.isEmpty { Text("No recorded days yet").foregroundStyle(.secondary) }
-                else { ForEach(recentItems) { item in MacSidebarRow(title: item.title, subtitle: item.subtitle, systemImage: item.icon).tag(item.selection) } }
+                else {
+                    ForEach(recentItems) { item in
+                        MacSidebarRow(title: item.title, subtitle: item.subtitle, systemImage: item.icon)
+                            .tag(item.selection)
+                    }
+                }
             }
             Section("History") {
                 ForEach(years) { year in
@@ -990,6 +1141,22 @@ private struct MovesMacBrowser: View {
         }
         .navigationTitle("Moves")
         .navigationSplitViewColumnWidth(min: 230, ideal: 285, max: 360)
+        .contextMenu(forSelectionType: MacSelection.self) { selectedItems in
+            if let selection = selectedItems.first,
+               case let .day(dayKey) = selection,
+               let day = recordedTimelines.first(where: { $0.dayKey == dayKey }) {
+                ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
+                    Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
+                        exportDay(day, format: format)
+                    }
+                }
+                Divider()
+                Button("Delete Day", systemImage: "trash", role: .destructive) {
+                    self.selection = selection
+                    isConfirmingDayDeletion = true
+                }
+            }
+        }
         .overlay {
             if recordedTimelines.isEmpty && importedSampleCount == 0 { ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here.")) }
         }
@@ -1003,6 +1170,7 @@ private struct MovesMacBrowser: View {
     }
 
     private func summary(for timeline: DayTimeline) -> String { "\(timeline.places.count) places · \(timeline.moves.count) moves · \(timeline.samples.count) samples" }
+
 }
 
 private struct MacSidebarRow: View {
@@ -1025,12 +1193,7 @@ private struct MacWorkspace: View {
     let timelines: [DayTimeline]
     @Binding var selection: MacSelection?
     let searchText: String
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.undoManager) private var undoManager
-    @State private var isConfirmingEntryDeletion = false
-    @State private var isConfirmingDayDeletion = false
-    @State private var deletionErrorMessage = ""
-    @State private var isShowingDeletionError = false
+    let exportActivity: (MacSelection, MacTimelineExportFormat) -> Void
 
     private var selectedDay: DayTimeline? {
         if case let .day(key) = selection { return timelines.first { $0.dayKey == key } }
@@ -1043,101 +1206,25 @@ private struct MacWorkspace: View {
         workspaceContent
         .navigationTitle(selectedDay?.dayStart.formatted(date: .long, time: .omitted) ?? "History")
         .toolbar { ToolbarItem(placement: .primaryAction) { if !searchText.isEmpty { Text("Filtered").font(.caption).foregroundStyle(.secondary) } } }
-        .toolbar {
-            MacDeletionToolbar(
-                isConfirmingDayDeletion: $isConfirmingDayDeletion,
-                isConfirmingEntryDeletion: $isConfirmingEntryDeletion,
-                canDeleteDay: selectedDay != nil,
-                hasSelectedEntry: hasSelectedEntry
-            )
-        }
-        .confirmationDialog("Delete Entry?", isPresented: $isConfirmingEntryDeletion, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { deleteSelectedEntry() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the selected entry from the timeline. You can undo the deletion afterwards.")
-        }
-        .confirmationDialog("Delete Day?", isPresented: $isConfirmingDayDeletion, titleVisibility: .visible) {
-            Button("Delete Day", role: .destructive) { deleteSelectedDay() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes all places, moves, and location samples for the selected day. You can undo the deletion afterwards.")
-        }
-        .alert("Could Not Delete Data", isPresented: $isShowingDeletionError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(deletionErrorMessage)
-        }
     }
 
     @ViewBuilder
     private var workspaceContent: some View {
         if let selectedDay {
-            MacDayWorkspace(day: selectedDay, selection: $selection)
+            MacDayWorkspace(day: selectedDay, selection: $selection, exportActivity: exportActivity)
         } else {
             ContentUnavailableView("Select a day", systemImage: "calendar", description: Text("Choose a day from the sidebar to browse your location history."))
         }
     }
 
-    private var hasSelectedEntry: Bool {
-        if case .place = selection { return true }
-        if case .move = selection { return true }
-        return false
-    }
-
-    private func deleteSelectedEntry() {
-        do {
-            switch selection {
-            case .place(let id):
-                guard let place = timelines.flatMap(\.places).first(where: { $0.id == id }) else { return }
-                try TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoManager)
-            case .move(let id):
-                guard let move = timelines.flatMap(\.moves).first(where: { $0.id == id }) else { return }
-                try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoManager)
-            default: return
-            }
-            if let day = selectedDay { selection = .day(day.dayKey) }
-        } catch {
-            deletionErrorMessage = error.localizedDescription
-            isShowingDeletionError = true
-        }
-    }
-
-    private func deleteSelectedDay() {
-        guard let day = selectedDay else { return }
-        do {
-            try TimelineDeletion.delete(day: day, in: modelContext, undoManager: undoManager)
-            selection = nil
-        } catch {
-            deletionErrorMessage = error.localizedDescription
-            isShowingDeletionError = true
-        }
-    }
-}
-
-private struct MacDeletionToolbar: ToolbarContent {
-    @Binding var isConfirmingDayDeletion: Bool
-    @Binding var isConfirmingEntryDeletion: Bool
-    let canDeleteDay: Bool
-    let hasSelectedEntry: Bool
-
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button("Delete Day", role: .destructive) { isConfirmingDayDeletion = true }
-                .disabled(!canDeleteDay)
-                .help("Delete all data for the selected day")
-        }
-        ToolbarItem(placement: .navigation) {
-            Button("Delete Entry", role: .destructive) { isConfirmingEntryDeletion = true }
-                .disabled(!hasSelectedEntry)
-                .help("Delete the selected timeline entry")
-        }
-    }
 }
 
 private struct MacDayWorkspace: View {
     let day: DayTimeline
     @Binding var selection: MacSelection?
+    let exportActivity: (MacSelection, MacTimelineExportFormat) -> Void
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.undoManager) private var undoManager
     @State private var camera: MapCameraPosition = .automatic
 
     private var coordinates: [CLLocationCoordinate2D] {
@@ -1177,6 +1264,98 @@ private struct MacDayWorkspace: View {
             .frame(minHeight: 185, idealHeight: 235)
             .padding(.top, 8)
             .overlay { if rows.isEmpty { ContentUnavailableView("No activity", systemImage: "location.slash") } }
+            .contextMenu(forSelectionType: MacSelection.self) { selectedItems in
+                if let selection = selectedItems.first {
+                    activityContextMenu(for: selection)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func activityContextMenu(for selection: MacSelection) -> some View {
+        switch selection {
+        case .place(let id):
+            ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
+                Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
+                    exportActivity(selection, format)
+                }
+            }
+            if let place = day.places.first(where: { $0.id == id }) {
+                Divider()
+                Button("Delete Place", systemImage: "trash", role: .destructive) {
+                    try? TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoManager)
+                }
+            }
+        case .move(let id):
+            ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
+                Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
+                    exportActivity(selection, format)
+                }
+            }
+            if let move = day.moves.first(where: { $0.id == id }) {
+                Divider()
+                Button("Duplicate Activity", systemImage: "plus.square.on.square") { duplicate(move) }
+                Button("Simplify Route", systemImage: "point.3.connected.trianglepath.dotted") { simplifyRoute(for: move) }
+                    .disabled(routeCoordinates(for: move).count < 3)
+                Button("Reset Route Edits", systemImage: "arrow.uturn.backward") {
+                    move.clearManualRouteCoordinates()
+                    try? modelContext.save()
+                }
+                .disabled(!move.hasManualRouteCoordinates)
+                Menu("Change Transport", systemImage: "arrow.triangle.branch") {
+                    ForEach(TransportMode.allCases) { mode in
+                        Button(mode.title) {
+                            move.transportMode = mode
+                            move.clearCachedRouteCoordinates()
+                            try? modelContext.save()
+                        }
+                    }
+                }
+                Divider()
+                Button("Delete Activity", systemImage: "trash", role: .destructive) {
+                    try? TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoManager)
+                }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func duplicate(_ move: MoveSegment) {
+        let duplicate = MoveSegment(
+            dedupeKey: "manual-duplicate-\(UUID().uuidString)",
+            startDate: move.startDate,
+            endDate: move.endDate,
+            transportMode: move.transportMode,
+            distanceMeters: move.distanceMeters,
+            stepCount: move.stepCount,
+            comment: move.comment
+        )
+        duplicate.deviceIdentifier = move.deviceIdentifier
+        duplicate.startPlace = move.startPlace
+        duplicate.endPlace = move.endPlace
+        duplicate.dayTimeline = day
+        let route = routeCoordinates(for: move)
+        if route.count > 1 { duplicate.storeManualRouteCoordinates(route) }
+        modelContext.insert(duplicate)
+        try? modelContext.save()
+    }
+
+    private func simplifyRoute(for move: MoveSegment) {
+        let coordinates = routeCoordinates(for: move)
+        guard coordinates.count > 2 else { return }
+        var simplified = [coordinates[0]]
+        for coordinate in coordinates.dropFirst().dropLast() where RouteCoordinateOps.distanceMeters(from: simplified[simplified.count - 1], to: coordinate) >= 15 {
+            simplified.append(coordinate)
+        }
+        simplified.append(coordinates[coordinates.count - 1])
+        guard simplified.count < coordinates.count else { return }
+        move.storeManualRouteCoordinates(simplified)
+        try? modelContext.save()
+    }
+
+    private func routeCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
+        move.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: move)
     }
 
     private var rows: [MacActivityRow] {
@@ -1198,11 +1377,26 @@ private struct MacActivityRow: Identifiable, Hashable {
 }
 
 private struct MacDayMap: View {
+    private struct MatchedRoute {
+        let signature: String
+        let coordinates: [CLLocationCoordinate2D]
+    }
+
     let day: DayTimeline
     @Binding var camera: MapCameraPosition
+    @Environment(\.modelContext) private var modelContext
     @AppStorage(MovesMacSettingsKey.showsLargeMapMarkers) private var showsLargeMapMarkers = false
     @AppStorage(MovesMacSettingsKey.showsMapElevation) private var showsMapElevation = true
     @AppStorage(MovesMacSettingsKey.routeLineWidth) private var routeLineWidth = 4.0
+    @State private var matchedRoutes: [UUID: MatchedRoute] = [:]
+
+    private var routeMatchingKey: String {
+        day.moves.map { move in
+            let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+            return "\(move.id.uuidString)|\(MoveRouteGeometry.cacheSignature(for: move, fallback: fallback))"
+        }
+        .joined(separator: ";")
+    }
 
     var body: some View {
         Map(position: $camera) {
@@ -1215,7 +1409,7 @@ private struct MacDayMap: View {
                 }
             }
             ForEach(day.moves) { move in
-                let route = RouteCoordinateStorage.decode(move.manualRouteCoordinatesData ?? move.routeCacheCoordinatesData)
+                let route = displayedRoute(for: move)
                 if route.count > 1 { MapPolyline(coordinates: route).stroke(routeColor(move.transportMode), lineWidth: routeLineWidth) }
                 else if let start = move.startPlace?.coordinate, let end = move.endPlace?.coordinate { MapPolyline(coordinates: [start, end]).stroke(routeColor(move.transportMode), style: StrokeStyle(lineWidth: max(2, routeLineWidth - 1), dash: [6, 5])) }
             }
@@ -1225,12 +1419,52 @@ private struct MacDayMap: View {
             Label("\(day.places.count) places · \(day.moves.count) moves", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                 .font(.caption.weight(.medium)).padding(8).background(.regularMaterial, in: Capsule()).padding(12)
         }
+        .task(id: routeMatchingKey) {
+            await resolveRoutes()
+        }
+    }
+
+    private func displayedRoute(for move: MoveSegment) -> [CLLocationCoordinate2D] {
+        if let manualRoute = move.manualRouteCoordinates {
+            return manualRoute
+        }
+
+        let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+        let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+        if let resolved = matchedRoutes[move.id], resolved.signature == signature {
+            return resolved.coordinates
+        }
+        return move.cachedRouteCoordinates(for: signature) ?? fallback
+    }
+
+    @MainActor
+    private func resolveRoutes() async {
+        var resolved: [UUID: MatchedRoute] = [:]
+
+        for move in day.moves {
+            guard !Task.isCancelled else { return }
+            let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+            let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+            let coordinates = await RoadRouteMatcher.matchedCoordinates(for: move)
+            resolved[move.id] = MatchedRoute(signature: signature, coordinates: coordinates)
+        }
+
+        guard !Task.isCancelled else { return }
+        matchedRoutes = resolved
+
+        if modelContext.hasChanges {
+            try? modelContext.save()
+        }
     }
 }
 
 private struct MacInspector: View {
     let selection: MacSelection?
     let timelines: [DayTimeline]
+    let requestEntryDeletion: () -> Void
+    let requestDayDeletion: () -> Void
+    @Environment(\.modelContext) private var modelContext
+    @State private var transportModeSaveError: String?
 
     private var selectedPlace: VisitPlace? { guard case let .place(id) = selection else { return nil }; return timelines.flatMap(\.places).first { $0.id == id } }
     private var selectedMove: MoveSegment? { guard case let .move(id) = selection else { return nil }; return timelines.flatMap(\.moves).first { $0.id == id } }
@@ -1244,6 +1478,14 @@ private struct MacInspector: View {
             else { ContentUnavailableView("Nothing Selected", systemImage: "sidebar.right", description: Text("Select a day or activity to inspect its metadata.")) }
         }
         .padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert("Could Not Change Transport Mode", isPresented: Binding(
+            get: { transportModeSaveError != nil },
+            set: { if !$0 { transportModeSaveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { transportModeSaveError = nil }
+        } message: {
+            Text(transportModeSaveError ?? "")
+        }
     }
 
     private func dayInspector(_ day: DayTimeline) -> some View {
@@ -1251,6 +1493,9 @@ private struct MacInspector: View {
             Section("Day") { LabeledContent("Date", value: day.dayStart.formatted(date: .long, time: .omitted)); LabeledContent("Day key", value: day.dayKey) }
             Section("Activity") { LabeledContent("Places", value: day.places.count.formatted()); LabeledContent("Moves", value: day.moves.count.formatted()); LabeledContent("Samples", value: day.samples.count.formatted()) }
             Section("Record") { LabeledContent("Created", value: day.createdAt.formatted(date: .abbreviated, time: .shortened)) }
+            Section("Actions") {
+                Button("Delete Day", systemImage: "trash", role: .destructive, action: requestDayDeletion)
+            }
         }
     }
 
@@ -1260,15 +1505,57 @@ private struct MacInspector: View {
             Section("Location") { LabeledContent("Latitude", value: place.latitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Longitude", value: place.longitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Accuracy", value: "±\(MovesMeasurementFormatter.accuracy(meters: place.horizontalAccuracy))") }
             if let comment = place.comment, !comment.isEmpty { Section("Comment") { Text(comment) } }
             Section("Record") { LabeledContent("ID", value: place.id.uuidString) }
+            Section("Actions") {
+                Button("Delete Entry", systemImage: "trash", role: .destructive, action: requestEntryDeletion)
+            }
         }
     }
 
     private func moveInspector(_ move: MoveSegment) -> some View {
         Form {
-            Section("Move") { Label(move.transportMode.title, systemImage: move.transportMode.symbolName).font(.headline); LabeledContent("Started", value: move.timelineStartDate.formatted(date: .long, time: .shortened)); LabeledContent("Duration", value: formatDuration(move.timelineDuration)); LabeledContent("Distance", value: formatDistance(move.distanceMeters)) }
+            Section("Move") {
+                Label(move.transportMode.title, systemImage: move.transportMode.symbolName).font(.headline)
+                Picker("Transport", selection: Binding(
+                    get: { move.transportMode },
+                    set: { setTransportMode($0, for: move) }
+                )) {
+                    ForEach(TransportMode.allCases) { mode in
+                        Label(mode.title, systemImage: mode.symbolName).tag(mode)
+                    }
+                }
+                LabeledContent("Started", value: move.timelineStartDate.formatted(date: .long, time: .shortened))
+                LabeledContent("Duration", value: formatDuration(move.timelineDuration))
+                LabeledContent("Distance", value: formatDistance(move.distanceMeters))
+            }
             Section("Route") { LabeledContent("Samples", value: move.samples.count.formatted()); LabeledContent("Source", value: move.usesHealthWorkoutRoute ? "Health workout route" : move.usesHighAccuracyRouteTracking ? "Route tracking" : "Location history"); if let start = move.startPlace { LabeledContent("From", value: start.displayTitle) }; if let end = move.endPlace { LabeledContent("To", value: end.displayTitle) } }
             if let comment = move.comment, !comment.isEmpty { Section("Comment") { Text(comment) } }
             Section("Record") { LabeledContent("ID", value: move.id.uuidString) }
+            Section("Actions") {
+                Button("Delete Entry", systemImage: "trash", role: .destructive, action: requestEntryDeletion)
+            }
+        }
+    }
+
+    private func setTransportMode(_ mode: TransportMode, for move: MoveSegment) {
+        guard move.transportMode != mode else { return }
+
+        let previousMode = move.transportMode
+        let previousCacheSignature = move.routeCacheSignature
+        let previousCacheCoordinates = move.routeCacheCoordinatesData
+        let previousManualCoordinates = move.manualRouteCoordinatesData
+
+        move.transportMode = mode
+        move.clearCachedRouteCoordinates()
+        move.clearManualRouteCoordinates()
+
+        do {
+            try modelContext.save()
+        } catch {
+            move.transportMode = previousMode
+            move.routeCacheSignature = previousCacheSignature
+            move.routeCacheCoordinatesData = previousCacheCoordinates
+            move.manualRouteCoordinatesData = previousManualCoordinates
+            transportModeSaveError = error.localizedDescription
         }
     }
 }
@@ -1344,6 +1631,60 @@ private enum MacTimelineExporter {
             filename: "\(fileStem).\(fileExtension)",
             contentType: contentType
         )
+    }
+
+    static func makePayload(move: MoveSegment, format: MacTimelineExportFormat, fileStem: String) -> MacTimelineExportPayload? {
+        let title = "\(move.startPlace?.displayTitle ?? "Unknown start") to \(move.endPlace?.displayTitle ?? "Unknown destination")"
+        let points = routePoints(for: move)
+        let data: Data?
+
+        switch format {
+        case .gpx:
+            guard points.count > 1 else { return nil }
+            var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"Moves\" xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><name>\(xmlEscaped(title))</name><type>\(xmlEscaped(move.transportMode.title))</type><trkseg>"
+            for point in points {
+                xml += "<trkpt lat=\"\(coordinateString(point.latitude))\" lon=\"\(coordinateString(point.longitude))\"><time>\(iso8601.string(from: point.timestamp))</time></trkpt>"
+            }
+            data = (xml + "</trkseg></trk></gpx>").data(using: .utf8)
+        case .geoJSON:
+            guard points.count > 1 else { return nil }
+            let feature: [String: Any] = [
+                "type": "Feature",
+                "geometry": ["type": "LineString", "coordinates": points.map { [$0.longitude, $0.latitude] }],
+                "properties": ["record_type": "move", "title": title, "day_key": move.dayTimeline?.dayKey ?? "", "transport_mode": move.transportMode.rawValue, "start_time": iso8601.string(from: move.timelineStartDate), "end_time": iso8601.string(from: move.endDate), "distance_meters": move.distanceMeters],
+            ]
+            data = try? JSONSerialization.data(withJSONObject: feature, options: [.prettyPrinted, .sortedKeys])
+        case .csv:
+            let row = ["record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude,comment", ["move", iso8601.string(from: move.timelineStartDate), iso8601.string(from: move.endDate), csvEscaped(title), move.dayTimeline?.dayKey ?? "", move.transportMode.rawValue, String(format: "%.2f", move.distanceMeters), move.stepCount.map(String.init) ?? "", "", "", csvEscaped(move.comment ?? "")].joined(separator: ",")].joined(separator: "\n")
+            data = row.data(using: .utf8)
+        }
+
+        return singlePayload(data, format: format, fileStem: fileStem)
+    }
+
+    static func makePayload(place: VisitPlace, format: MacTimelineExportFormat, fileStem: String) -> MacTimelineExportPayload? {
+        let data: Data?
+        switch format {
+        case .gpx:
+            data = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"Moves\" xmlns=\"http://www.topografix.com/GPX/1/1\"><wpt lat=\"\(coordinateString(place.latitude))\" lon=\"\(coordinateString(place.longitude))\"><name>\(xmlEscaped(place.displayTitle))</name><time>\(iso8601.string(from: place.arrivalDate))</time></wpt></gpx>".data(using: .utf8)
+        case .geoJSON:
+            let feature: [String: Any] = ["type": "Feature", "geometry": ["type": "Point", "coordinates": [place.longitude, place.latitude]], "properties": ["record_type": "place", "title": place.displayTitle, "day_key": place.dayTimeline?.dayKey ?? "", "arrival_time": iso8601.string(from: place.arrivalDate)]]
+            data = try? JSONSerialization.data(withJSONObject: feature, options: [.prettyPrinted, .sortedKeys])
+        case .csv:
+            let row = ["record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude,comment", ["place", iso8601.string(from: place.arrivalDate), place.departureDate.map(iso8601.string(from:)) ?? "", csvEscaped(place.displayTitle), place.dayTimeline?.dayKey ?? "", "", "", "", coordinateString(place.latitude), coordinateString(place.longitude), csvEscaped(place.comment ?? "")].joined(separator: ",")].joined(separator: "\n")
+            data = row.data(using: .utf8)
+        }
+        return singlePayload(data, format: format, fileStem: fileStem)
+    }
+
+    private static func singlePayload(_ data: Data?, format: MacTimelineExportFormat, fileStem: String) -> MacTimelineExportPayload? {
+        guard let data else { return nil }
+        let extensionAndType: (String, UTType) = switch format {
+        case .gpx: ("gpx", .xml)
+        case .geoJSON: ("geojson", .json)
+        case .csv: ("csv", .commaSeparatedText)
+        }
+        return MacTimelineExportPayload(data: data, filename: "\(fileStem).\(extensionAndType.0)", contentType: extensionAndType.1)
     }
 
     private static func gpxData(

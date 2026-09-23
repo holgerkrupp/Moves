@@ -613,6 +613,7 @@ struct ContentView: View {
                 ForEach(recentDayTimelines) { day in
                     DaySidebarRow(day: day)
                         .tag(day.dayKey)
+                        .dayContextMenu(day)
                 }
             }
         }
@@ -1271,12 +1272,33 @@ private struct DaySidebarRow: View {
     }
 }
 
+private extension View {
+    func dayContextMenu(_ day: DayTimeline) -> some View {
+        contextMenu {
+            ForEach(TimelineExportFormat.allCases, id: \.self) { format in
+                if let payload = TimelineExporter.makePayload(
+                    days: [day],
+                    format: format,
+                    fileStem: "moves-\(day.dayKey)"
+                ) {
+                    ShareLink(
+                        item: TimelineShareFile(data: payload.data, filename: payload.filename),
+                        preview: SharePreview(payload.filename)
+                    ) {
+                        Label("Export \(format.title)", systemImage: "doc.badge.arrow.up")
+                    }
+                }
+            }
+        }
+    }
+}
+
 enum TimelineExportScope {
     case allDays
     case selectedDay
 }
 
-enum TimelineExportFormat {
+enum TimelineExportFormat: CaseIterable, Hashable {
     case gpx
     case geoJSON
     case csv
@@ -1300,6 +1322,14 @@ enum TimelineExportFormat {
             return "geojson"
         case .csv:
             return "csv"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .gpx: "GPX"
+        case .geoJSON: "GeoJSON"
+        case .csv: "CSV"
         }
     }
 }
@@ -1348,6 +1378,24 @@ struct GPXShareFile: Transferable {
                 withIntermediateDirectories: true
             )
 
+            let url = directory.appending(path: file.filename)
+            try file.data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        }
+    }
+}
+
+/// A temporary export file used by context menus. ShareLink presents the
+/// platform's native share/save destination picker on iPhone, iPad, and Mac.
+struct TimelineShareFile: Transferable {
+    let data: Data
+    let filename: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .data) { file in
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let url = directory.appending(path: file.filename)
             try file.data.write(to: url, options: .atomic)
             return SentTransferredFile(url)
@@ -1474,6 +1522,95 @@ enum TimelineExporter {
             filename: "\(fileStem).gpx",
             contentType: .xml
         )
+    }
+
+    /// Creates a portable file for one timeline activity. Keeping this separate
+    /// from the day exporter means contextual actions never have to mutate a
+    /// model relationship just to serialize a single record.
+    static func makePayload(
+        move: MoveSegment,
+        format: TimelineExportFormat,
+        fileStem: String
+    ) -> TimelineExportPayload? {
+        let title = "\(move.startPlace?.displayTitle ?? "Unknown start") to \(move.endPlace?.displayTitle ?? "Unknown destination")"
+        let points = routePoints(for: move)
+        let data: Data?
+
+        switch format {
+        case .gpx:
+            guard points.count > 1 else { return nil }
+            var xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1" creator="Moves" xmlns="http://www.topografix.com/GPX/1/1">
+              <trk><name>\(xmlEscaped(title))</name><type>\(xmlEscaped(move.transportMode.title))</type><trkseg>
+            """
+            for point in points {
+                xml += "\n    <trkpt lat=\"\(coordinateString(point.latitude))\" lon=\"\(coordinateString(point.longitude))\">"
+                if let elevation = point.elevation, elevation.isFinite { xml += "<ele>\(elevationString(elevation))</ele>" }
+                xml += "<time>\(iso8601.string(from: point.timestamp))</time></trkpt>"
+            }
+            xml += "\n  </trkseg></trk></gpx>"
+            data = xml.data(using: .utf8)
+        case .geoJSON:
+            guard points.count > 1 else { return nil }
+            var properties: [String: Any] = [
+                "record_type": "move", "title": title, "day_key": move.dayTimeline?.dayKey ?? "",
+                "transport_mode": move.transportMode.rawValue,
+                "start_time": iso8601.string(from: move.timelineStartDate),
+                "end_time": iso8601.string(from: move.endDate), "distance_meters": move.distanceMeters,
+            ]
+            if let comment = move.comment, !comment.isEmpty { properties["comment"] = comment }
+            let feature: [String: Any] = [
+                "type": "Feature",
+                "geometry": ["type": "LineString", "coordinates": points.map { [$0.longitude, $0.latitude] }],
+                "properties": properties,
+            ]
+            data = try? JSONSerialization.data(withJSONObject: feature, options: [.prettyPrinted, .sortedKeys])
+        case .csv:
+            let row = [
+                "record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude,comment",
+                ["move", iso8601.string(from: move.timelineStartDate), iso8601.string(from: move.endDate),
+                 csvEscaped(title), move.dayTimeline?.dayKey ?? "", move.transportMode.rawValue,
+                 String(format: "%.2f", move.distanceMeters), move.stepCount.map(String.init) ?? "", "", "", csvEscaped(move.comment ?? "")].joined(separator: ","),
+            ].joined(separator: "\n")
+            data = row.data(using: .utf8)
+        }
+
+        guard let data else { return nil }
+        return TimelineExportPayload(data: data, filename: "\(fileStem).\(format.fileExtension)", contentType: format.contentType)
+    }
+
+    static func makePayload(
+        place: VisitPlace,
+        format: TimelineExportFormat,
+        fileStem: String
+    ) -> TimelineExportPayload? {
+        let data: Data?
+        switch format {
+        case .gpx:
+            let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1" creator="Moves" xmlns="http://www.topografix.com/GPX/1/1">
+              <wpt lat="\(coordinateString(place.latitude))" lon="\(coordinateString(place.longitude))"><name>\(xmlEscaped(place.displayTitle))</name><time>\(iso8601.string(from: place.arrivalDate))</time></wpt>
+            </gpx>
+            """
+            data = xml.data(using: .utf8)
+        case .geoJSON:
+            var properties: [String: Any] = ["record_type": "place", "title": place.displayTitle, "day_key": place.dayTimeline?.dayKey ?? "", "arrival_time": iso8601.string(from: place.arrivalDate)]
+            if let departure = place.departureDate { properties["departure_time"] = iso8601.string(from: departure) }
+            if let comment = place.comment, !comment.isEmpty { properties["comment"] = comment }
+            let feature: [String: Any] = ["type": "Feature", "geometry": ["type": "Point", "coordinates": [place.longitude, place.latitude]], "properties": properties]
+            data = try? JSONSerialization.data(withJSONObject: feature, options: [.prettyPrinted, .sortedKeys])
+        case .csv:
+            let row = [
+                "record_type,start_time,end_time,title,day_key,transport_mode,distance_meters,step_count,latitude,longitude,comment",
+                ["place", iso8601.string(from: place.arrivalDate), place.departureDate.map(iso8601.string(from:)) ?? "", csvEscaped(place.displayTitle), place.dayTimeline?.dayKey ?? "", "", "", "", coordinateString(place.latitude), coordinateString(place.longitude), csvEscaped(place.comment ?? "")].joined(separator: ","),
+            ].joined(separator: "\n")
+            data = row.data(using: .utf8)
+        }
+
+        guard let data else { return nil }
+        return TimelineExportPayload(data: data, filename: "\(fileStem).\(format.fileExtension)", contentType: format.contentType)
     }
 
     private static func gpxData(for days: [DayTimeline]) -> Data? {
@@ -1683,6 +1820,14 @@ enum TimelineExporter {
     }
 
     private static func routePoints(for move: MoveSegment) -> [TimelineTrackPoint] {
+        if let manualRoute = move.manualRouteCoordinates {
+            return routePoints(
+                for: manualRoute,
+                startDate: move.timelineStartDate,
+                endDate: move.endDate
+            )
+        }
+
         var points: [TimelineTrackPoint] = []
         points.reserveCapacity(move.samples.count + 2)
 
