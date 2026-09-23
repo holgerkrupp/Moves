@@ -1347,7 +1347,7 @@ struct DayMapStrip: View {
 
             if showsBigMarkers && !isSelected {
                 Marker(marker.title, coordinate: marker.coordinate)
-                    .tint(MovesPalette.place)
+                    .tint(MovesPalette.place.opacity(selection == nil ? 1 : 0.35))
             } else {
                 Annotation(marker.title, coordinate: marker.coordinate, anchor: .center) {
                     Button {
@@ -1356,6 +1356,7 @@ struct DayMapStrip: View {
                         }
                     } label: {
                         MapLocationDot(tint: MovesPalette.place, isSelected: isSelected)
+                            .opacity(selection != nil && !isSelected ? 0.35 : 1)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(marker.title)
@@ -1436,6 +1437,7 @@ struct DayMapStrip: View {
             presentationCache.placeRefreshKey,
             presentationCache.latestSampleKey,
             liveRouteSnapshot?.id ?? "none",
+            selectionRefreshKey,
             showsBigMarkers ? "big" : "small",
             collapsedSnapshotRouteKey
         ]
@@ -1455,7 +1457,8 @@ struct DayMapStrip: View {
                 liveRouteSnapshot: liveRouteSnapshot,
                 placeMarkers: placeMarkers,
                 latestSampleCoordinate: latestSampleCoordinate,
-                showsBigMarkers: showsBigMarkers
+                showsBigMarkers: showsBigMarkers,
+                selection: selection
             )
 
             guard !Task.isCancelled else { return }
@@ -1474,7 +1477,8 @@ struct DayMapStrip: View {
         liveRouteSnapshot: LiveRouteTrackingSnapshot?,
         placeMarkers: [PlaceMarker],
         latestSampleCoordinate: CLLocationCoordinate2D?,
-        showsBigMarkers: Bool
+        showsBigMarkers: Bool,
+        selection: TimelineMapSelection?
     ) async throws -> UIImage {
         let options = MKMapSnapshotter.Options()
         options.region = region
@@ -1498,7 +1502,8 @@ struct DayMapStrip: View {
             liveRouteSnapshot: liveRouteSnapshot,
             placeMarkers: placeMarkers,
             latestSampleCoordinate: latestSampleCoordinate,
-            showsBigMarkers: showsBigMarkers
+            showsBigMarkers: showsBigMarkers,
+            selection: selection
         )
     }
 
@@ -1508,7 +1513,8 @@ struct DayMapStrip: View {
         liveRouteSnapshot: LiveRouteTrackingSnapshot?,
         placeMarkers: [PlaceMarker],
         latestSampleCoordinate: CLLocationCoordinate2D?,
-        showsBigMarkers: Bool
+        showsBigMarkers: Bool,
+        selection: TimelineMapSelection?
     ) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = snapshot.image.scale
@@ -1518,35 +1524,47 @@ struct DayMapStrip: View {
             snapshot.image.draw(at: .zero)
 
             for route in routes {
+                let isSelected: Bool
+                if case .move(let selectedID) = selection {
+                    isSelected = route.id == selectedID.uuidString
+                } else {
+                    isSelected = false
+                }
+                let dimsForOtherSelection = selection != nil && !isSelected
                 strokeRoute(
                     route.shadowCoordinates,
                     in: snapshot,
-                    color: UIColor(route.shadowTint),
-                    lineWidth: route.shadowLineWidth
+                    color: UIColor(route.shadowTint).withAlphaComponent(dimsForOtherSelection ? 0.2 : 1),
+                    lineWidth: isSelected ? route.shadowLineWidth + 4 : route.shadowLineWidth
                 )
                 strokeRoute(
                     route.coordinates,
                     in: snapshot,
-                    color: UIColor(route.tint).withAlphaComponent(0.95),
-                    lineWidth: route.lineWidth
+                    color: UIColor(route.tint).withAlphaComponent(dimsForOtherSelection ? 0.28 : 0.95),
+                    lineWidth: isSelected ? route.lineWidth + 4 : route.lineWidth
                 )
             }
 
             if let liveRouteSnapshot {
+                let isSelected: Bool
+                if case .liveRoute = selection { isSelected = true } else { isSelected = false }
                 strokeRoute(
                     liveRouteSnapshot.coordinates,
                     in: snapshot,
-                    color: UIColor(MovesPalette.routeTracking).withAlphaComponent(0.95),
-                    lineWidth: 5
+                    color: UIColor(MovesPalette.routeTracking).withAlphaComponent(selection != nil && !isSelected ? 0.28 : 0.95),
+                    lineWidth: isSelected ? 9 : 5
                 )
             }
 
             for marker in placeMarkers {
+                let isSelected = selection == .place(marker.id)
                 drawMarker(
                     at: snapshot.point(for: marker.coordinate),
                     in: snapshot.image.size,
                     tint: UIColor(MovesPalette.place),
-                    isLarge: showsBigMarkers
+                    isLarge: showsBigMarkers,
+                    isSelected: isSelected,
+                    isDimmed: selection != nil && !isSelected
                 )
             }
 
@@ -1558,7 +1576,9 @@ struct DayMapStrip: View {
                     at: snapshot.point(for: latestSampleCoordinate),
                     in: snapshot.image.size,
                     tint: UIColor(liveRouteSnapshot == nil ? MovesPalette.start : MovesPalette.routeTracking),
-                    isLarge: showsBigMarkers
+                    isLarge: showsBigMarkers,
+                    isSelected: selection != nil,
+                    isDimmed: false
                 )
             }
         }
@@ -1598,9 +1618,11 @@ struct DayMapStrip: View {
         at point: CGPoint,
         in size: CGSize,
         tint: UIColor,
-        isLarge: Bool
+        isLarge: Bool,
+        isSelected: Bool,
+        isDimmed: Bool
     ) {
-        let diameter: CGFloat = isLarge ? 14 : 8
+        let diameter: CGFloat = isSelected ? 14 : (isLarge ? 14 : 8)
         let radius = diameter / 2
         let drawingBounds = CGRect(
             x: -diameter,
@@ -1617,12 +1639,33 @@ struct DayMapStrip: View {
             height: diameter
         )
         let path = UIBezierPath(ovalIn: rect)
-        tint.setFill()
+        tint.withAlphaComponent(isDimmed ? 0.32 : 1).setFill()
         path.fill()
 
         UIColor.white.setStroke()
         path.lineWidth = isLarge ? 2 : 1.5
         path.stroke()
+
+        if isSelected {
+            let ringRect = rect.insetBy(dx: -5, dy: -5)
+            let ring = UIBezierPath(ovalIn: ringRect)
+            UIColor.white.withAlphaComponent(0.96).setStroke()
+            ring.lineWidth = 3
+            ring.stroke()
+            tint.setStroke()
+            path.lineWidth = 2
+            path.stroke()
+        }
+    }
+
+    private var selectionRefreshKey: String {
+        switch selection {
+        case .place(let id): return "place:\(id.uuidString)"
+        case .move(let id): return "move:\(id.uuidString)"
+        case .liveRoute(let id): return "live:\(id)"
+        case .sample(let id): return "sample:\(id)"
+        case nil: return "none"
+        }
     }
 
     private static var windowBounds: CGRect {

@@ -610,9 +610,13 @@ private struct MovesMacBrowser: View {
     private var importedMoveCount: Int { allMoves.filter { $0.samples.contains { $0.source == .fileRouteImport } }.count }
     private var recordedTimelines: [DayTimeline] { timelines.filter(\.hasRecordedActivity) }
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var years: [MacYear] {
         let calendar = Calendar.autoupdatingCurrent
-        let grouped = Dictionary(grouping: recordedTimelines) { calendar.component(.year, from: $0.dayStart) }
+        let grouped = Dictionary(grouping: sidebarTimelines) { calendar.component(.year, from: $0.dayStart) }
         return grouped.keys.sorted(by: >).map { year in
             let byMonth = Dictionary(grouping: grouped[year, default: []]) { calendar.component(.month, from: $0.dayStart) }
             return MacYear(year: year, months: byMonth.keys.sorted(by: >).map { month in
@@ -622,7 +626,7 @@ private struct MovesMacBrowser: View {
     }
 
     private var recentItems: [MacRecentItem] {
-        recordedTimelines.prefix(8).map { timeline in
+        sidebarTimelines.prefix(8).map { timeline in
             MacRecentItem(id: "day-\(timeline.dayKey)", title: timeline.dayStart.formatted(date: .abbreviated, time: .omitted), subtitle: summary(for: timeline), icon: "calendar", selection: .day(timeline.dayKey))
         }
     }
@@ -632,9 +636,13 @@ private struct MovesMacBrowser: View {
         guard !query.isEmpty else { return recordedTimelines }
         return recordedTimelines.filter { timeline in
             timeline.dayStart.formatted(date: .long, time: .omitted).localizedCaseInsensitiveContains(query) ||
-            timeline.places.contains { $0.displayTitle.localizedCaseInsensitiveContains(query) } ||
+            timeline.places.contains { $0.matches(searchQuery: query) } ||
             timeline.moves.contains { $0.transportMode.title.localizedCaseInsensitiveContains(query) }
         }
+    }
+
+    private var sidebarTimelines: [DayTimeline] {
+        isSearching ? filteredTimelines : recordedTimelines
     }
 
     private var selectedTimelineIndex: Int? {
@@ -680,7 +688,7 @@ private struct MovesMacBrowser: View {
                 FailedRouteImportsView(importer: importer)
             default:
                 MacWorkspace(
-                    timelines: filteredTimelines,
+                    timelines: recordedTimelines,
                     selection: $selection,
                     searchText: searchText,
                     exportActivity: exportActivity
@@ -1107,35 +1115,48 @@ private struct MovesMacBrowser: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
-            Section("Library") {
-                MacSidebarRow(title: "Imported", subtitle: "\(importedMoveCount) routes · \(importedSampleCount) samples", systemImage: "arrow.down.to.line.compact")
-                    .tag(MacSelection.imported)
-                MacSidebarRow(title: "Failed Imports", subtitle: recoverySubtitle, systemImage: "exclamationmark.triangle")
-                    .tag(MacSelection.recovery)
-            }
-            Section("Recent") {
-                if recentItems.isEmpty { Text("No recorded days yet").foregroundStyle(.secondary) }
-                else {
-                    ForEach(recentItems) { item in
-                        MacSidebarRow(title: item.title, subtitle: item.subtitle, systemImage: item.icon)
-                            .tag(item.selection)
+            if isSearching {
+                Section("Search Results") {
+                    ForEach(filteredTimelines) { timeline in
+                        MacSidebarRow(
+                            title: timeline.dayStart.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()),
+                            subtitle: summary(for: timeline),
+                            systemImage: "calendar.day.timeline.left"
+                        )
+                        .tag(MacSelection.day(timeline.dayKey))
                     }
                 }
-            }
-            Section("History") {
-                ForEach(years) { year in
-                    DisclosureGroup {
-                        ForEach(year.months) { month in
-                            DisclosureGroup {
-                                ForEach(month.days) { timeline in
-                                    MacSidebarRow(title: timeline.dayStart.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()), subtitle: summary(for: timeline), systemImage: "calendar.day.timeline.left")
-                                        .tag(MacSelection.day(timeline.dayKey))
-                                }
-                            } label: {
-                                Label(DateFormatter().monthSymbols[month.month - 1], systemImage: "calendar")
-                            }
+            } else {
+                Section("Library") {
+                    MacSidebarRow(title: "Imported", subtitle: "\(importedMoveCount) routes · \(importedSampleCount) samples", systemImage: "arrow.down.to.line.compact")
+                        .tag(MacSelection.imported)
+                    MacSidebarRow(title: "Failed Imports", subtitle: recoverySubtitle, systemImage: "exclamationmark.triangle")
+                        .tag(MacSelection.recovery)
+                }
+                Section("Recent") {
+                    if recentItems.isEmpty { Text("No recorded days yet").foregroundStyle(.secondary) }
+                    else {
+                        ForEach(recentItems) { item in
+                            MacSidebarRow(title: item.title, subtitle: item.subtitle, systemImage: item.icon)
+                                .tag(item.selection)
                         }
-                    } label: { Label(String(year.year), systemImage: "calendar.badge.clock") }
+                    }
+                }
+                Section("History") {
+                    ForEach(years) { year in
+                        DisclosureGroup {
+                            ForEach(year.months) { month in
+                                DisclosureGroup {
+                                    ForEach(month.days) { timeline in
+                                        MacSidebarRow(title: timeline.dayStart.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()), subtitle: summary(for: timeline), systemImage: "calendar.day.timeline.left")
+                                            .tag(MacSelection.day(timeline.dayKey))
+                                    }
+                                } label: {
+                                    Label(DateFormatter().monthSymbols[month.month - 1], systemImage: "calendar")
+                                }
+                            }
+                        } label: { Label(String(year.year), systemImage: "calendar.badge.clock") }
+                    }
                 }
             }
         }
@@ -1158,7 +1179,11 @@ private struct MovesMacBrowser: View {
             }
         }
         .overlay {
-            if recordedTimelines.isEmpty && importedSampleCount == 0 { ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here.")) }
+            if isSearching && filteredTimelines.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            } else if recordedTimelines.isEmpty && importedSampleCount == 0 {
+                ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here."))
+            }
         }
     }
 

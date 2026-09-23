@@ -1,0 +1,13 @@
+Target dependency graph (6 targets)
+Target 'Moves' in project 'Moves'
+➜ Explicit dependency on target 'CloudDataPresence-product' in project 'CloudDataPresence'
+➜ Explicit dependency on target 'CloudKitSyncMonitor-product' in project 'CloudKitSyncMonitor'
+Target 'CloudKitSyncMonitor-product' in project 'CloudKitSyncMonitor'
+➜ Explicit dependency on target 'CloudKitSyncMonitor' in project 'CloudKitSyncMonitor'
+➜ Explicit dependency on target 'CloudKitSyncMonitor_CloudKitSyncMonitor' in project 'CloudKitSyncMonitor'
+Target 'CloudKitSyncMonitor' in project 'CloudKitSyncMonitor'
+➜ Explicit dependency on target 'CloudKitSyncMonitor_CloudKitSyncMonitor' in project 'CloudKitSyncMonitor'
+Target 'CloudKitSyncMonitor_CloudKitSyncMonitor' in project 'CloudKitSyncMonitor' (no dependencies)
+Target 'CloudDataPresence-product' in project 'CloudDataPresence'
+➜ Explicit dependency on target 'CloudDataPresence' in project 'CloudDataPresence'
+Target 'CloudDataPresence' in project 'CloudDataPresence' (no dependencies)

@@ -1,0 +1,139 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/Moves-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/Moves-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/Moves-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/Moves-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/Moves-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Mac/MovesMacApp.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesMacApp~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/ImportQueue.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueue~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/ImportQueueViews.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/ImportQueueViews~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/MovesJumpToDateView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesJumpToDateView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/MovesRouteSupport.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/MovesRouteSupport~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/RouteCoordinateStorage.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteCoordinateStorage~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/RouteFileImport.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImport~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/RouteFileImportConfiguration.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportConfiguration~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/RouteFileImportWorker.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteFileImportWorker~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/RouteImportAcquisition.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/RouteImportAcquisition~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Moves/VisitedLocation.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/VisitedLocation~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/DerivedSources/GeneratedStringSymbols_Localizable.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.dia",
+    "index-unit-output-path" : "/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/build/Moves.build/Debug/Moves.build/Objects-normal/arm64/GeneratedStringSymbols_Localizable~partial.swiftmodule"
+  }
+}

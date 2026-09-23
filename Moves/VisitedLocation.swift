@@ -582,6 +582,17 @@ final class VisitPlace {
         let lon = String(format: "%.5f", longitude)
         return "\(lat), \(lon)"
     }
+
+    /// Matches every name associated with a visit, including the automatic
+    /// geocoded name that may be hidden by a custom label in the timeline.
+    func matches(searchQuery: String) -> Bool {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+
+        return [userLabel, autoLabel, comment]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains { $0.localizedCaseInsensitiveContains(query) }
+    }
 }
 
 fileprivate extension VisitPlace {

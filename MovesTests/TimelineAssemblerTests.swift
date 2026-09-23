@@ -80,6 +80,57 @@ final class MovesTimelinePeriodTests: XCTestCase {
 
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
+    func testTrackSplitInterpolatesTimeBetweenSurroundingSamples() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let route = [
+            CLLocationCoordinate2D(latitude: 53.0, longitude: 10.000),
+            CLLocationCoordinate2D(latitude: 53.0, longitude: 10.010),
+            CLLocationCoordinate2D(latitude: 53.0, longitude: 10.020),
+        ]
+        let references = [
+            TrackSplitReferencePoint(
+                coordinate: CLLocationCoordinate2D(latitude: 53.0, longitude: 10.005),
+                timestamp: start.addingTimeInterval(5 * 60)
+            ),
+            TrackSplitReferencePoint(
+                coordinate: CLLocationCoordinate2D(latitude: 53.0, longitude: 10.015),
+                timestamp: start.addingTimeInterval(25 * 60)
+            ),
+        ]
+
+        let plan = try XCTUnwrap(TrackSplitPlanner.makePlan(
+            routeCoordinates: route,
+            splitSegmentIndex: 1,
+            segmentFraction: 0,
+            referencePoints: references,
+            startDate: start,
+            endDate: start.addingTimeInterval(30 * 60)
+        ))
+
+        XCTAssertEqual(plan.timestamp.timeIntervalSince(start), 15 * 60, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(plan.leadingCoordinates.last).longitude, 10.010, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(plan.trailingCoordinates.first).longitude, 10.010, accuracy: 0.000_001)
+    }
+
+    func testTrackSplitFallsBackToMoveEndpointsWithoutSamples() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let route = [
+            CLLocationCoordinate2D(latitude: 0, longitude: 0),
+            CLLocationCoordinate2D(latitude: 0, longitude: 0.01),
+        ]
+
+        let plan = try XCTUnwrap(TrackSplitPlanner.makePlan(
+            routeCoordinates: route,
+            splitSegmentIndex: 0,
+            segmentFraction: 0.25,
+            referencePoints: [],
+            startDate: start,
+            endDate: start.addingTimeInterval(40 * 60)
+        ))
+
+        XCTAssertEqual(plan.timestamp.timeIntervalSince(start), 10 * 60, accuracy: 1)
+    }
+
     func testDurationFormatterUsesLocalizedMinuteUnit() {
         let locale = Locale(identifier: "en_US")
 

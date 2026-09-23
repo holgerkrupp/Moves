@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/Sources/CloudDataPresence/CloudDataPresence.swift" : {
+    "const-values" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.d",
+    "diagnostics" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.dia",
+    "index-unit-output-path" : "/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.o",
+    "llvm-bc" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.bc",
+    "object" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Library/Developer/Xcode/DerivedData/Moves-drtqojpkbplbtshjepbaqelzgyex/SourcePackages/checkouts/CloudDataPresence/build/CloudDataPresence.build/Debug/CloudDataPresence-t.build/Objects-normal/arm64/CloudDataPresence~partial.swiftmodule"
+  }
+}

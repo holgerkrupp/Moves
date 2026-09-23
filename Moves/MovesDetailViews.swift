@@ -288,6 +288,11 @@ struct MoveMapDetailView: View {
     @State private var isShowingDeleteError = false
     @State private var isShowingHealthOpenError = false
     @State private var isShowingDetails = false
+    @State private var isSelectingSplitPoint = false
+    @State private var proposedSplit: TrackSplitPlan?
+    @State private var isSplittingTrack = false
+    @State private var splitErrorMessage = ""
+    @State private var isShowingSplitError = false
 
     private var activeRenderedRoute: RenderedRoute {
         RenderedRoute(
@@ -402,6 +407,14 @@ struct MoveMapDetailView: View {
                     .disabled(routeCoordinates.count < 2 || isSavingManualRoute)
                     .help(isEditingManualRoute ? "Stop editing route" : "Edit route")
 
+                    Button {
+                        setSplitPointSelection(!isSelectingSplitPoint)
+                    } label: {
+                        Image(systemName: isSelectingSplitPoint ? "scissors.circle.fill" : "scissors")
+                    }
+                    .disabled(routeCoordinates.count < 2 || isSavingManualRoute || isSplittingTrack)
+                    .help(isSelectingSplitPoint ? "Cancel track split" : "Split track")
+
                     Button(role: .destructive) {
                         isConfirmingDeletion = true
                     } label: {
@@ -433,6 +446,36 @@ struct MoveMapDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Apple Health could not be opened from this device.")
+        }
+        .confirmationDialog(
+            "Split Track Here?",
+            isPresented: Binding(
+                get: { proposedSplit != nil },
+                set: { if !$0 { proposedSplit = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Split Track") {
+                guard let plan = proposedSplit else { return }
+                proposedSplit = nil
+                splitTrack(using: plan)
+            }
+            Button("Choose Another Point") {
+                proposedSplit = nil
+            }
+            Button("Cancel", role: .cancel) {
+                proposedSplit = nil
+                isSelectingSplitPoint = false
+            }
+        } message: {
+            if let proposedSplit {
+                Text("The two activities will meet at \(proposedSplit.timestamp.formatted(date: .omitted, time: .shortened)). The time is interpolated from the surrounding recorded points.")
+            }
+        }
+        .alert("Could Not Split Track", isPresented: $isShowingSplitError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(splitErrorMessage)
         }
         .sheet(isPresented: $isShowingDetails) {
             MoveDetailsView(segment: segment, displayedRouteCoordinates: routeCoordinates)
@@ -484,8 +527,15 @@ struct MoveMapDetailView: View {
                         }
                     }
                 }
+
+                if let proposedSplit {
+                    Annotation("Split point", coordinate: proposedSplit.coordinate, anchor: .center) {
+                        SplitRoutePointMarker()
+                    }
+                }
             }
             .simultaneousGesture(manualRouteEditGesture(proxy: proxy))
+            .simultaneousGesture(splitPointSelectionGesture(proxy: proxy))
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
     }
@@ -518,6 +568,11 @@ struct MoveMapDetailView: View {
                     }
                 } else if isEditingManualRoute {
                     Label("Drag the route line to adjust it", systemImage: "hand.draw")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(activeRenderedRoute.tint)
+                }
+                if isSelectingSplitPoint {
+                    Label("Tap the track where the second activity should begin", systemImage: "scissors")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(activeRenderedRoute.tint)
                 }
@@ -648,6 +703,172 @@ struct MoveMapDetailView: View {
             .onEnded { value in
                 finishManualRouteDrag(at: value.location, proxy: proxy)
             }
+    }
+
+    private func splitPointSelectionGesture(proxy: MapProxy) -> some Gesture {
+        SpatialTapGesture()
+            .onEnded { value in
+                selectSplitPoint(at: value.location, proxy: proxy)
+            }
+    }
+
+    private func setSplitPointSelection(_ isSelecting: Bool) {
+        isSelectingSplitPoint = isSelecting
+        proposedSplit = nil
+        if isSelecting {
+            setManualRouteEditing(false)
+        }
+    }
+
+    private func selectSplitPoint(at point: CGPoint, proxy: MapProxy) {
+        guard isSelectingSplitPoint,
+              let nearest = nearestRouteSegment(to: point, proxy: proxy),
+              nearest.distance <= 44 else {
+            return
+        }
+
+        let references = segment.samples.preferredRouteDisplaySamples
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .map { TrackSplitReferencePoint(coordinate: $0.coordinate, timestamp: $0.timestamp) }
+        guard let plan = TrackSplitPlanner.makePlan(
+            routeCoordinates: routeCoordinates,
+            splitSegmentIndex: nearest.segmentIndex,
+            segmentFraction: nearest.fraction,
+            referencePoints: references,
+            startDate: segment.timelineStartDate,
+            endDate: segment.endDate
+        ) else {
+            splitErrorMessage = "Choose a point farther from the beginning or end of the track."
+            isShowingSplitError = true
+            return
+        }
+
+        proposedSplit = plan
+    }
+
+    private func nearestRouteSegment(
+        to point: CGPoint,
+        proxy: MapProxy
+    ) -> (segmentIndex: Int, fraction: Double, distance: CGFloat)? {
+        guard routeCoordinates.count > 1 else { return nil }
+        var nearest: (segmentIndex: Int, fraction: Double, distance: CGFloat)?
+
+        for index in 0..<(routeCoordinates.count - 1) {
+            guard let start = proxy.convert(routeCoordinates[index], to: .local),
+                  let end = proxy.convert(routeCoordinates[index + 1], to: .local) else {
+                continue
+            }
+            let deltaX = end.x - start.x
+            let deltaY = end.y - start.y
+            let lengthSquared = deltaX * deltaX + deltaY * deltaY
+            guard lengthSquared > 0 else { continue }
+            let fraction = min(
+                max(((point.x - start.x) * deltaX + (point.y - start.y) * deltaY) / lengthSquared, 0),
+                1
+            )
+            let projected = CGPoint(
+                x: start.x + deltaX * fraction,
+                y: start.y + deltaY * fraction
+            )
+            let distance = hypot(projected.x - point.x, projected.y - point.y)
+            if nearest == nil || distance < nearest!.distance {
+                nearest = (index, Double(fraction), distance)
+            }
+        }
+
+        return nearest
+    }
+
+    private func splitTrack(using plan: TrackSplitPlan) {
+        guard !isSplittingTrack,
+              let dayTimeline = segment.dayTimeline,
+              plan.timestamp > segment.timelineStartDate,
+              plan.timestamp < segment.endDate else {
+            return
+        }
+
+        isSplittingTrack = true
+        let undoPayload = SplitMoveUndoPayload(
+            segment: segment,
+            displayedRouteCoordinates: routeCoordinates
+        )
+        let originalEndDate = segment.endDate
+        let originalEndPlace = segment.endPlace
+        let originalStepCount = segment.stepCount
+        let originalDuration = max(originalEndDate.timeIntervalSince(segment.timelineStartDate), 1)
+        let leadingDuration = max(plan.timestamp.timeIntervalSince(segment.timelineStartDate), 0)
+        let leadingStepCount = originalStepCount.map {
+            min(max(Int((Double($0) * leadingDuration / originalDuration).rounded()), 0), $0)
+        }
+        let trailingStepCount = originalStepCount.map { $0 - (leadingStepCount ?? 0) }
+        let splitToken = "\(Int(plan.timestamp.timeIntervalSince1970.rounded()))-\(UUID().uuidString)"
+
+        let splitPlace = VisitPlace(
+            arrivalDate: plan.timestamp,
+            departureDate: plan.timestamp,
+            latitude: plan.coordinate.latitude,
+            longitude: plan.coordinate.longitude,
+            horizontalAccuracy: 0
+        )
+        splitPlace.deviceIdentifier = segment.deviceIdentifier
+        splitPlace.dayTimeline = dayTimeline
+
+        let trailingMove = MoveSegment(
+            dedupeKey: "\(segment.dedupeKey)|split-after|\(splitToken)",
+            startDate: plan.timestamp,
+            endDate: originalEndDate,
+            transportMode: segment.transportMode,
+            distanceMeters: routeDistance(for: plan.trailingCoordinates),
+            stepCount: trailingStepCount,
+            comment: segment.comment
+        )
+        trailingMove.deviceIdentifier = segment.deviceIdentifier
+        trailingMove.isExcludedFromConnectionStatistics = segment.isExcludedFromConnectionStatistics
+        trailingMove.startPlace = splitPlace
+        trailingMove.endPlace = originalEndPlace
+        trailingMove.dayTimeline = dayTimeline
+        trailingMove.storeManualRouteCoordinates(plan.trailingCoordinates)
+
+        segment.dedupeKey = "\(segment.dedupeKey)|split-before|\(splitToken)"
+        segment.endDate = plan.timestamp
+        segment.endPlace = splitPlace
+        segment.distanceMeters = routeDistance(for: plan.leadingCoordinates)
+        segment.stepCount = leadingStepCount
+        segment.clearCachedRouteCoordinates()
+        segment.storeManualRouteCoordinates(plan.leadingCoordinates)
+
+        for sample in undoPayload.samples {
+            sample.moveSegment = sample.timestamp <= plan.timestamp ? segment : trailingMove
+        }
+
+        modelContext.insert(splitPlace)
+        modelContext.insert(trailingMove)
+
+        do {
+            try modelContext.save()
+            let trailingMoveID = trailingMove.id
+            let splitPlaceID = splitPlace.id
+            undoController.manager.registerUndo(withTarget: modelContext) { context in
+                undoPayload.restore(
+                    in: context,
+                    trailingMoveID: trailingMoveID,
+                    splitPlaceID: splitPlaceID
+                )
+            }
+            undoController.manager.setActionName("Split Track")
+            routeCoordinates = plan.leadingCoordinates
+            refreshMoveGPXShareFile()
+            isSelectingSplitPoint = false
+            isSplittingTrack = false
+            dismiss()
+        } catch {
+            modelContext.rollback()
+            routeCoordinates = undoPayload.displayedRouteCoordinates
+            refreshMoveGPXShareFile()
+            splitErrorMessage = error.localizedDescription
+            isShowingSplitError = true
+            isSplittingTrack = false
+        }
     }
 
     private func setManualRouteEditing(_ isEditing: Bool) {
@@ -1266,6 +1487,85 @@ private struct ManualRouteWaypointMarker: View {
                     .stroke(Color.accentColor, lineWidth: isActive ? 3 : 2)
             }
             .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+    }
+}
+
+private struct SplitRoutePointMarker: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color(uiColor: .systemBackground))
+                .frame(width: 30, height: 30)
+                .shadow(color: .black.opacity(0.24), radius: 3, y: 1)
+
+            Image(systemName: "scissors")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.accentColor)
+        }
+        .accessibilityLabel("Selected split point")
+    }
+}
+
+private struct SplitMoveUndoPayload {
+    let id: UUID
+    let dedupeKey: String
+    let endDate: Date
+    let endPlace: VisitPlace?
+    let distanceMeters: Double
+    let stepCount: Int?
+    let routeCacheSignature: String?
+    let routeCacheCoordinatesData: Data?
+    let manualRouteCoordinatesData: Data?
+    let samples: [LocationSample]
+    let displayedRouteCoordinates: [CLLocationCoordinate2D]
+
+    init(
+        segment: MoveSegment,
+        displayedRouteCoordinates: [CLLocationCoordinate2D]
+    ) {
+        id = segment.id
+        dedupeKey = segment.dedupeKey
+        endDate = segment.endDate
+        endPlace = segment.endPlace
+        distanceMeters = segment.distanceMeters
+        stepCount = segment.stepCount
+        routeCacheSignature = segment.routeCacheSignature
+        routeCacheCoordinatesData = segment.routeCacheCoordinatesData
+        manualRouteCoordinatesData = segment.manualRouteCoordinatesData
+        samples = segment.samples
+        self.displayedRouteCoordinates = displayedRouteCoordinates
+    }
+
+    @MainActor
+    func restore(
+        in context: ModelContext,
+        trailingMoveID: UUID,
+        splitPlaceID: UUID
+    ) {
+        guard let original = try? context.fetch(FetchDescriptor<MoveSegment>())
+            .first(where: { $0.id == id }) else {
+            return
+        }
+
+        original.dedupeKey = dedupeKey
+        original.endDate = endDate
+        original.endPlace = endPlace
+        original.distanceMeters = distanceMeters
+        original.stepCount = stepCount
+        original.routeCacheSignature = routeCacheSignature
+        original.routeCacheCoordinatesData = routeCacheCoordinatesData
+        original.manualRouteCoordinatesData = manualRouteCoordinatesData
+        samples.forEach { $0.moveSegment = original }
+
+        if let trailingMove = try? context.fetch(FetchDescriptor<MoveSegment>())
+            .first(where: { $0.id == trailingMoveID }) {
+            context.delete(trailingMove)
+        }
+        if let splitPlace = try? context.fetch(FetchDescriptor<VisitPlace>())
+            .first(where: { $0.id == splitPlaceID }) {
+            context.delete(splitPlace)
+        }
+        try? context.save()
     }
 }
 

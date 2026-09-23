@@ -1,0 +1,4 @@
+module CloudDataPresence {
+header "CloudDataPresence-Swift.h"
+export *
+}

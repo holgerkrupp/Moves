@@ -247,6 +247,210 @@ struct RenderedRoute: Identifiable {
     }
 }
 
+struct TrackSplitReferencePoint {
+    let coordinate: CLLocationCoordinate2D
+    let timestamp: Date
+}
+
+struct TrackSplitPlan {
+    let coordinate: CLLocationCoordinate2D
+    let timestamp: Date
+    let leadingCoordinates: [CLLocationCoordinate2D]
+    let trailingCoordinates: [CLLocationCoordinate2D]
+}
+
+/// Builds a stable split from a point on the displayed route. Sample timestamps are
+/// projected onto that route so the split time can be interpolated between the two
+/// recorded points surrounding the user's selection.
+enum TrackSplitPlanner {
+    static func makePlan(
+        routeCoordinates: [CLLocationCoordinate2D],
+        splitSegmentIndex: Int,
+        segmentFraction: Double,
+        referencePoints: [TrackSplitReferencePoint],
+        startDate: Date,
+        endDate: Date
+    ) -> TrackSplitPlan? {
+        guard routeCoordinates.count > 1,
+              routeCoordinates.indices.contains(splitSegmentIndex),
+              routeCoordinates.indices.contains(splitSegmentIndex + 1),
+              startDate < endDate else {
+            return nil
+        }
+
+        let fraction = min(max(segmentFraction, 0), 1)
+        let cumulativeDistances = cumulativeDistances(for: routeCoordinates)
+        guard let totalDistance = cumulativeDistances.last, totalDistance > 0 else { return nil }
+
+        let segmentDistance = cumulativeDistances[splitSegmentIndex + 1]
+            - cumulativeDistances[splitSegmentIndex]
+        let splitDistance = cumulativeDistances[splitSegmentIndex] + segmentDistance * fraction
+        guard splitDistance > 0.5, splitDistance < totalDistance - 0.5 else { return nil }
+
+        let coordinate = interpolatedCoordinate(
+            from: routeCoordinates[splitSegmentIndex],
+            to: routeCoordinates[splitSegmentIndex + 1],
+            fraction: fraction
+        )
+        var timedProgress: [(distance: CLLocationDistance, timestamp: Date)] = [
+            (0, startDate),
+            (totalDistance, endDate),
+        ]
+        timedProgress.append(contentsOf: referencePoints.compactMap { reference in
+            guard reference.timestamp >= startDate, reference.timestamp <= endDate else { return nil }
+            return (
+                projectedDistance(
+                    of: reference.coordinate,
+                    onto: routeCoordinates,
+                    cumulativeDistances: cumulativeDistances
+                ),
+                reference.timestamp
+            )
+        })
+        timedProgress.sort { lhs, rhs in
+            if lhs.distance != rhs.distance { return lhs.distance < rhs.distance }
+            return lhs.timestamp < rhs.timestamp
+        }
+
+        let previous = timedProgress.last(where: { $0.distance <= splitDistance })
+            ?? (0, startDate)
+        let next = timedProgress.first(where: { $0.distance >= splitDistance })
+            ?? (totalDistance, endDate)
+        let timestamp: Date
+        if next.distance - previous.distance > 0.01 {
+            let timeFraction = (splitDistance - previous.distance) / (next.distance - previous.distance)
+            timestamp = previous.timestamp.addingTimeInterval(
+                next.timestamp.timeIntervalSince(previous.timestamp) * timeFraction
+            )
+        } else {
+            timestamp = previous.timestamp
+        }
+        let boundedTimestamp = min(max(timestamp, startDate), endDate)
+        guard boundedTimestamp > startDate, boundedTimestamp < endDate else { return nil }
+
+        var leading = Array(routeCoordinates[...splitSegmentIndex])
+        if !coordinatesAreEqual(leading.last, coordinate) {
+            leading.append(coordinate)
+        }
+        var trailing = [coordinate]
+        let remainder = routeCoordinates[(splitSegmentIndex + 1)...]
+        if let first = remainder.first, coordinatesAreEqual(first, coordinate) {
+            trailing.append(contentsOf: remainder.dropFirst())
+        } else {
+            trailing.append(contentsOf: remainder)
+        }
+
+        guard leading.count > 1, trailing.count > 1 else { return nil }
+        return TrackSplitPlan(
+            coordinate: coordinate,
+            timestamp: boundedTimestamp,
+            leadingCoordinates: leading,
+            trailingCoordinates: trailing
+        )
+    }
+
+    private static func cumulativeDistances(
+        for coordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationDistance] {
+        var result: [CLLocationDistance] = [0]
+        result.reserveCapacity(coordinates.count)
+        for index in 1..<coordinates.count {
+            result.append(
+                result[index - 1]
+                    + RouteCoordinateOps.distanceMeters(
+                        from: coordinates[index - 1],
+                        to: coordinates[index]
+                    )
+            )
+        }
+        return result
+    }
+
+    private static func projectedDistance(
+        of coordinate: CLLocationCoordinate2D,
+        onto route: [CLLocationCoordinate2D],
+        cumulativeDistances: [CLLocationDistance]
+    ) -> CLLocationDistance {
+        var bestDistance = CLLocationDistance.greatestFiniteMagnitude
+        var bestProgress: CLLocationDistance = 0
+
+        for index in 0..<(route.count - 1) {
+            let fraction = projectedFraction(
+                of: coordinate,
+                from: route[index],
+                to: route[index + 1]
+            )
+            let projected = interpolatedCoordinate(
+                from: route[index],
+                to: route[index + 1],
+                fraction: fraction
+            )
+            let distance = RouteCoordinateOps.distanceMeters(from: coordinate, to: projected)
+            if distance < bestDistance {
+                bestDistance = distance
+                let segmentDistance = cumulativeDistances[index + 1] - cumulativeDistances[index]
+                bestProgress = cumulativeDistances[index] + segmentDistance * fraction
+            }
+        }
+
+        return bestProgress
+    }
+
+    private static func projectedFraction(
+        of point: CLLocationCoordinate2D,
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D
+    ) -> Double {
+        let latitudeScale = cos(((start.latitude + end.latitude) / 2) * .pi / 180)
+        let segmentX = longitudeDelta(from: start.longitude, to: end.longitude) * latitudeScale
+        let segmentY = end.latitude - start.latitude
+        let pointX = longitudeDelta(from: start.longitude, to: point.longitude) * latitudeScale
+        let pointY = point.latitude - start.latitude
+        let lengthSquared = segmentX * segmentX + segmentY * segmentY
+        guard lengthSquared > 0 else { return 0 }
+        return min(max((pointX * segmentX + pointY * segmentY) / lengthSquared, 0), 1)
+    }
+
+    private static func interpolatedCoordinate(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        fraction: Double
+    ) -> CLLocationCoordinate2D {
+        let longitude = start.longitude
+            + longitudeDelta(from: start.longitude, to: end.longitude) * fraction
+        return CLLocationCoordinate2D(
+            latitude: start.latitude + (end.latitude - start.latitude) * fraction,
+            longitude: normalizedLongitude(longitude)
+        )
+    }
+
+    private static func longitudeDelta(
+        from start: CLLocationDegrees,
+        to end: CLLocationDegrees
+    ) -> CLLocationDegrees {
+        var delta = end - start
+        if delta > 180 { delta -= 360 }
+        if delta < -180 { delta += 360 }
+        return delta
+    }
+
+    private static func normalizedLongitude(_ longitude: CLLocationDegrees) -> CLLocationDegrees {
+        var normalized = longitude.truncatingRemainder(dividingBy: 360)
+        if normalized > 180 { normalized -= 360 }
+        if normalized < -180 { normalized += 360 }
+        return normalized
+    }
+
+    private static func coordinatesAreEqual(
+        _ lhs: CLLocationCoordinate2D?,
+        _ rhs: CLLocationCoordinate2D
+    ) -> Bool {
+        guard let lhs else { return false }
+        return abs(lhs.latitude - rhs.latitude) < 0.000_000_1
+            && abs(lhs.longitude - rhs.longitude) < 0.000_000_1
+    }
+}
+
 #if os(iOS)
 @MainActor
 func liveRouteTrackingSnapshot(

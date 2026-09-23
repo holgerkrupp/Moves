@@ -71,7 +71,7 @@
 		48F925F2305AD31C0011EEA3 /* metroMelbourne.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F1305AD31C0011EEA3 /* metroMelbourne.icon */; };
 		48F925F4305AD7120011EEA3 /* sydney.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F3305AD7120011EEA3 /* sydney.icon */; };
 		48F925F6305B073A0011EEA3 /* M-stadt.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F5305B073A0011EEA3 /* M-stadt.icon */; };
-		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; };
+		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; platformFilter = ios; };
 		A10000012F00000100000002 /* MovesRouteSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000001 /* MovesRouteSupport.swift */; };
 		A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000003 /* MovesTimelineViews.swift */; platformFilter = ios; };
 		A10000012F00000100000006 /* MovesDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000005 /* MovesDetailViews.swift */; platformFilter = ios; };
@@ -111,16 +111,17 @@
 		C10000013000000100000005 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; platformFilter = ios; };
 		C10000013000000100000006 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; };
 		D10000013010000100000001 /* DawarichSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000000 /* DawarichSync.swift */; platformFilter = ios; };
-		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; };
+		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; platformFilter = ios; };
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; platformFilter = ios; };
-		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; };
+		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; platformFilter = ios; };
 		E21000013020000100000001 /* ImportQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21000013020000100000000 /* ImportQueueTests.swift */; };
-		E22000013020000100000001 /* ImportStressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22000013020000100000000 /* ImportStressTests.swift */; };
+		E22000013020000100000001 /* ImportStressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22000013020000100000000 /* ImportStressTests.swift */; platformFilter = ios; };
 		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; platformFilter = ios; };
 		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; platformFilter = ios; };
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
 		F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
 		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
+		F20000013120000100000001 /* MacSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000013120000100000000 /* MacSearchTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -302,6 +303,7 @@
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
 		F10000013100000100000001 /* MovesMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovesMac.entitlements; sourceTree = "<group>"; };
 		F1000001310000010000000E /* RouteCoordinateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteCoordinateStorage.swift; sourceTree = "<group>"; };
+		F20000013120000100000000 /* MacSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -490,6 +492,7 @@
 		9A1B00012F00000100000003 /* MovesTests */ = {
 			isa = PBXGroup;
 			children = (
+				F20000013120000100000000 /* MacSearchTests.swift */,
 				D10000013010000100000002 /* DawarichSyncTests.swift */,
 				E20000013020000100000000 /* MovesStatisticsSearchTests.swift */,
 				E21000013020000100000000 /* ImportQueueTests.swift */,
@@ -830,6 +833,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F20000013120000100000001 /* MacSearchTests.swift in Sources */,
 				D10000013010000100000003 /* DawarichSyncTests.swift in Sources */,
 				E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */,
 				E21000013020000100000001 /* ImportQueueTests.swift in Sources */,
@@ -1171,14 +1175,16 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.MovesTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Moves.app/Moves";
+				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/Moves.app/Contents/MacOS/Moves";
 				TEST_TARGET_NAME = Moves;
 			};
 			name = Debug;
@@ -1197,13 +1203,15 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.MovesTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Moves.app/Moves";
+				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/Moves.app/Contents/MacOS/Moves";
 				TEST_TARGET_NAME = Moves;
 			};
 			name = Release;
