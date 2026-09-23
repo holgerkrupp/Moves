@@ -597,8 +597,17 @@ final class RouteFileImporter: ObservableObject {
     var isImporting: Bool { state == .running }
     var canResume: Bool { state == .paused || state == .failed || (state == .idle && RouteFileImportStore.state != nil) }
 
-    func start(urls: [URL], configuration: RouteFileImportConfiguration) {
-        guard !isImporting else { return }
+    @discardableResult
+    func start(urls: [URL], configuration: RouteFileImportConfiguration) -> Bool {
+        guard !urls.isEmpty else {
+            lastErrorMessage = "No route files were selected."
+            return false
+        }
+        guard !isImporting else {
+            lastErrorMessage = "Another route-file import is already running."
+            return false
+        }
+        lastErrorMessage = nil
         state = .running
         importProgress = 0
         importPhase = "Preparing files"
@@ -622,7 +631,9 @@ final class RouteFileImporter: ObservableObject {
                 let files = acquisition.files
                 guard !files.isEmpty else { throw RouteFileImportError.noFiles }
                 if let activeJobID, var job = self.importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
-                    job.displayName = files.count == 1 ? files[0].lastPathComponent : "Route file import (\(files.count) files)"
+                    job.displayName = files.count == 1
+                        ? (acquisition.sourceNames.first ?? files[0].lastPathComponent)
+                        : "Route file import (\(files.count) files)"
                     job.source.originalFileNames = acquisition.sourceNames
                     job.source.sourceIdentifiers = acquisition.sourceIdentifiers
                     job.source.bookmarkData = acquisition.bookmarkData
@@ -683,9 +694,11 @@ final class RouteFileImporter: ObservableObject {
                 }
             }
         }
+        return true
     }
 
-    func start(urls: [URL], skipExistingDates: Bool) {
+    @discardableResult
+    func start(urls: [URL], skipExistingDates: Bool) -> Bool {
         start(
             urls: urls,
             configuration: RouteFileImportConfiguration(
@@ -840,7 +853,7 @@ final class RouteFileImporter: ObservableObject {
             state = .completed
             if let activeJobID, var job = importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
                 job.state = .completed
-                job.phase = .postProcessing
+                job.phase = nil
                 job.counters.completedItemCount = job.counters.itemCount
                 job.counters.routeCount = persisted.routeCount
                 job.counters.sampleCount = persisted.sampleCount
@@ -1480,6 +1493,8 @@ struct RouteFileImportOptionsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    RouteImportSourceNotice()
+
                     ImportOptionsCard(
                         title: "Route mapping",
                         subtitle: "Choose how imported coordinates become routes on your timeline.",
@@ -1642,6 +1657,36 @@ private struct ImportOptionsCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct RouteImportSourceNotice: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "externaldrive.badge.exclamationmark")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Keep your original files")
+                    .font(.subheadline.weight(.semibold))
+
+                Text("Moves transforms route data for your timeline and does not retain the original files. Your selected files are not modified; keep them separately if you may need their original structure or metadata.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.orange.opacity(0.25), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1835,7 +1880,7 @@ private actor RouteFileImportExecution {
             persisted.state = .completed
             updateQueue(jobID: persisted.jobID) { job in
                 job.state = .completed
-                job.phase = .postProcessing
+                job.phase = nil
                 job.counters.completedItemCount = job.counters.itemCount
                 job.counters.routeCount = persisted.routeCount
                 job.counters.sampleCount = persisted.sampleCount
@@ -2030,7 +2075,7 @@ struct RouteFileImportSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes imported GPS samples, route moves that contain no remaining samples, and their unused generated endpoint places. Empty imported days are removed too. Phone, watch, and Health samples are kept.")
+            Text("This removes imported GPS samples, route moves that contain no remaining samples, and their unused generated endpoint places. Empty imported days are removed too. Samples recorded on devices or from Health are kept.")
         }
         .alert("Imported Route Data", isPresented: $isShowingRemovalMessage) {
             Button("OK", role: .cancel) {}
@@ -2260,15 +2305,23 @@ private struct RouteImportActionRow: View {
 }
 
 enum RouteFileImportContentTypes {
+    static let gpx = UTType(filenameExtension: "gpx")
+        ?? UTType(importedAs: "de.holgerkrupp.moves.gpx", conformingTo: .xml)
+    static let tcx = UTType(filenameExtension: "tcx")
+        ?? UTType(importedAs: "de.holgerkrupp.moves.tcx", conformingTo: .xml)
+    static let kml = UTType(filenameExtension: "kml")
+        ?? UTType(importedAs: "de.holgerkrupp.moves.kml", conformingTo: .xml)
+    static let geoJSON = UTType(filenameExtension: "geojson")
+        ?? UTType(importedAs: "de.holgerkrupp.moves.geojson", conformingTo: .json)
+
     static let allowed: [UTType] = [
         .folder,
-        .archive,
-        .xml,
+        UTType(filenameExtension: "zip") ?? .archive,
         .json,
-        UTType(filenameExtension: "gpx") ?? .xml,
-        UTType(filenameExtension: "tcx") ?? .xml,
-        UTType(filenameExtension: "kml") ?? .xml,
-        UTType(filenameExtension: "geojson") ?? .json
+        gpx,
+        tcx,
+        kml,
+        geoJSON
     ]
 
 }

@@ -144,6 +144,7 @@ struct DayTimelinePage: View {
 
 struct DayTimelinePageContent: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var undoController: AppUndoController
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     let dayTimeline: DayTimeline
     let isActive: Bool
@@ -154,6 +155,9 @@ struct DayTimelinePageContent: View {
     @State private var provisionalSampleResolvedKey: String?
     @State private var presentationCache: DayTimelinePresentationCache
     @State private var isReviewingImportedData = false
+    @State private var pendingDeletionEntry: TimelineEntry?
+    @State private var deletionErrorMessage = ""
+    @State private var isShowingDeletionError = false
     @Binding private var mapSelection: TimelineMapSelection?
 
     init(
@@ -363,6 +367,17 @@ struct DayTimelinePageContent: View {
                 )
             }
         }
+        .confirmationDialog("Delete Entry?", item: $pendingDeletionEntry, titleVisibility: .visible) { entry in
+            Button("Delete", role: .destructive) { delete(entry: entry) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This removes the entry from the timeline. You can undo the deletion afterwards.")
+        }
+        .alert("Could Not Delete Entry", isPresented: $isShowingDeletionError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deletionErrorMessage)
+        }
     }
 
     private var macContent: some View {
@@ -372,8 +387,6 @@ struct DayTimelinePageContent: View {
                 isActive: isActive,
                 selection: $mapSelection
             )
-
-            MultiDeviceActivityBanner(resolution: deviceResolution)
 
             importedDataReviewButton
 
@@ -400,8 +413,6 @@ struct DayTimelinePageContent: View {
                     isActive: isActive,
                     selection: $mapSelection
                 )
-
-                MultiDeviceActivityBanner(resolution: deviceResolution)
 
                 importedDataReviewButton
 
@@ -437,8 +448,6 @@ struct DayTimelinePageContent: View {
                     .padding(.horizontal, 4)
 
                     timelinePanel(usesSelection: true)
-
-                    MultiDeviceActivityBanner(resolution: deviceResolution)
 
                     importedDataReviewButton
 
@@ -533,6 +542,7 @@ struct DayTimelinePageContent: View {
                     isFirst: index == 0,
                     isLast: index == timelineEntries.count - 1
                 )
+                .timelineDeletionSwipeAction(entry: entry) { pendingDeletionEntry = entry }
 
                 if index < timelineEntries.count - 1 {
                     Divider()
@@ -562,6 +572,7 @@ struct DayTimelinePageContent: View {
 
                     timelineDetailLink(for: entry)
                 }
+                .timelineDeletionSwipeAction(entry: entry) { pendingDeletionEntry = entry }
                 .background {
                     if mapSelection == entry.mapSelection {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -679,6 +690,36 @@ struct DayTimelinePageContent: View {
         let timestamp = Int(sample.timestamp.timeIntervalSince1970.rounded())
         return "\(sample.dedupeKey)|\(timestamp)|\(sampleCount)"
     }
+
+    private func delete(entry: TimelineEntry) {
+        do {
+            switch entry {
+            case .place(let place): try TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoController.manager)
+            case .move(let move): try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoController.manager)
+            case .sample(let sample, _, _): try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
+            case .liveRoute, .start: return
+            }
+            mapSelection = nil
+        } catch {
+            deletionErrorMessage = error.localizedDescription
+            isShowingDeletionError = true
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func timelineDeletionSwipeAction(entry: TimelineEntry, action: @escaping () -> Void) -> some View {
+        if entry.isDeletable {
+            swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive, action: action) {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        } else {
+            self
+        }
+    }
 }
 
 private struct DayTimelinePresentationCache {
@@ -688,26 +729,6 @@ private struct DayTimelinePresentationCache {
 
     var latestSample: LocationSample? {
         sortedSamples.last
-    }
-}
-
-private struct MultiDeviceActivityBanner: View {
-    let resolution: MultiDeviceDayResolution
-
-    var body: some View {
-        if resolution.kind == .independentJourneys {
-            Label {
-                Text("Another iPhone recorded a separate trip today. This timeline is showing this phone's journey.")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: "iphone.gen3.radiowaves.left.and.right")
-            }
-            .foregroundStyle(MovesPalette.routeTracking)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .panelSurface()
-        }
     }
 }
 
@@ -1767,6 +1788,13 @@ enum TimelineEntry: Identifiable {
     case liveRoute(LiveRouteTrackingSnapshot)
     case start(place: VisitPlace, timestamp: Date)
     case sample(location: LocationSample, sampleCount: Int, resolvedName: String?)
+
+    var isDeletable: Bool {
+        switch self {
+        case .place, .move, .sample: true
+        case .liveRoute, .start: false
+        }
+    }
 
     var id: String {
         switch self {

@@ -31,18 +31,22 @@ struct ImportQueueToolbarButton: View {
 
     var body: some View {
         Button { isPresented = true } label: {
-            ImportCircularProgressView(
-                progress: coordinator.snapshot.aggregateProgress,
-                isActive: !coordinator.snapshot.unfinishedJobs.isEmpty
-            )
-                .frame(width: 22, height: 22)
-                .overlay {
-                    if coordinator.snapshot.unfinishedJobs.isEmpty {
-                        Image(systemName: "arrow.down.circle")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tint)
+            HStack(spacing: 6) {
+                ImportCircularProgressView(
+                    progress: coordinator.snapshot.aggregateProgress,
+                    isActive: !coordinator.snapshot.unfinishedJobs.isEmpty
+                )
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        if coordinator.snapshot.unfinishedJobs.isEmpty {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tint)
+                        }
                     }
-                }
+                Text("Import Queue")
+                    .lineLimit(1)
+            }
         }
         .accessibilityLabel("Import queue")
         .accessibilityValue(queueAccessibilityValue)
@@ -60,6 +64,8 @@ struct ImportQueueToolbarButton: View {
 }
 
 struct ImportQueueView: View {
+    private static let visibleJobLimit = 5
+
     @ObservedObject var coordinator: ImportCoordinator
     var onResume: ((UUID) -> Void)?
     var onPause: ((UUID) -> Void)?
@@ -67,6 +73,7 @@ struct ImportQueueView: View {
     @State private var isShowingImportOptions = false
     @State private var isShowingFileImporter = false
     @State private var importConfiguration = RouteFileImportConfiguration()
+    @State private var importErrorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -99,7 +106,7 @@ struct ImportQueueView: View {
                         }
                     }
 
-                    ForEach(coordinator.snapshot.jobs) { job in
+                    ForEach(visibleJobs) { job in
                         ImportQueueJobRow(
                             job: job,
                             pause: {
@@ -119,6 +126,14 @@ struct ImportQueueView: View {
                                 onResume?(job.id)
                             }
                         )
+                    }
+
+                    if hiddenJobCount > 0 {
+                        Text("\(hiddenJobCount) more import\(hiddenJobCount == 1 ? "" : "s") in the queue")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .listRowBackground(Color.clear)
                     }
                 }
 
@@ -148,6 +163,13 @@ struct ImportQueueView: View {
             }
             .navigationTitle("Import Queue")
             .toolbar {
+                if !coordinator.snapshot.finishedJobs.isEmpty {
+                    ToolbarItem(placement: .secondaryAction) {
+                        Button("Remove Finished", systemImage: "checkmark.circle.badge.xmark") {
+                            _ = try? coordinator.removeFinishedImports()
+                        }
+                    }
+                }
                 if !coordinator.snapshot.jobs.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Button("Import file", systemImage: "square.and.arrow.down") {
@@ -173,14 +195,38 @@ struct ImportQueueView: View {
                 allowedContentTypes: RouteFileImportContentTypes.allowed,
                 allowsMultipleSelection: true
             ) { result in
-                if case .success(let urls) = result {
-                    coordinator.enqueueRouteFiles(urls, configuration: importConfiguration)
+                switch result {
+                case .success(let urls):
+                    if !coordinator.enqueueRouteFiles(urls, configuration: importConfiguration) {
+                        importErrorMessage = coordinator.lastErrorMessage ?? "The route-file importer is unavailable."
+                    }
+                case .failure(let error):
+                    importErrorMessage = error.localizedDescription
                 }
+            }
+            .alert(
+                "Couldn’t Import Route Files",
+                isPresented: Binding(
+                    get: { importErrorMessage != nil },
+                    set: { if !$0 { importErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { importErrorMessage = nil }
+            } message: {
+                Text(importErrorMessage ?? "The selected files could not be opened.")
             }
         }
     }
 
     @Environment(\.dismiss) private var dismiss
+
+    private var visibleJobs: [ImportJobRecord] {
+        coordinator.snapshot.prioritizedJobs(limit: Self.visibleJobLimit)
+    }
+
+    private var hiddenJobCount: Int {
+        max(coordinator.snapshot.jobs.count - visibleJobs.count, 0)
+    }
 }
 
 private struct ImportQueueJobRow: View {

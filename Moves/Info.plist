@@ -2,9 +2,122 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>de.holgerkrupp.Moves.dailyTimelineBackup</string>
+		<string>de.holgerkrupp.Moves.shareMapAggregates</string>
+		<string>de.holgerkrupp.Moves.routeFileImport</string>
+		<string>de.holgerkrupp.Moves.routeFileImport.continued</string>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Route Files</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.topografix.gpx</string>
+				<string>de.holgerkrupp.moves.gpx</string>
+				<string>com.garmin.tcx</string>
+				<string>de.holgerkrupp.moves.tcx</string>
+				<string>com.google.earth.kml</string>
+				<string>de.holgerkrupp.moves.kml</string>
+				<string>public.geojson</string>
+				<string>de.holgerkrupp.moves.geojson</string>
+				<string>public.json</string>
+				<string>public.zip-archive</string>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>GPS Exchange Format Route</string>
+			<key>UTTypeIdentifier</key>
+			<string>de.holgerkrupp.moves.gpx</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gpx</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/gpx+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Training Center XML Route</string>
+			<key>UTTypeIdentifier</key>
+			<string>de.holgerkrupp.moves.tcx</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tcx</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.garmin.tcx+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Keyhole Markup Language Route</string>
+			<key>UTTypeIdentifier</key>
+			<string>de.holgerkrupp.moves.kml</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kml</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.google-earth.kml+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>GeoJSON Route</string>
+			<key>UTTypeIdentifier</key>
+			<string>de.holgerkrupp.moves.geojson</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>geojson</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/geo+json</string>
+			</dict>
+		</dict>
 	</array>
 </dict>
 </plist>

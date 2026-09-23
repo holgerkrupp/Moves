@@ -321,7 +321,7 @@ struct MovesSettingsView: View {
                             }
                         }
 
-                        Text("Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically.")
+                        Text("Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing location points are deduplicated automatically.")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
@@ -415,7 +415,15 @@ struct MovesSettingsView: View {
             switch result {
             case .success(let urls):
                 Task { @MainActor in
-                    importCoordinator.enqueueRouteFiles(urls, configuration: routeImportConfiguration)
+                    if importCoordinator.enqueueRouteFiles(urls, configuration: routeImportConfiguration) {
+                        routeImportMessage = urls.count == 1
+                            ? "Added \(urls[0].lastPathComponent) to the import queue."
+                            : "Added \(urls.count) files to the import queue."
+                    } else {
+                        routeImportMessage = importCoordinator.lastErrorMessage
+                            ?? "The selected files could not be added to the import queue."
+                    }
+                    isShowingRouteImportMessage = true
                 }
             case .failure(let error):
                 routeImportMessage = "File import failed: \(error.localizedDescription)"
@@ -665,11 +673,11 @@ private struct MultiDeviceSettingsCard: View {
             TextField("Custom device name (optional)", text: $deviceName)
                 .textInputAutocapitalization(.words)
 
-            Text("Moves uses the system name for this iPhone unless you set a custom name. Matching trips are combined silently; separately travelling phones keep separate journeys.")
+            Text("Moves uses this device’s system name unless you set a custom name. Matching trips are combined automatically; trips recorded separately on different devices remain separate journeys.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
 
-            Text("This iPhone: \(DeviceIdentityStore.displayName)")
+            Text("This device: \(DeviceIdentityStore.displayName)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(MovesPalette.routeTracking)
         }
@@ -873,7 +881,7 @@ private struct HealthWorkoutRouteImportSettingsView: View {
     private func showHistoricalImportResultIfAvailable() {
         if let report = healthRouteImportManager.lastHistoricalImportReport {
             let prefix = report.didResumeInterruptedImport ? "Resumed and imported" : "Imported"
-            importMessage = "\(prefix) \(report.routeCount) workout route(s) from \(report.workoutCount) workout(s), covering \(report.sampleCount) GPS point(s). Duplicate phone and watch points were merged automatically."
+            importMessage = "\(prefix) \(report.routeCount) workout route(s) from \(report.workoutCount) workout(s), covering \(report.sampleCount) GPS point(s). Duplicate location points were merged automatically."
             isShowingImportMessage = true
         } else if let message = healthRouteImportManager.lastHistoricalImportErrorMessage {
             importMessage = message

@@ -255,6 +255,261 @@ extension DayTimeline {
     }
 }
 
+@MainActor
+enum TimelineDeletion {
+    static func delete(place: VisitPlace, in context: ModelContext, undoManager: UndoManager?) throws {
+        let payload = DeletedTimelinePlace(place: place)
+        context.delete(place)
+        try context.save()
+        registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Place")
+    }
+
+    static func delete(move: MoveSegment, in context: ModelContext, undoManager: UndoManager?) throws {
+        let payload = DeletedTimelineMove(move: move)
+        context.delete(move)
+        try context.save()
+        registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Move")
+    }
+
+    static func delete(sample: LocationSample, in context: ModelContext, undoManager: UndoManager?) throws {
+        let payload = DeletedTimelineSample(sample: sample)
+        context.delete(sample)
+        try context.save()
+        registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Location Sample")
+    }
+
+    static func delete(day: DayTimeline, in context: ModelContext, undoManager: UndoManager?) throws {
+        let payload = DeletedTimelineDay(day: day)
+        context.delete(day)
+        try context.save()
+        registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Day")
+    }
+
+    private static func registerUndo<T: TimelineDeletionUndoPayload>(
+        _ payload: T,
+        in context: ModelContext,
+        undoManager: UndoManager?,
+        actionName: String
+    ) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: context) { context in
+            payload.restore(in: context)
+            try? context.save()
+        }
+        undoManager.setActionName(actionName)
+    }
+}
+
+private protocol TimelineDeletionUndoPayload {
+    @MainActor func restore(in context: ModelContext)
+}
+
+private struct DeletedTimelinePlace: TimelineDeletionUndoPayload {
+    let id: UUID
+    let deviceIdentifier: String
+    let arrivalDate: Date
+    let departureDate: Date?
+    let latitude: Double
+    let longitude: Double
+    let horizontalAccuracy: Double
+    let userLabel: String?
+    let autoLabel: String?
+    let comment: String?
+    let createdAt: Date
+    let day: DayTimeline?
+    let outgoingMoves: [MoveSegment]
+    let incomingMoves: [MoveSegment]
+
+    init(place: VisitPlace) {
+        id = place.id
+        deviceIdentifier = place.deviceIdentifier
+        arrivalDate = place.arrivalDate
+        departureDate = place.departureDate
+        latitude = place.latitude
+        longitude = place.longitude
+        horizontalAccuracy = place.horizontalAccuracy
+        userLabel = place.userLabel
+        autoLabel = place.autoLabel
+        comment = place.comment
+        createdAt = place.createdAt
+        day = place.dayTimeline
+        outgoingMoves = place.outgoingMoves
+        incomingMoves = place.incomingMoves
+    }
+
+    @MainActor func restore(in context: ModelContext) {
+        guard (try? context.fetch(FetchDescriptor<VisitPlace>()).contains(where: { $0.id == id })) != true else { return }
+        let place = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment)
+        place.id = id
+        place.deviceIdentifier = deviceIdentifier
+        place.createdAt = createdAt
+        place.dayTimeline = day
+        context.insert(place)
+        outgoingMoves.forEach { $0.startPlace = place }
+        incomingMoves.forEach { $0.endPlace = place }
+    }
+}
+
+private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
+    let id: UUID
+    let deviceIdentifier: String
+    let dedupeKey: String
+    let startDate: Date
+    let endDate: Date
+    let transportMode: TransportMode
+    let distanceMeters: Double
+    let stepCount: Int?
+    let comment: String?
+    let isExcluded: Bool
+    let createdAt: Date
+    let startPlace: VisitPlace?
+    let endPlace: VisitPlace?
+    let day: DayTimeline?
+    let routeCacheSignature: String?
+    let routeCacheCoordinatesData: Data?
+    let manualRouteCoordinatesData: Data?
+    let samples: [LocationSample]
+
+    init(move: MoveSegment) {
+        id = move.id
+        deviceIdentifier = move.deviceIdentifier
+        dedupeKey = move.dedupeKey
+        startDate = move.startDate
+        endDate = move.endDate
+        transportMode = move.transportMode
+        distanceMeters = move.distanceMeters
+        stepCount = move.stepCount
+        comment = move.comment
+        isExcluded = move.isExcludedFromConnectionStatistics
+        createdAt = move.createdAt
+        startPlace = move.startPlace
+        endPlace = move.endPlace
+        day = move.dayTimeline
+        routeCacheSignature = move.routeCacheSignature
+        routeCacheCoordinatesData = move.routeCacheCoordinatesData
+        manualRouteCoordinatesData = move.manualRouteCoordinatesData
+        samples = move.samples
+    }
+
+    @MainActor func restore(in context: ModelContext) {
+        guard (try? context.fetch(FetchDescriptor<MoveSegment>()).contains(where: { $0.id == id })) != true else { return }
+        let move = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment)
+        move.id = id
+        move.deviceIdentifier = deviceIdentifier
+        move.isExcludedFromConnectionStatistics = isExcluded
+        move.createdAt = createdAt
+        move.startPlace = startPlace
+        move.endPlace = endPlace
+        move.dayTimeline = day
+        move.routeCacheSignature = routeCacheSignature
+        move.routeCacheCoordinatesData = routeCacheCoordinatesData
+        move.manualRouteCoordinatesData = manualRouteCoordinatesData
+        move.samples = samples
+        samples.forEach { $0.moveSegment = move }
+        context.insert(move)
+    }
+}
+
+private struct DeletedTimelineSample: TimelineDeletionUndoPayload {
+    let dedupeKey: String
+    let deviceIdentifier: String
+    let timestamp: Date
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let horizontalAccuracy: Double
+    let speed: Double
+    let sourceRawValue: String
+    let createdAt: Date
+    let day: DayTimeline?
+    let move: MoveSegment?
+
+    init(sample: LocationSample) {
+        dedupeKey = sample.dedupeKey
+        deviceIdentifier = sample.deviceIdentifier
+        timestamp = sample.timestamp
+        latitude = sample.latitude
+        longitude = sample.longitude
+        altitude = sample.altitude
+        horizontalAccuracy = sample.horizontalAccuracy
+        speed = sample.speed
+        sourceRawValue = sample.sourceRawValue
+        createdAt = sample.createdAt
+        day = sample.dayTimeline
+        move = sample.moveSegment
+    }
+
+    @MainActor func restore(in context: ModelContext) {
+        guard (try? context.fetch(FetchDescriptor<LocationSample>()).contains(where: { $0.dedupeKey == dedupeKey && $0.timestamp == timestamp })) != true else { return }
+        let location = CLLocation(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude), altitude: altitude, horizontalAccuracy: horizontalAccuracy, verticalAccuracy: -1, course: -1, speed: speed, timestamp: timestamp)
+        let sample = LocationSample(location: location, source: LocationSampleSource(rawValue: sourceRawValue) ?? .significantChange, dedupeKey: dedupeKey, deviceIdentifier: deviceIdentifier)
+        sample.createdAt = createdAt
+        sample.dayTimeline = day
+        sample.moveSegment = move
+        context.insert(sample)
+    }
+}
+
+private struct DeletedTimelineDay: TimelineDeletionUndoPayload {
+    let dayKey: String
+    let dayStart: Date
+    let createdAt: Date
+    let places: [DeletedTimelineDayPlace]
+    let moves: [DeletedTimelineDayMove]
+    let samples: [DeletedTimelineDaySample]
+
+    init(day: DayTimeline) {
+        dayKey = day.dayKey
+        dayStart = day.dayStart
+        createdAt = day.createdAt
+        places = day.places.map(DeletedTimelineDayPlace.init)
+        moves = day.moves.map(DeletedTimelineDayMove.init)
+        samples = day.samples.map(DeletedTimelineDaySample.init)
+    }
+
+    @MainActor func restore(in context: ModelContext) {
+        guard (try? context.fetch(FetchDescriptor<DayTimeline>()).contains(where: { $0.dayKey == dayKey })) != true else { return }
+        let day = DayTimeline(dayStart: dayStart)
+        day.dayKey = dayKey
+        day.createdAt = createdAt
+        context.insert(day)
+
+        var placesByID: [UUID: VisitPlace] = [:]
+        for record in places {
+            let place = record.makeModel(day: day)
+            placesByID[place.id] = place
+            context.insert(place)
+        }
+        var movesByID: [UUID: MoveSegment] = [:]
+        for record in moves {
+            let move = record.makeModel(day: day, places: placesByID)
+            movesByID[move.id] = move
+            context.insert(move)
+        }
+        for record in samples {
+            context.insert(record.makeModel(day: day, moves: movesByID))
+        }
+    }
+}
+
+private struct DeletedTimelineDayPlace {
+    let id: UUID, deviceIdentifier: String, arrivalDate: Date, departureDate: Date?, latitude: Double, longitude: Double, horizontalAccuracy: Double, userLabel: String?, autoLabel: String?, comment: String?, createdAt: Date
+    init(_ place: VisitPlace) { id = place.id; deviceIdentifier = place.deviceIdentifier; arrivalDate = place.arrivalDate; departureDate = place.departureDate; latitude = place.latitude; longitude = place.longitude; horizontalAccuracy = place.horizontalAccuracy; userLabel = place.userLabel; autoLabel = place.autoLabel; comment = place.comment; createdAt = place.createdAt }
+    func makeModel(day: DayTimeline) -> VisitPlace { let p = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment); p.id = id; p.deviceIdentifier = deviceIdentifier; p.createdAt = createdAt; p.dayTimeline = day; return p }
+}
+
+private struct DeletedTimelineDayMove {
+    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?
+    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData }
+    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; return m }
+}
+
+private struct DeletedTimelineDaySample {
+    let dedupeKey: String, deviceIdentifier: String, timestamp: Date, latitude: Double, longitude: Double, altitude: Double, horizontalAccuracy: Double, speed: Double, sourceRawValue: String, createdAt: Date, moveID: UUID?
+    init(_ sample: LocationSample) { dedupeKey = sample.dedupeKey; deviceIdentifier = sample.deviceIdentifier; timestamp = sample.timestamp; latitude = sample.latitude; longitude = sample.longitude; altitude = sample.altitude; horizontalAccuracy = sample.horizontalAccuracy; speed = sample.speed; sourceRawValue = sample.sourceRawValue; createdAt = sample.createdAt; moveID = sample.moveSegment?.id }
+    func makeModel(day: DayTimeline, moves: [UUID: MoveSegment]) -> LocationSample { let l = CLLocation(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude), altitude: altitude, horizontalAccuracy: horizontalAccuracy, verticalAccuracy: -1, course: -1, speed: speed, timestamp: timestamp); let s = LocationSample(location: l, source: LocationSampleSource(rawValue: sourceRawValue) ?? .significantChange, dedupeKey: dedupeKey, deviceIdentifier: deviceIdentifier); s.createdAt = createdAt; s.dayTimeline = day; s.moveSegment = moveID.flatMap { moves[$0] }; return s }
+}
+
 @Model
 final class VisitPlace {
     var id: UUID = UUID()
@@ -2350,11 +2605,28 @@ enum MultiDeviceTimelineResolver {
     }
 }
 
-#if targetEnvironment(simulator)
-enum SimulatorDemoDataSeeder {
+#if DEBUG
+enum DemoDataSeeder {
     private static var roadCoordinatesCache: [String: [CLLocationCoordinate2D]] = [:]
     private static var roadCoordinatesRequestCount = 0
     private static let roadCoordinatesRequestLimit = 20
+
+    static func makeDemoModelContainer() throws -> ModelContainer {
+        let schema = Schema([
+            DayTimeline.self,
+            VisitPlace.self,
+            KnownLocation.self,
+            MoveSegment.self,
+            LocationSample.self,
+            MovesDeviceProfile.self,
+        ])
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
 
     static func seedIfNeeded(in container: ModelContainer) {
         do {

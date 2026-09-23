@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="25098" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES">
+    <device id="iPad13_0rounded" orientation="portrait" layout="fullscreen" appearance="light"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="25073"/>
+        <capability name="Named colors" minToolsVersion="9.0"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--View Controller-->
+        <scene sceneID="LaunchScreenScene">
+            <objects>
+                <viewController id="LaunchScreenViewController" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="LaunchScreenView">
+                        <rect key="frame" x="0.0" y="0.0" width="1032" height="1376"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="LaunchLogo" translatesAutoresizingMaskIntoConstraints="NO" id="VGo-XX-usb">
+                                <rect key="frame" x="366" y="538" width="300" height="300"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" secondItem="VGo-XX-usb" secondAttribute="height" multiplier="1:1" id="0MI-ZE-Rk8"/>
+                                    <constraint firstAttribute="height" constant="300" id="3MQ-tE-Cn7"/>
+                                    <constraint firstAttribute="width" constant="300" id="ZFe-j1-ZcZ"/>
+                                    <constraint firstAttribute="width" relation="greaterThanOrEqual" constant="300" id="nOw-Kg-Ev3"/>
+                                </constraints>
+                            </imageView>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="Xgj-c9-49I"/>
+                        <color key="backgroundColor" name="MovesStart"/>
+                        <constraints>
+                            <constraint firstItem="VGo-XX-usb" firstAttribute="centerX" secondItem="LaunchScreenView" secondAttribute="centerX" id="ICw-Ev-PAm"/>
+                            <constraint firstItem="VGo-XX-usb" firstAttribute="centerY" secondItem="LaunchScreenView" secondAttribute="centerY" id="QYf-yk-P0M"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="LaunchScreenFirstResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="135.1145038167939" y="112.67605633802818"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="LaunchLogo" width="128" height="128"/>
+        <namedColor name="MovesStart">
+            <color red="0.94999998807907104" green="0.63999998569488525" blue="0.18000000715255737" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+    </resources>
+</document>

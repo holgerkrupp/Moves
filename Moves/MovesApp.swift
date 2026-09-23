@@ -147,14 +147,13 @@ struct MovesApp: App {
                 wrappedValue: MultiDevicePresenceManager(modelContainer: container)
             )
             let importCoordinator = ImportCoordinator()
-            _importCoordinator = StateObject(wrappedValue: importCoordinator)
-            _routeFileImporter = StateObject(
-                wrappedValue: RouteFileImporter(
-                    modelContext: ModelContext(container),
-                    importCoordinator: importCoordinator
-                )
+            let routeFileImporter = RouteFileImporter(
+                modelContext: ModelContext(container),
+                importCoordinator: importCoordinator
             )
-            importCoordinator.attach(routeFileImporter: _routeFileImporter.wrappedValue)
+            importCoordinator.attach(routeFileImporter: routeFileImporter)
+            _importCoordinator = StateObject(wrappedValue: importCoordinator)
+            _routeFileImporter = StateObject(wrappedValue: routeFileImporter)
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
                 captureManager: captureManager
@@ -216,8 +215,8 @@ struct MovesApp: App {
             configurations: [modelConfiguration, cacheConfiguration]
         )
 
-        #if targetEnvironment(simulator)
-        SimulatorDemoDataSeeder.seedIfNeeded(in: container)
+        #if targetEnvironment(simulator) && DEBUG
+        DemoDataSeeder.seedIfNeeded(in: container)
         #endif
 
         return container

@@ -119,6 +119,16 @@
     "%lld matching route(s)" : {
 
     },
+    "%lld more import%@ in the queue" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld more import%2$@ in the queue"
+          }
+        }
+      }
+    },
     "%lld moves" : {
 
     },
@@ -209,6 +219,9 @@
     "Actions for (job.displayName)" : {
 
     },
+    "Active jobs" : {
+
+    },
     "Activity" : {
 
     },
@@ -227,10 +240,10 @@
     "Always location access is needed to keep this running in the background." : {
 
     },
-    "Another iPhone recorded a separate trip today. This timeline is showing this phone's journey." : {
+    "App Icon" : {
 
     },
-    "App Icon" : {
+    "Appearance" : {
 
     },
     "Apple Health could not be opened from this device." : {
@@ -290,6 +303,9 @@
     "Captured location" : {
 
     },
+    "Changes apply to open Moves windows and are remembered the next time the app starts." : {
+
+    },
     "Choose a day from the sidebar to browse your location history." : {
 
     },
@@ -297,6 +313,9 @@
 
     },
     "Choose Date…" : {
+
+    },
+    "Choose Export Selected Day or Export All History from the File menu to create a file." : {
 
     },
     "Choose files, folder, or ZIP" : {
@@ -329,6 +348,15 @@
     "Copy Raw Data" : {
 
     },
+    "Could Not Delete Data" : {
+
+    },
+    "Could Not Delete Day" : {
+
+    },
+    "Could Not Delete Entry" : {
+
+    },
     "Could Not Delete Move" : {
 
     },
@@ -342,6 +370,12 @@
 
     },
     "Could Not Update Statistics" : {
+
+    },
+    "Couldn’t Import Route File" : {
+
+    },
+    "Couldn’t Import Route Files" : {
 
     },
     "Create & Share" : {
@@ -360,6 +394,9 @@
 
     },
     "CSV (.csv)" : {
+
+    },
+    "CSV…" : {
 
     },
     "Custom device name (optional)" : {
@@ -395,7 +432,25 @@
     "Deduplicate Existing Data?" : {
 
     },
+    "Default mapping" : {
+
+    },
     "Delete" : {
+
+    },
+    "Delete all data for the selected day" : {
+
+    },
+    "Delete Day" : {
+
+    },
+    "Delete Day?" : {
+
+    },
+    "Delete Entry" : {
+
+    },
+    "Delete Entry?" : {
 
     },
     "Delete Known Location?" : {
@@ -411,6 +466,9 @@
 
     },
     "Delete Place?" : {
+
+    },
+    "Delete the selected timeline entry" : {
 
     },
     "Departed" : {
@@ -482,6 +540,9 @@
     "Excluded from commute calculations" : {
 
     },
+    "Existing Timeline Data" : {
+
+    },
     "Expand map" : {
 
     },
@@ -494,10 +555,19 @@
     "Export ${period} as ${format}" : {
 
     },
+    "Export All History" : {
+
+    },
     "Export Format" : {
 
     },
+    "Export Selected Day" : {
+
+    },
     "Export Timeline" : {
+
+    },
+    "Exported Content" : {
 
     },
     "Exports timeline data as a GPX, GeoJSON, or CSV file." : {
@@ -539,6 +609,9 @@
     "Format" : {
 
     },
+    "Formats" : {
+
+    },
     "From" : {
 
     },
@@ -546,6 +619,9 @@
 
     },
     "GeoJSON (.geojson)" : {
+
+    },
+    "GeoJSON…" : {
 
     },
     "Get Timeline Summary" : {
@@ -569,10 +645,19 @@
     "GPX Track" : {
 
     },
+    "GPX…" : {
+
+    },
     "Grant location access above to start recording visits and movement." : {
 
     },
     "Grant location access first to use this feature." : {
+
+    },
+    "Hide Inspector" : {
+
+    },
+    "Hide Inspector (⌥⌘I)" : {
 
     },
     "History" : {
@@ -617,22 +702,43 @@
     "Import Queue" : {
 
     },
+    "Import Route Files" : {
+
+    },
+    "Import Route Files…" : {
+
+    },
+    "Import Route Files… (⌘O)" : {
+
+    },
     "Imported Data" : {
 
     },
     "Imported GPS samples and routes with no remaining non-imported samples are removed, together with their unused generated endpoint places and empty days." : {
 
     },
+    "Imported moves" : {
+
+    },
     "Imported Route Data" : {
+
+    },
+    "Imported samples" : {
 
     },
     "Importing…" : {
 
     },
-    "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing phone or watch points are deduplicated automatically." : {
+    "Imports" : {
+
+    },
+    "Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing location points are deduplicated automatically." : {
 
     },
     "Include a journey below to use it in the minimum, average, and maximum calculations again." : {
+
+    },
+    "Include comments" : {
 
     },
     "Include in Calculations" : {
@@ -642,6 +748,9 @@
 
     },
     "Include return trips" : {
+
+    },
+    "Include saved places" : {
 
     },
     "Includes the visited locations and movement tracks from the selected time span." : {
@@ -660,6 +769,9 @@
 
     },
     "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
+
+    },
+    "Keep your original files" : {
 
     },
     "Label (Home, Work...)" : {
@@ -698,6 +810,9 @@
     "Location name" : {
 
     },
+    "Location samples" : {
+
+    },
     "Location, note, or date" : {
 
     },
@@ -717,6 +832,9 @@
 
     },
     "Manual route" : {
+
+    },
+    "Map" : {
 
     },
     "Map Style" : {
@@ -739,6 +857,12 @@
 
     },
     "Minimum imported points" : {
+
+    },
+    "More" : {
+
+    },
+    "More actions" : {
 
     },
     "Most active days" : {
@@ -771,7 +895,13 @@
     "Moves needs to ask for location access before GPS tracking can start." : {
 
     },
-    "Moves uses the system name for this iPhone unless you set a custom name. Matching trips are combined silently; separately travelling phones keep separate journeys." : {
+    "Moves stores timeline data in your private iCloud container and keeps imported-route recovery information locally." : {
+
+    },
+    "Moves transforms route data for your timeline and does not retain the original files. Your selected files are not modified; keep them separately if you may need their original structure or metadata." : {
+
+    },
+    "Moves uses this device’s system name unless you set a custom name. Matching trips are combined automatically; trips recorded separately on different devices remain separate journeys." : {
 
     },
     "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo." : {
@@ -790,6 +920,9 @@
 
     },
     "Next Day" : {
+
+    },
+    "Next Day (⌘])" : {
 
     },
     "No activity" : {
@@ -927,6 +1060,12 @@
     "Previous Day" : {
 
     },
+    "Previous Day (⌘[)" : {
+
+    },
+    "Privacy" : {
+
+    },
     "Progress for (job.displayName)" : {
 
     },
@@ -957,6 +1096,9 @@
     "Record" : {
 
     },
+    "Recorded days" : {
+
+    },
     "Recorded visits remain in your timeline. Only the saved name and proximity area are removed." : {
 
     },
@@ -967,6 +1109,9 @@
 
     },
     "Remove all filtered routes" : {
+
+    },
+    "Remove Finished" : {
 
     },
     "Remove imported data?" : {
@@ -1024,6 +1169,12 @@
     "Route files you import will appear here." : {
 
     },
+    "Route line width" : {
+
+    },
+    "Route Mapping" : {
+
+    },
     "Routes are being saved and map-matched in the background. Large batches may take time because each file is parsed and checkpointed separately." : {
 
     },
@@ -1034,6 +1185,9 @@
 
     },
     "Save Changes" : {
+
+    },
+    "Search" : {
 
     },
     "Search by place, note, or date" : {
@@ -1058,6 +1212,9 @@
 
     },
     "Select all" : {
+
+    },
+    "Select the latest recorded day when opening a window" : {
 
     },
     "Server" : {
@@ -1108,7 +1265,25 @@
     "Show big map markers" : {
 
     },
+    "Show Import Queue" : {
+
+    },
+    "Show inspector" : {
+
+    },
+    "Show Inspector" : {
+
+    },
+    "Show Inspector (⌥⌘I)" : {
+
+    },
+    "Show large place markers" : {
+
+    },
     "Show Raw JSON" : {
+
+    },
+    "Show realistic map elevation" : {
 
     },
     "Shows iCloud activity for this copy of Moves. Other devices sync independently." : {
@@ -1213,7 +1388,13 @@
     "There are no recorded places or movements in this time span." : {
 
     },
+    "These defaults preselect the options shown when you import route files. You can still change them for each import." : {
+
+    },
     "These journeys remain in your timeline but do not affect commute statistics." : {
+
+    },
+    "These options affect day maps throughout the macOS app." : {
 
     },
     "These safeguards can end the session early if power gets tight." : {
@@ -1222,7 +1403,7 @@
     "This also removes unused generated endpoint places and empty imported days. Non-imported samples are preserved." : {
 
     },
-    "This iPhone: %@" : {
+    "This device: %@" : {
 
     },
     "This journey still appears in your timeline and can be included again at any time." : {
@@ -1231,7 +1412,16 @@
     "This month" : {
 
     },
-    "This removes imported GPS samples, route moves that contain no remaining samples, and their unused generated endpoint places. Empty imported days are removed too. Phone, watch, and Health samples are kept." : {
+    "This removes all places, moves, and location samples for the selected day. You can undo the deletion afterwards." : {
+
+    },
+    "This removes imported GPS samples, route moves that contain no remaining samples, and their unused generated endpoint places. Empty imported days are removed too. Samples recorded on devices or from Health are kept." : {
+
+    },
+    "This removes the entry from the timeline. You can undo the deletion afterwards." : {
+
+    },
+    "This removes the selected entry from the timeline. You can undo the deletion afterwards." : {
 
     },
     "This removes this move from the timeline. You can undo the deletion afterwards." : {
@@ -1267,7 +1457,7 @@
     "Today" : {
 
     },
-    "Toggle Inspector" : {
+    "Today (⇧⌘T)" : {
 
     },
     "Toggle Real Route Tracking" : {
@@ -1351,16 +1541,25 @@
     "Visited Place" : {
 
     },
+    "When imported times overlap" : {
+
+    },
     "When iOS reports two consecutive visits without movement between them, Moves creates an estimated move from the available location and motion data." : {
 
     },
     "When this is off, maps use small dots so more of the map stays visible." : {
 
     },
+    "Workspace" : {
+
+    },
     "Yesterday" : {
 
     },
     "You will see when you traveled between them, plus minimum, average, and maximum journey times." : {
+
+    },
+    "Your location history stays in your private app data and iCloud container unless you explicitly import, export, or configure an external service." : {
 
     }
   },

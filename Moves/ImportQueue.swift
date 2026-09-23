@@ -1,6 +1,10 @@
 import Foundation
 import Combine
 
+private extension Notification.Name {
+    static let movesImportQueueStoreDidChange = Notification.Name("Moves.importQueueStoreDidChange")
+}
+
 /// Operational state for an import job. These records are deliberately not SwiftData models:
 /// queue progress is local device state and must never become part of the CloudKit history schema.
 enum ImportJobState: String, Codable, CaseIterable, Sendable {
@@ -173,6 +177,10 @@ struct ImportJobRecord: Codable, Hashable, Identifiable, Sendable {
 struct ImportQueueSnapshot: Equatable, Sendable {
     var jobs: [ImportJobRecord]
 
+    var finishedJobs: [ImportJobRecord] {
+        jobs.filter { [.completed, .cancelled].contains($0.state) }
+    }
+
     var aggregateProgress: Double? {
         let active = jobs.filter { $0.state != .cancelled }
         guard !active.isEmpty else { return nil }
@@ -186,6 +194,19 @@ struct ImportQueueSnapshot: Equatable, Sendable {
     }
 
     var hasVisibleWork: Bool { !unfinishedJobs.isEmpty }
+
+    func prioritizedJobs(limit: Int) -> [ImportJobRecord] {
+        guard limit > 0 else { return [] }
+        return Array(
+            jobs.sorted { lhs, rhs in
+                let lhsFinished = [.completed, .cancelled].contains(lhs.state)
+                let rhsFinished = [.completed, .cancelled].contains(rhs.state)
+                if lhsFinished != rhsFinished { return !lhsFinished }
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            .prefix(limit)
+        )
+    }
 }
 
 /// JSON-backed local queue. `fileURL` is injectable so persistence and migration can be tested
@@ -204,12 +225,14 @@ struct ImportQueueStore: Sendable {
             .appendingPathComponent("Moves/ImportQueue.json")
     }
 
-    func load() throws -> [ImportJobRecord] {
+    func load(restoringInterruptedJobs: Bool = true) throws -> [ImportJobRecord] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         let data = try Data(contentsOf: fileURL)
         let envelope = try JSONDecoder().decode(Envelope.self, from: data)
         guard envelope.version <= Self.currentVersion else { throw ImportQueueStoreError.unsupportedVersion(envelope.version) }
-        return envelope.jobs.map(Self.restoreInterruptedJob)
+        return restoringInterruptedJobs
+            ? envelope.jobs.map(Self.restoreInterruptedJob)
+            : envelope.jobs
     }
 
     func save(_ jobs: [ImportJobRecord]) throws {
@@ -217,20 +240,24 @@ struct ImportQueueStore: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(Envelope(version: Self.currentVersion, jobs: jobs))
         try data.write(to: fileURL, options: .atomic)
+        NotificationCenter.default.post(
+            name: .movesImportQueueStoreDidChange,
+            object: fileURL.standardizedFileURL
+        )
     }
 
     func append(_ job: ImportJobRecord) throws {
-        var jobs = try load()
+        var jobs = try load(restoringInterruptedJobs: false)
         jobs.append(job)
         try save(jobs)
     }
 
     func remove(id: UUID) throws {
-        try save(try load().filter { $0.id != id })
+        try save(try load(restoringInterruptedJobs: false).filter { $0.id != id })
     }
 
     func update(id: UUID, _ update: (inout ImportJobRecord) -> Void) throws {
-        var jobs = try load()
+        var jobs = try load(restoringInterruptedJobs: false)
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         update(&jobs[index])
         try save(jobs)
@@ -261,6 +288,8 @@ enum ImportQueueStoreError: LocalizedError, Sendable {
 /// work belong to a worker supplied by the importer and must not be added here.
 @MainActor
 final class ImportCoordinator: ObservableObject {
+    private static let finishedRemovalDelay = Duration.seconds(1)
+
     @Published private(set) var snapshot: ImportQueueSnapshot
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var recoveryItems: [ImportRecoveryItem]
@@ -268,6 +297,8 @@ final class ImportCoordinator: ObservableObject {
     private let store: ImportQueueStore
     private let recoveryStore: ImportRecoveryStore
     private weak var routeFileImporter: RouteFileImporter?
+    private var storeChangeObserver: AnyCancellable?
+    private var finishedRemovalTask: Task<Void, Never>?
 
     init(store: ImportQueueStore = ImportQueueStore(), recoveryStore: ImportRecoveryStore = ImportRecoveryStore()) {
         self.store = store
@@ -280,6 +311,16 @@ final class ImportCoordinator: ObservableObject {
         }
         snapshot = ImportQueueSnapshot(jobs: restoredJobs)
         recoveryItems = (try? recoveryStore.load()) ?? []
+
+        let observedFileURL = store.fileURL.standardizedFileURL
+        storeChangeObserver = NotificationCenter.default.publisher(for: .movesImportQueueStoreDidChange)
+            .filter { ($0.object as? URL)?.standardizedFileURL == observedFileURL }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.reloadQueueFromStore()
+                }
+            }
+        scheduleFinishedImportRemoval()
     }
 
     var jobs: [ImportJobRecord] { snapshot.jobs }
@@ -305,9 +346,20 @@ final class ImportCoordinator: ObservableObject {
         self.routeFileImporter = routeFileImporter
     }
 
-    func enqueueRouteFiles(_ urls: [URL], configuration: RouteFileImportConfiguration) {
-        guard !urls.isEmpty else { return }
-        routeFileImporter?.start(urls: urls, configuration: configuration)
+    @discardableResult
+    func enqueueRouteFiles(_ urls: [URL], configuration: RouteFileImportConfiguration) -> Bool {
+        guard !urls.isEmpty else { return false }
+        guard let routeFileImporter else {
+            lastErrorMessage = "The route-file importer is unavailable. Close and reopen Moves, then try again."
+            return false
+        }
+        lastErrorMessage = nil
+        guard routeFileImporter.start(urls: urls, configuration: configuration) else {
+            lastErrorMessage = routeFileImporter.lastErrorMessage
+                ?? "The route files could not be added to the import queue."
+            return false
+        }
+        return true
     }
 
     func resumeRouteImport() { routeFileImporter?.resume() }
@@ -332,6 +384,17 @@ final class ImportCoordinator: ObservableObject {
     func cancel(id: UUID) throws { try transition(id: id, to: .cancelled) }
     func retry(id: UUID) throws { try transition(id: id, to: .queued, clearError: true) }
 
+    @discardableResult
+    func removeFinishedImports() throws -> Int {
+        let finishedIDs = Set(snapshot.finishedJobs.map(\.id))
+        guard !finishedIDs.isEmpty else { return 0 }
+        finishedRemovalTask?.cancel()
+        finishedRemovalTask = nil
+        snapshot.jobs.removeAll { finishedIDs.contains($0.id) }
+        try persist()
+        return finishedIDs.count
+    }
+
     func addRecovery(_ item: ImportRecoveryItem) throws {
         recoveryItems.removeAll { $0.id == item.id }
         recoveryItems.append(item)
@@ -355,6 +418,41 @@ final class ImportCoordinator: ObservableObject {
         snapshot.jobs[index].updatedAt = .now
         if clearError { snapshot.jobs[index].lastError = nil }
         try persist()
+        scheduleFinishedImportRemoval()
+    }
+
+    private func reloadQueueFromStore() {
+        do {
+            let refreshedSnapshot = ImportQueueSnapshot(
+                jobs: try store.load(restoringInterruptedJobs: false)
+            )
+            if refreshedSnapshot != snapshot {
+                snapshot = refreshedSnapshot
+            }
+            scheduleFinishedImportRemoval()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func scheduleFinishedImportRemoval() {
+        guard !snapshot.finishedJobs.isEmpty else {
+            finishedRemovalTask?.cancel()
+            finishedRemovalTask = nil
+            return
+        }
+        guard finishedRemovalTask == nil else { return }
+
+        finishedRemovalTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: Self.finishedRemovalDelay)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.finishedRemovalTask = nil
+            _ = try? self.removeFinishedImports()
+        }
     }
 
     private func persist() throws {

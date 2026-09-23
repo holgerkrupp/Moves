@@ -180,10 +180,36 @@ struct RouteImportAcquirer {
     private func extract(zip: URL) throws -> [(URL, Data?)] {
         let data: Data
         do { data = try Data(contentsOf: zip) } catch { throw RouteImportAcquisitionError.sourceUnavailable(zip.path) }
-        var cursor = 0
+        // ZIP files start with local file records; the central directory lives near the end.
+        // Locate the end-of-central-directory record first instead of assuming that the first
+        // bytes are a central-directory entry.
+        guard data.count >= 22 else { throw RouteImportAcquisitionError.invalidArchive }
+        let earliestEOCDOffset = max(0, data.count - 65_557)
+        var endOfCentralDirectoryOffset: Int?
+        for offset in stride(from: data.count - 22, through: earliestEOCDOffset, by: -1) {
+            if data.uint32LE(at: offset) == 0x06054B50 {
+                endOfCentralDirectoryOffset = offset
+                break
+            }
+        }
+        guard let endOfCentralDirectoryOffset else { throw RouteImportAcquisitionError.invalidArchive }
+
+        let entryCount = Int(data.uint16LE(at: endOfCentralDirectoryOffset + 10))
+        let centralDirectorySize = Int(data.uint32LE(at: endOfCentralDirectoryOffset + 12))
+        var cursor = Int(data.uint32LE(at: endOfCentralDirectoryOffset + 16))
+        guard cursor >= 0,
+              centralDirectorySize <= data.count,
+              cursor <= data.count - centralDirectorySize else {
+            throw RouteImportAcquisitionError.invalidArchive
+        }
+
         var result: [(URL, Data?)] = []
-        while cursor + 46 <= data.count {
-            guard data.uint32LE(at: cursor) == 0x02014B50 else { break }
+        for _ in 0..<entryCount {
+            guard cursor + 46 <= data.count,
+                  data.uint32LE(at: cursor) == 0x02014B50 else {
+                throw RouteImportAcquisitionError.invalidArchive
+            }
+            let flags = data.uint16LE(at: cursor + 8)
             let method = data.uint16LE(at: cursor + 10)
             let compressedSize = Int(data.uint32LE(at: cursor + 20))
             let nameLength = Int(data.uint16LE(at: cursor + 28))
@@ -196,6 +222,7 @@ struct RouteImportAcquirer {
             cursor = nameStart + nameLength + extraLength + commentLength
             let nameURL = URL(fileURLWithPath: name)
             guard isSupportedRouteFile(nameURL), !name.hasSuffix("/") else { continue }
+            guard flags & 0x1 == 0 else { throw RouteImportAcquisitionError.invalidArchive }
             guard localOffset + 30 <= data.count, data.uint32LE(at: localOffset) == 0x04034B50 else { throw RouteImportAcquisitionError.invalidArchive }
             let localNameLength = Int(data.uint16LE(at: localOffset + 26))
             let localExtraLength = Int(data.uint16LE(at: localOffset + 28))

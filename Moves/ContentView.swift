@@ -332,6 +332,11 @@ private func temporaryRouteTrackingAutoStopText(
     }
 }
 
+private struct RouteImportRequest: Identifiable {
+    let id = UUID()
+    let urls: [URL]
+}
+
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @EnvironmentObject private var routeFileImporter: RouteFileImporter
@@ -356,12 +361,16 @@ struct ContentView: View {
     @State private var timelineMapSelection: TimelineMapSelection?
     @State private var pendingRouteImportURLs: [URL] = []
     @State private var routeImportFlushTask: Task<Void, Never>?
-    @State private var isShowingDroppedRouteImportOptions = false
+    @State private var routeImportRequest: RouteImportRequest?
     @State private var droppedRouteImportConfiguration = RouteFileImportConfiguration()
     @State private var isShowingImportQueue = false
     @State private var isFillingSelectedDayGaps = false
     @State private var gapFillResultMessage = ""
     @State private var isShowingGapFillResult = false
+    @State private var routeImportOpenError: String?
+    @State private var isConfirmingDayDeletion = false
+    @State private var dayDeletionErrorMessage = ""
+    @State private var isShowingDayDeletionError = false
 
     /// Empty `DayTimeline` records are an implementation detail used while recording. They
     /// should not become browsable days in the timeline UI.
@@ -434,20 +443,24 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingDatePicker) {
             datePickerSheet
         }
-        .sheet(isPresented: $isShowingDroppedRouteImportOptions, onDismiss: {
-            pendingRouteImportURLs.removeAll()
-        }) {
+        .sheet(item: $routeImportRequest) { request in
             RouteFileImportOptionsView(
                 configuration: $droppedRouteImportConfiguration,
-                actionTitle: "Import Dropped Items",
+                actionTitle: request.urls.count == 1 ? "Import Route File" : "Import Route Files",
                 actionSystemImage: "square.and.arrow.down"
             ) {
-                let urls = pendingRouteImportURLs
-                pendingRouteImportURLs.removeAll()
-                isShowingDroppedRouteImportOptions = false
+                routeImportRequest = nil
                 Task { @MainActor in
                     await Task.yield()
-                    importCoordinator.enqueueRouteFiles(urls, configuration: droppedRouteImportConfiguration)
+                    if importCoordinator.enqueueRouteFiles(
+                        request.urls,
+                        configuration: droppedRouteImportConfiguration
+                    ) {
+                        isShowingImportQueue = true
+                    } else {
+                        routeImportOpenError = importCoordinator.lastErrorMessage
+                            ?? "The route files could not be added to the import queue."
+                    }
                 }
             }
         }
@@ -478,6 +491,28 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(gapFillResultMessage)
+        }
+        .alert(
+            "Couldn’t Import Route File",
+            isPresented: Binding(
+                get: { routeImportOpenError != nil },
+                set: { if !$0 { routeImportOpenError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { routeImportOpenError = nil }
+        } message: {
+            Text(routeImportOpenError ?? "The route file could not be opened.")
+        }
+        .confirmationDialog("Delete Day?", isPresented: $isConfirmingDayDeletion, titleVisibility: .visible) {
+            Button("Delete Day", role: .destructive) { deleteSelectedDay() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all places, moves, and location samples for the selected day. You can undo the deletion afterwards.")
+        }
+        .alert("Could Not Delete Day", isPresented: $isShowingDayDeletionError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(dayDeletionErrorMessage)
         }
         .task {
             guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
@@ -657,67 +692,132 @@ struct ContentView: View {
         .navigationTitle("Moves")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    isShowingSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
+            if usesPhoneToolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    settingsToolbarButton
                 }
-                .keyboardShortcut(",", modifiers: .command)
-                .help("Settings")
-            }
 
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    MovesStatisticsSearchView(
-                        dayTimelines: recordedDayTimelines,
-                        initialDate: selectedDay?.dayStart ?? .now
+                ToolbarItem(placement: .topBarTrailing) {
+                    phoneOverflowMenu
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    settingsToolbarButton
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    statisticsToolbarLink
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    ImportQueueToolbarButton(
+                        coordinator: importCoordinator,
+                        isPresented: $isShowingImportQueue
                     )
-                } label: {
-                    Label("Statistics & Share", systemImage: "chart.bar.xaxis")
                 }
-                .help("Statistics & Share")
-            }
 
-            ToolbarItem(placement: .topBarTrailing) {
-                ImportQueueToolbarButton(
-                    coordinator: importCoordinator,
-                    isPresented: $isShowingImportQueue
-                )
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    fillGapsOnSelectedDay()
-                } label: {
-                    if isFillingSelectedDayGaps {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("Fill Missing Moves", systemImage: "wand.and.stars")
-                    }
+                ToolbarItem(placement: .topBarTrailing) {
+                    fillGapsToolbarButton
                 }
-                .disabled(isFillingSelectedDayGaps || (selectedDay?.places.count ?? 0) < 2)
-                .help("Fill missing moves on the selected day")
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    deleteDayToolbarButton
+                }
             }
 
             if captureManager.isLocationTrackingAvailable {
                 ToolbarItem(placement: .topBarTrailing) {
-                    RouteTrackingToolbarButton(
-                        endsAt: captureManager.temporaryRouteTrackingEndsAt,
-                        authorizationStatus: captureManager.authorizationStatus,
-                        tapAction: {
-                            isShowingRouteTrackingSettings = true
-                        },
-                        longPressAction: {
-                            captureManager.enableTemporaryRouteTracking(
-                                duration: captureManager.temporaryRouteTrackingDuration
-                            )
-                        }
-                    )
+                    routeTrackingToolbarButton
                 }
             }
         }
+    }
+
+    private var usesPhoneToolbar: Bool {
+        #if canImport(UIKit)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
+    private var settingsToolbarButton: some View {
+        Button {
+            isShowingSettings = true
+        } label: {
+            Label("Settings", systemImage: "gearshape")
+        }
+        .keyboardShortcut(",", modifiers: .command)
+        .help("Settings")
+    }
+
+    private var statisticsToolbarLink: some View {
+        NavigationLink {
+            MovesStatisticsSearchView(
+                dayTimelines: recordedDayTimelines,
+                initialDate: selectedDay?.dayStart ?? .now
+            )
+        } label: {
+            Label("Statistics & Share", systemImage: "chart.bar.xaxis")
+        }
+        .help("Statistics & Share")
+    }
+
+    private var fillGapsToolbarButton: some View {
+        Button {
+            fillGapsOnSelectedDay()
+        } label: {
+            if isFillingSelectedDayGaps {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Label("Fill Missing Moves", systemImage: "wand.and.stars")
+            }
+        }
+        .disabled(isFillingSelectedDayGaps || (selectedDay?.places.count ?? 0) < 2)
+        .help("Fill missing moves on the selected day")
+    }
+
+    private var deleteDayToolbarButton: some View {
+        Button(role: .destructive) {
+            isConfirmingDayDeletion = true
+        } label: {
+            Label("Delete Day", systemImage: "trash")
+        }
+        .disabled(selectedDay == nil)
+        .help("Delete all data for the selected day")
+    }
+
+    private var routeTrackingToolbarButton: some View {
+        RouteTrackingToolbarButton(
+            endsAt: captureManager.temporaryRouteTrackingEndsAt,
+            authorizationStatus: captureManager.authorizationStatus,
+            tapAction: {
+                isShowingRouteTrackingSettings = true
+            },
+            longPressAction: {
+                captureManager.enableTemporaryRouteTracking(
+                    duration: captureManager.temporaryRouteTrackingDuration
+                )
+            }
+        )
+    }
+
+    private var phoneOverflowMenu: some View {
+        Menu {
+            statisticsToolbarLink
+
+            ImportQueueToolbarButton(
+                coordinator: importCoordinator,
+                isPresented: $isShowingImportQueue
+            )
+
+            fillGapsToolbarButton
+            deleteDayToolbarButton
+        } label: {
+            Label("More", systemImage: "ellipsis.circle")
+        }
+        .help("More actions")
     }
 
     private var background: some View {
@@ -976,7 +1076,11 @@ struct ContentView: View {
 
     private func handleDeepLink(_ url: URL) {
         if url.isFileURL {
-            enqueueRouteImport([url])
+            if let stagedURL = RouteFileImporter.copyDroppedItem(at: url) {
+                enqueueRouteImport([stagedURL])
+            } else {
+                routeImportOpenError = "\(url.lastPathComponent) could not be opened."
+            }
             return
         }
 
@@ -1011,8 +1115,9 @@ struct ContentView: View {
             guard !Task.isCancelled else { return }
             let urls = pendingRouteImportURLs
             guard !urls.isEmpty else { return }
+            pendingRouteImportURLs.removeAll()
             droppedRouteImportConfiguration = RouteFileImportConfiguration()
-            isShowingDroppedRouteImportOptions = true
+            routeImportRequest = RouteImportRequest(urls: urls)
         }
     }
 
@@ -1095,6 +1200,21 @@ struct ContentView: View {
             } catch {
                 print("Failed to save undo changes: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func deleteSelectedDay() {
+        guard let day = selectedDay else { return }
+        do {
+            try TimelineDeletion.delete(day: day, in: modelContext, undoManager: undoController.manager)
+            selectedPageIndex = min(selectedPageIndex, max(recordedDayTimelines.count - 1, 0))
+            selectedDayKey = recordedDayTimelines.indices.contains(selectedPageIndex)
+                ? recordedDayTimelines[selectedPageIndex].dayKey
+                : ""
+            timelineMapSelection = nil
+        } catch {
+            dayDeletionErrorMessage = error.localizedDescription
+            isShowingDayDeletionError = true
         }
     }
 }

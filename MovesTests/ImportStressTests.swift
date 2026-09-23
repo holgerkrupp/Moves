@@ -43,8 +43,10 @@ final class ImportStressTests: XCTestCase {
 
         let result = try RouteImportAcquirer(stagingDirectory: staging).acquire(urls: [source, archive, source])
 
-        XCTAssertEqual(result.sourceNames.count, 22)
-        XCTAssertEqual(result.sourceNames, result.sourceNames.sorted())
+        let expectedNames = ["mixed.geojson"]
+            + (0..<18).map { String(format: "route-%02d.gpx", $0) }
+            + ["inside.geojson", "inside.gpx"]
+        XCTAssertEqual(result.sourceNames, expectedNames)
         XCTAssertEqual(Set(result.sourceNames).count, result.sourceNames.count)
         XCTAssertTrue(result.files.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
     }
@@ -205,6 +207,7 @@ private extension ImportStressTests {
             let crc = crc32(payload)
             output.appendLE(UInt32(0x04034b50)); output.appendLE(UInt16(20)); output.appendLE(UInt16(0)); output.appendLE(UInt16(0))
             output.appendLE(UInt16(0)); output.appendLE(UInt16(0)); output.appendLE(crc); output.appendLE(UInt32(payload.count)); output.appendLE(UInt32(payload.count))
+            output.appendLE(UInt16(nameData.count)); output.appendLE(UInt16(0))
             output.append(nameData); output.append(payload)
             central.appendLE(UInt32(0x02014b50)); central.appendLE(UInt16(20)); central.appendLE(UInt16(20)); central.appendLE(UInt16(0)); central.appendLE(UInt16(0))
             central.appendLE(UInt16(0)); central.appendLE(UInt16(0)); central.appendLE(crc); central.appendLE(UInt32(payload.count)); central.appendLE(UInt32(payload.count))

@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import Moves
 
 final class ImportQueueTests: XCTestCase {
@@ -20,6 +21,98 @@ final class ImportQueueTests: XCTestCase {
         XCTAssertEqual(restored.count, 1)
         XCTAssertEqual(restored[0].id, job.id)
         XCTAssertEqual(restored[0].state, .paused)
+        XCTAssertEqual(try store.load(restoringInterruptedJobs: false)[0].state, .importing)
+    }
+
+    @MainActor
+    func testCoordinatorReflectsBackgroundWorkerStoreUpdates() async throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = ImportCoordinator(store: store)
+        var job = ImportJobRecord(displayName: "route.gpx", state: .acquiring, phase: .acquiring)
+        job.counters.itemCount = 1
+        try coordinator.enqueue(job)
+
+        let updated = expectation(description: "Coordinator reloads the background-worker update")
+        let observation = coordinator.$snapshot
+            .dropFirst()
+            .sink { snapshot in
+                guard snapshot.jobs.first?.state == .completed else { return }
+                updated.fulfill()
+            }
+
+        try store.update(id: job.id) { storedJob in
+            storedJob.state = .completed
+            storedJob.phase = nil
+            storedJob.counters.completedItemCount = 1
+        }
+
+        await fulfillment(of: [updated], timeout: 1)
+        withExtendedLifetime(observation) {}
+        XCTAssertEqual(coordinator.jobs.first?.state, .completed)
+        XCTAssertEqual(coordinator.aggregateProgress, 1)
+    }
+
+    @MainActor
+    func testCoordinatorAutomaticallyRemovesFinishedImports() async throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = ImportCoordinator(store: store)
+
+        let removed = expectation(description: "Finished import is removed")
+        let observation = coordinator.$snapshot
+            .dropFirst()
+            .sink { snapshot in
+                guard snapshot.jobs.isEmpty else { return }
+                removed.fulfill()
+            }
+
+        var completed = ImportJobRecord(displayName: "finished.gpx", state: .completed, phase: nil)
+        completed.counters = ImportJobCounters(itemCount: 1, completedItemCount: 1)
+        try coordinator.enqueue(completed)
+
+        await fulfillment(of: [removed], timeout: 2)
+        withExtendedLifetime(observation) {}
+        XCTAssertTrue(try store.load(restoringInterruptedJobs: false).isEmpty)
+    }
+
+    @MainActor
+    func testRemoveFinishedImportsKeepsFailedAndActiveJobs() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = ImportCoordinator(store: store)
+        try coordinator.enqueue(ImportJobRecord(displayName: "finished.gpx", state: .completed, phase: nil))
+        try coordinator.enqueue(ImportJobRecord(displayName: "failed.gpx", state: .failed, phase: nil))
+        try coordinator.enqueue(ImportJobRecord(displayName: "active.gpx", state: .importing, phase: .importing))
+
+        XCTAssertEqual(try coordinator.removeFinishedImports(), 1)
+        XCTAssertEqual(Set(coordinator.jobs.map(\.displayName)), ["failed.gpx", "active.gpx"])
+    }
+
+    func testPrioritizedJobsCapsTheVisibleQueueAndPrefersActiveWork() {
+        let now = Date()
+        var jobs = (0..<7).map { index in
+            ImportJobRecord(
+                displayName: "active-\(index).gpx",
+                state: .importing,
+                phase: .importing,
+                updatedAt: now.addingTimeInterval(Double(index))
+            )
+        }
+        jobs.append(ImportJobRecord(
+            displayName: "finished.gpx",
+            state: .completed,
+            phase: nil,
+            updatedAt: now.addingTimeInterval(100)
+        ))
+
+        let visible = ImportQueueSnapshot(jobs: jobs).prioritizedJobs(limit: 5)
+
+        XCTAssertEqual(visible.count, 5)
+        XCTAssertTrue(visible.allSatisfy { $0.state == .importing })
+        XCTAssertEqual(visible.map(\.displayName), [
+            "active-6.gpx", "active-5.gpx", "active-4.gpx", "active-3.gpx", "active-2.gpx"
+        ])
     }
 
     @MainActor
