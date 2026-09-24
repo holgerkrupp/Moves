@@ -144,7 +144,7 @@ final class ImportStressTests: XCTestCase {
             stagingDirectory: root.appendingPathComponent("staged"),
             configuration: RouteImportAcquisitionConfiguration(maximumStagedFiles: 1, maximumStagedBytes: 64)
         ).acquire(urls: [input])) { error in
-            XCTAssertEqual(error as? RouteImportAcquisitionError, .stagingLimitExceeded)
+            XCTAssertEqual(error as? RouteImportAcquisitionError, .stagingByteLimitExceeded(maximum: 64))
         }
     }
 
@@ -157,6 +157,70 @@ final class ImportStressTests: XCTestCase {
             try RouteTrackParserWorker.parse(url: url).reduce(0) { $0 + $1.points.count }
         }.value
         XCTAssertEqual(count, 12_000)
+    }
+
+    @MainActor
+    func testImportedRouteSummaryCountsOnlyFileRouteData() async throws {
+        let container = try testContainer()
+        let context = ModelContext(container)
+        let timeline = DayTimeline(dayStart: epoch)
+        let importedMove = MoveSegment(
+            dedupeKey: "imported-move",
+            startDate: epoch,
+            endDate: epoch.addingTimeInterval(60),
+            transportMode: .walking,
+            distanceMeters: 100,
+            stepCount: nil
+        )
+        let recordedMove = MoveSegment(
+            dedupeKey: "recorded-move",
+            startDate: epoch.addingTimeInterval(120),
+            endDate: epoch.addingTimeInterval(180),
+            transportMode: .walking,
+            distanceMeters: 100,
+            stepCount: nil
+        )
+        let locations = makeLocations(count: 3)
+        let importedSamples = locations.prefix(2).enumerated().map { index, location in
+            LocationSample(
+                location: location,
+                source: .fileRouteImport,
+                dedupeKey: "imported-\(index)"
+            )
+        }
+        let recordedSample = LocationSample(
+            location: locations[2],
+            source: .routeTracking,
+            dedupeKey: "recorded"
+        )
+
+        timeline.moves = [importedMove, recordedMove]
+        timeline.samples = importedSamples + [recordedSample]
+        importedMove.dayTimeline = timeline
+        importedMove.samples = importedSamples
+        recordedMove.dayTimeline = timeline
+        recordedMove.samples = [recordedSample]
+        importedSamples.forEach {
+            $0.dayTimeline = timeline
+            $0.moveSegment = importedMove
+        }
+        recordedSample.dayTimeline = timeline
+        recordedSample.moveSegment = recordedMove
+        context.insert(timeline)
+        try context.save()
+
+        let (summary, daySummaries) = try await Task.detached(priority: .utility) {
+            let worker = ImportedRouteDataSummaryWorker(modelContainer: container)
+            let imported = try await worker.calculate()
+            let days = try await worker.calculateDaySummaries()
+            return (imported, days)
+        }.value
+
+        XCTAssertEqual(summary, ImportedRouteDataSummary(sampleCount: 2, moveCount: 1))
+        XCTAssertEqual(
+            daySummaries[timeline.dayKey],
+            TimelineDaySummary(placeCount: 0, moveCount: 2, sampleCount: 3)
+        )
     }
 }
 

@@ -6,6 +6,7 @@
 //  servers. The filename is retained so existing project references keep working.
 //
 
+import CoreLocation
 import Foundation
 import Security
 import SwiftData
@@ -83,11 +84,11 @@ enum LocationService: String, CaseIterable, Identifiable, Codable {
     var uploadNote: String {
         switch self {
         case .dawarich:
-            return "Moves sends recorded location samples only. Dawarich deduplicates matching points."
+            return "Moves sends the route shown on its map for completed moves, plus raw points that are not part of a move. Dawarich deduplicates matching points."
         case .reitti, .geoPulse:
-            return "Moves sends recorded location samples through this server's OwnTracks-compatible endpoint."
+            return "Moves sends mapped routes and unattached raw points through this server's OwnTracks-compatible endpoint."
         case .ownTracksRecorder, .traccar:
-            return "Moves sends recorded location samples through the OwnTracks protocol. Repeating a full-history upload may create duplicates, depending on the server."
+            return "Moves sends mapped routes and unattached raw points through the OwnTracks protocol. Repeating a full-history upload may create duplicates, depending on the server."
         }
     }
 }
@@ -186,26 +187,26 @@ enum LocationServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidServerURL(let service):
-            return "Enter a complete (service.title) server URL, including https://."
+            return "Enter a complete \(service.title) server URL, including https://."
         case .insecureRemoteServer(let service):
-            return "Remote (service.title) servers must use HTTPS. HTTP is only allowed for local-network hosts."
+            return "Remote \(service.title) servers must use HTTPS. HTTP is only allowed for local-network hosts."
         case .missingCredential(let service, let field):
-            return "Enter the (field) for (service.title)."
+            return "Enter the \(field) for \(service.title)."
         case .notConfigured(let service):
-            return "Connect to (service.title) first."
+            return "Connect to \(service.title) first."
         case .keychain(let status):
             let detail = SecCopyErrorMessageString(status, nil) as String? ?? "status \(status)"
             return "Could not access the saved credentials (\(detail))."
         case .invalidResponse(let service):
-            return "The server returned an invalid response. Check that this is a (service.title) endpoint."
+            return "The server returned an invalid response. Check that this is a \(service.title) endpoint."
         case .server(let service, let statusCode, let message):
             if statusCode == 401 || statusCode == 403 {
-                return "(service.title) rejected the saved credentials."
+                return "\(service.title) rejected the saved credentials."
             }
             if let message, !message.isEmpty {
-                return "(service.title) returned HTTP \(statusCode): \(message)"
+                return "\(service.title) returned HTTP \(statusCode): \(message)"
             }
-            return "(service.title) returned HTTP \(statusCode)."
+            return "\(service.title) returned HTTP \(statusCode)."
         }
     }
 }
@@ -302,7 +303,7 @@ private enum LocationServiceKeychain {
     }
 }
 
-private struct LocationExportSample {
+struct LocationExportSample {
     let latitude: Double
     let longitude: Double
     let altitude: Double?
@@ -317,6 +318,69 @@ private struct LocationExportSample {
         horizontalAccuracy = sample.horizontalAccuracy >= 0 ? sample.horizontalAccuracy : nil
         speedMetersPerSecond = sample.speed >= 0 ? sample.speed : nil
         timestamp = sample.timestamp
+    }
+
+    init(
+        latitude: Double,
+        longitude: Double,
+        altitude: Double? = nil,
+        horizontalAccuracy: Double? = nil,
+        speedMetersPerSecond: Double? = nil,
+        timestamp: Date
+    ) {
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = altitude
+        self.horizontalAccuracy = horizontalAccuracy
+        self.speedMetersPerSecond = speedMetersPerSecond
+        self.timestamp = timestamp
+    }
+}
+
+enum MappedRouteExport {
+    /// Converts the route drawn by Moves into timestamped points understood by
+    /// location-history services. MapKit geometry has no timestamps, so time is
+    /// distributed by distance along the route between the move's endpoints.
+    static func samples(
+        coordinates: [CLLocationCoordinate2D],
+        startDate: Date,
+        endDate: Date
+    ) -> [LocationExportSample] {
+        let validCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+            coordinates.filter { coordinate in
+                CLLocationCoordinate2DIsValid(coordinate)
+                    && coordinate.latitude.isFinite
+                    && coordinate.longitude.isFinite
+            },
+            minimumDistanceMeters: 0.5
+        )
+        guard validCoordinates.count > 1, endDate > startDate else { return [] }
+
+        var cumulativeDistances: [CLLocationDistance] = [0]
+        cumulativeDistances.reserveCapacity(validCoordinates.count)
+        for pair in zip(validCoordinates, validCoordinates.dropFirst()) {
+            cumulativeDistances.append(
+                cumulativeDistances[cumulativeDistances.count - 1]
+                    + RouteCoordinateOps.distanceMeters(from: pair.0, to: pair.1)
+            )
+        }
+
+        let totalDistance = cumulativeDistances.last ?? 0
+        let duration = endDate.timeIntervalSince(startDate)
+        let averageSpeed = totalDistance > 0 ? totalDistance / duration : nil
+
+        return zip(validCoordinates, cumulativeDistances).enumerated().map { index, element in
+            let (coordinate, distance) = element
+            let fraction = totalDistance > 0
+                ? distance / totalDistance
+                : Double(index) / Double(validCoordinates.count - 1)
+            return LocationExportSample(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+                speedMetersPerSecond: averageSpeed,
+                timestamp: startDate.addingTimeInterval(duration * fraction)
+            )
+        }
     }
 }
 
@@ -594,6 +658,7 @@ final class LocationServiceSyncManager: ObservableObject {
     private var notificationObserver: NSObjectProtocol?
     private var resyncRequested: Set<LocationService> = []
     private static let batchSize = 100
+    private static let moveFetchBatchSize = 100
 
     init(
         modelContainer: ModelContainer,
@@ -776,37 +841,26 @@ final class LocationServiceSyncManager: ObservableObject {
             let credentials = try LocationServiceKeychain.load(for: service) ?? LocationServiceCredentials()
             let input = connectionInput(for: service)
             let originalCursor = defaults.object(forKey: key(service, "uploadCursor")) as? Date
-            var cursor = allHistory ? Date.distantPast : (originalCursor ?? Date.now)
+            let cursor = allHistory ? Date.distantPast : (originalCursor ?? Date.now)
+            let upperBound = Date.now
             var uploadedCount = 0
 
-            while true {
-                let modelContext = ModelContext(modelContainer)
-                var descriptor = FetchDescriptor<LocationSample>(
-                    predicate: #Predicate { sample in sample.createdAt > cursor },
-                    sortBy: [SortDescriptor(\LocationSample.createdAt, order: .forward)]
-                )
-                descriptor.fetchLimit = Self.batchSize
-                let samples = try modelContext.fetch(descriptor)
-                guard !samples.isEmpty else { break }
+            uploadedCount += try await uploadMappedRoutes(
+                createdAfter: cursor,
+                createdThrough: upperBound,
+                configuration: configuration,
+                credentials: credentials,
+                input: input
+            )
+            uploadedCount += try await uploadUnattachedSamples(
+                createdAfter: cursor,
+                createdThrough: upperBound,
+                configuration: configuration,
+                credentials: credentials,
+                input: input
+            )
 
-                try await client.upload(
-                    samples.map(LocationExportSample.init),
-                    configuration: configuration,
-                    credentials: credentials,
-                    trackingUsername: input.trackingUsername,
-                    deviceID: input.deviceID
-                )
-                uploadedCount += samples.count
-                cursor = samples.map(\.createdAt).max() ?? cursor
-                if !allHistory {
-                    defaults.set(cursor, forKey: key(service, "uploadCursor"))
-                }
-                if samples.count < Self.batchSize { break }
-            }
-
-            if allHistory {
-                defaults.set(max(originalCursor ?? Date.distantPast, cursor), forKey: key(service, "uploadCursor"))
-            }
+            defaults.set(max(originalCursor ?? Date.distantPast, upperBound), forKey: key(service, "uploadCursor"))
             let completedAt = Date.now
             defaults.set(completedAt, forKey: key(service, "lastSuccess"))
             updateState(for: service) {
@@ -814,11 +868,166 @@ final class LocationServiceSyncManager: ObservableObject {
                 $0.lastOperationFailed = false
                 $0.lastMessage = uploadedCount == 0
                     ? "\(service.title) is up to date."
-                    : "Uploaded \(uploadedCount) location point\(uploadedCount == 1 ? "" : "s") to \(service.title)."
+                    : "Uploaded \(uploadedCount) route/location point\(uploadedCount == 1 ? "" : "s") to \(service.title)."
             }
         } catch {
             record(error: error, for: service)
         }
+    }
+
+    private func uploadMappedRoutes(
+        createdAfter cursor: Date,
+        createdThrough upperBound: Date,
+        configuration: LocationServiceConfiguration,
+        credentials: LocationServiceCredentials,
+        input: LocationServiceConnectionInput
+    ) async throws -> Int {
+        var candidateMoveIDs: Set<UUID> = []
+        var fetchOffset = 0
+
+        while true {
+            let modelContext = ModelContext(modelContainer)
+            var descriptor = FetchDescriptor<MoveSegment>(
+                predicate: #Predicate { move in
+                    move.createdAt > cursor && move.createdAt <= upperBound
+                },
+                sortBy: [SortDescriptor(\MoveSegment.createdAt, order: .forward)]
+            )
+            descriptor.fetchLimit = Self.moveFetchBatchSize
+            descriptor.fetchOffset = fetchOffset
+            let moves = try modelContext.fetch(descriptor)
+            guard !moves.isEmpty else { break }
+            candidateMoveIDs.formUnion(moves.map(\.id))
+            fetchOffset += moves.count
+            if moves.count < Self.moveFetchBatchSize { break }
+        }
+
+        // A detailed import can attach new samples to a move that already existed.
+        // Include those moves even though their original creation date is older
+        // than the upload cursor.
+        if cursor != Date.distantPast {
+            fetchOffset = 0
+            while true {
+                let modelContext = ModelContext(modelContainer)
+                var descriptor = FetchDescriptor<LocationSample>(
+                    predicate: #Predicate { sample in
+                        sample.createdAt > cursor
+                            && sample.createdAt <= upperBound
+                            && sample.moveSegment != nil
+                    },
+                    sortBy: [SortDescriptor(\LocationSample.createdAt, order: .forward)]
+                )
+                descriptor.fetchLimit = Self.batchSize
+                descriptor.fetchOffset = fetchOffset
+                let samples = try modelContext.fetch(descriptor)
+                guard !samples.isEmpty else { break }
+                candidateMoveIDs.formUnion(samples.compactMap { $0.moveSegment?.id })
+                fetchOffset += samples.count
+                if samples.count < Self.batchSize { break }
+            }
+        }
+
+        guard !candidateMoveIDs.isEmpty else { return 0 }
+
+        let modelContext = ModelContext(modelContainer)
+        let moves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+            .filter { candidateMoveIDs.contains($0.id) }
+            .sorted { lhs, rhs in
+                if lhs.timelineStartDate != rhs.timelineStartDate {
+                    return lhs.timelineStartDate < rhs.timelineStartDate
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+        var uploadedCount = 0
+
+        for move in moves {
+            let coordinates = await RoadRouteMatcher.matchedCoordinates(for: move)
+            let routeSamples = MappedRouteExport.samples(
+                coordinates: coordinates,
+                startDate: move.timelineStartDate,
+                endDate: move.endDate
+            )
+            if routeSamples.isEmpty {
+                uploadedCount += try await uploadInBatches(
+                    move.samples
+                        .sorted(by: { $0.timestamp < $1.timestamp })
+                        .map(LocationExportSample.init),
+                    configuration: configuration,
+                    credentials: credentials,
+                    input: input
+                )
+            } else {
+                uploadedCount += try await uploadInBatches(
+                    routeSamples,
+                    configuration: configuration,
+                    credentials: credentials,
+                    input: input
+                )
+            }
+        }
+
+        if modelContext.hasChanges {
+            try modelContext.save()
+        }
+
+        return uploadedCount
+    }
+
+    private func uploadUnattachedSamples(
+        createdAfter cursor: Date,
+        createdThrough upperBound: Date,
+        configuration: LocationServiceConfiguration,
+        credentials: LocationServiceCredentials,
+        input: LocationServiceConnectionInput
+    ) async throws -> Int {
+        var fetchOffset = 0
+        var uploadedCount = 0
+
+        while true {
+            let modelContext = ModelContext(modelContainer)
+            var descriptor = FetchDescriptor<LocationSample>(
+                predicate: #Predicate { sample in
+                    sample.createdAt > cursor
+                        && sample.createdAt <= upperBound
+                        && sample.moveSegment == nil
+                },
+                sortBy: [SortDescriptor(\LocationSample.createdAt, order: .forward)]
+            )
+            descriptor.fetchLimit = Self.batchSize
+            descriptor.fetchOffset = fetchOffset
+            let samples = try modelContext.fetch(descriptor)
+            guard !samples.isEmpty else { break }
+
+            uploadedCount += try await uploadInBatches(
+                samples.map(LocationExportSample.init),
+                configuration: configuration,
+                credentials: credentials,
+                input: input
+            )
+            fetchOffset += samples.count
+            if samples.count < Self.batchSize { break }
+        }
+
+        return uploadedCount
+    }
+
+    private func uploadInBatches(
+        _ samples: [LocationExportSample],
+        configuration: LocationServiceConfiguration,
+        credentials: LocationServiceCredentials,
+        input: LocationServiceConnectionInput
+    ) async throws -> Int {
+        for startIndex in stride(from: 0, to: samples.count, by: Self.batchSize) {
+            let endIndex = min(startIndex + Self.batchSize, samples.count)
+            try await client.upload(
+                Array(samples[startIndex..<endIndex]),
+                configuration: configuration,
+                credentials: credentials,
+                trackingUsername: input.trackingUsername,
+                deviceID: input.deviceID
+            )
+        }
+        return samples.count
     }
 
     private func currentConfiguration(for service: LocationService) -> LocationServiceConfiguration? {
@@ -1003,7 +1212,7 @@ struct LocationServiceSettingsView: View {
                     .padding(.vertical, 5)
 
                     if state.isSyncing {
-                        ProgressView("Uploading location points…")
+                        ProgressView("Uploading routes and location points…")
                     }
 
                     if !state.lastMessage.isEmpty {
@@ -1059,7 +1268,7 @@ struct LocationServiceSettingsView: View {
             Button("Upload All History") { Task { await syncManager.syncAllHistory(service) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every location sample stored in Moves will be sent to \(service.title). Repeating this action may create duplicate points if the server does not deduplicate them.")
+            Text("Every mapped route and location point stored in Moves will be sent to \(service.title). Repeating this action may create duplicate points if the server does not deduplicate them.")
         }
         .confirmationDialog(
             "Disconnect \(service.title)?",

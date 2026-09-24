@@ -368,6 +368,12 @@ struct DayTimelinePageContent: View {
             }
         }
         .confirmationDialog("Delete Entry?", item: $pendingDeletionEntry, titleVisibility: .visible) { entry in
+            if case .place(let place) = entry,
+               TimelineDeletion.canMergeAdjacentRoutes(for: place) {
+                Button("Delete and Merge Routes", role: .destructive) {
+                    delete(entry: entry, mergeAdjacentRoutes: true)
+                }
+            }
             Button("Delete", role: .destructive) { delete(entry: entry) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
@@ -693,10 +699,16 @@ struct DayTimelinePageContent: View {
         return "\(sample.dedupeKey)|\(timestamp)|\(sampleCount)"
     }
 
-    private func delete(entry: TimelineEntry) {
+    private func delete(entry: TimelineEntry, mergeAdjacentRoutes: Bool = false) {
         do {
             switch entry {
-            case .place(let place): try TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoController.manager)
+            case .place(let place):
+                try TimelineDeletion.delete(
+                    place: place,
+                    mergeAdjacentRoutes: mergeAdjacentRoutes,
+                    in: modelContext,
+                    undoManager: undoController.manager
+                )
             case .move(let move): try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoController.manager)
             case .sample(let sample, _, _): try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
             case .liveRoute, .start: return
@@ -1131,7 +1143,6 @@ private enum DayMapRouteCache {
 }
 
 struct DayMapStrip: View {
-    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     let dayTimeline: DayTimeline
@@ -1276,18 +1287,21 @@ struct DayMapStrip: View {
     }
 
     private var mapView: some View {
-        Map(position: $camera, interactionModes: [.pan, .zoom]) {
-            mapContent
+        GeometryReader { proxy in
+            if proxy.size.width > 1, proxy.size.height > 1 {
+                Map(position: $camera, interactionModes: [.pan, .zoom]) {
+                    mapContent
+                }
+            } else {
+                Color.clear
+            }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
     }
 
     private var collapsedMapSnapshotView: some View {
         GeometryReader { proxy in
-            let size = CGSize(
-                width: max(proxy.size.width, 1),
-                height: Self.collapsedMapHeight
-            )
+            let size = CGSize(width: proxy.size.width, height: proxy.size.height)
 
             ZStack {
                 if let collapsedSnapshotImage {
@@ -1711,7 +1725,9 @@ struct DayMapStrip: View {
         renderedRoutes.reserveCapacity(sortedMoves.count)
 
         for move in sortedMoves {
-            let matched = await RoadRouteMatcher.matchedCoordinates(for: move)
+            // Day-map presentation must be read-only. Persisted route/cache updates here can
+            // trigger SwiftData/CloudKit work while MapKit is still laying out its view.
+            let matched = await RoadRouteMatcher.matchedCoordinates(for: move, persistResult: false)
             renderedRoutes.append(
                 RenderedRoute(
                     id: move.id.uuidString,
@@ -1725,13 +1741,6 @@ struct DayMapStrip: View {
 
         historicalRoutes = renderedRoutes
         DayMapRouteCache.store(renderedRoutes, for: historicalRouteRefreshKey, isFullyMatched: true)
-        if modelContext.hasChanges {
-            do {
-                try modelContext.save()
-            } catch {
-                print("Failed to persist matched route cache: \(error.localizedDescription)")
-            }
-        }
         refreshCamera(for: selection)
     }
 
@@ -1823,7 +1832,7 @@ struct DayMapStrip: View {
         dayTimeline.samples
             .filter { resolution.includes($0.deviceIdentifier) }
             .sorted(by: { $0.timestamp < $1.timestamp })
-            .last?
+            .last(where: { CLLocationCoordinate2DIsValid($0.coordinate) })?
             .coordinate
     }
 
@@ -1845,7 +1854,7 @@ struct DayMapStrip: View {
         let sortedSamples = dayTimeline.samples
             .filter { resolution.includes($0.deviceIdentifier) }
             .sorted(by: { $0.timestamp < $1.timestamp })
-        let latestSample = sortedSamples.last
+        let latestSample = sortedSamples.last(where: { CLLocationCoordinate2DIsValid($0.coordinate) })
         let latestSampleKey = latestSample.map { sample in
             "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
         } ?? "none"
@@ -1872,7 +1881,9 @@ struct DayMapStrip: View {
             placesByID[place.id] = place
         }
 
-        return placesByID.values.sorted(by: { $0.arrivalDate < $1.arrivalDate })
+        return placesByID.values
+            .filter { CLLocationCoordinate2DIsValid($0.coordinate) }
+            .sorted(by: { $0.arrivalDate < $1.arrivalDate })
     }
 
     private static func routeRefreshKey(

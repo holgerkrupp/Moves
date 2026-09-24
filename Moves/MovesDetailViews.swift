@@ -88,6 +88,11 @@ struct PlaceMapDetailView: View {
             isPresented: $isConfirmingDeletion,
             titleVisibility: .visible
         ) {
+            if TimelineDeletion.canMergeAdjacentRoutes(for: place) {
+                Button("Delete and Merge Routes", role: .destructive) {
+                    deletePlace(mergeAdjacentRoutes: true)
+                }
+            }
             Button("Delete", role: .destructive) {
                 deletePlace()
             }
@@ -104,14 +109,20 @@ struct PlaceMapDetailView: View {
     }
 
     private var placeMap: some View {
-        Map(position: $camera) {
-            if showsBigMarkers {
-                Marker(place.displayTitle, coordinate: place.coordinate)
-                    .tint(MovesPalette.place)
-            } else {
-                Annotation(place.displayTitle, coordinate: place.coordinate, anchor: .center) {
-                    MapLocationDot(tint: MovesPalette.place)
+        GeometryReader { proxy in
+            if proxy.size.width > 1, proxy.size.height > 1 {
+                Map(position: $camera) {
+                    if showsBigMarkers {
+                        Marker(place.displayTitle, coordinate: place.coordinate)
+                            .tint(MovesPalette.place)
+                    } else {
+                        Annotation(place.displayTitle, coordinate: place.coordinate, anchor: .center) {
+                            MapLocationDot(tint: MovesPalette.place)
+                        }
+                    }
                 }
+            } else {
+                Color.clear
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
@@ -217,10 +228,27 @@ struct PlaceMapDetailView: View {
         }
     }
 
-    private func deletePlace() {
+    private func deletePlace(mergeAdjacentRoutes: Bool = false) {
         guard !isDeleting else { return }
         isDeleting = true
         defer { isDeleting = false }
+
+        if mergeAdjacentRoutes {
+            do {
+                try TimelineDeletion.delete(
+                    place: place,
+                    mergeAdjacentRoutes: true,
+                    in: modelContext,
+                    undoManager: undoController.manager
+                )
+                dismiss()
+            } catch {
+                modelContext.rollback()
+                deleteErrorMessage = error.localizedDescription
+                isShowingDeleteError = true
+            }
+            return
+        }
 
         let undoPayload = DeletedPlaceUndoPayload(place: place)
         let undoManager = undoController.manager
@@ -486,56 +514,62 @@ struct MoveMapDetailView: View {
     }
 
     private var moveMap: some View {
-        MapReader { proxy in
-            Map(position: $camera, interactionModes: mapInteractionModes) {
-                if let start = segment.startPlace?.coordinate {
-                    if showsBigMarkers {
-                        Marker("Start", coordinate: start)
-                            .tint(MovesPalette.place)
-                    } else {
-                        Annotation("Start", coordinate: start, anchor: .center) {
-                            MapLocationDot(tint: MovesPalette.place)
+        GeometryReader { container in
+            if container.size.width > 1, container.size.height > 1 {
+                MapReader { proxy in
+                    Map(position: $camera, interactionModes: mapInteractionModes) {
+                        if let start = segment.startPlace?.coordinate {
+                            if showsBigMarkers {
+                                Marker("Start", coordinate: start)
+                                    .tint(MovesPalette.place)
+                            } else {
+                                Annotation("Start", coordinate: start, anchor: .center) {
+                                    MapLocationDot(tint: MovesPalette.place)
+                                }
+                            }
+                        }
+
+                        if activeRenderedRoute.shadowCoordinates.count > 1 {
+                            MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
+                                .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
+                        }
+
+                        ForEach(Array(activeRenderedRoute.coordinateSegments.enumerated()), id: \.offset) { _, coordinates in
+                            MapPolyline(coordinates: coordinates)
+                                .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
+                        }
+
+                        if let end = segment.endPlace?.coordinate {
+                            if showsBigMarkers {
+                                Marker("End", coordinate: end)
+                                    .tint(.red)
+                            } else {
+                                Annotation("End", coordinate: end, anchor: .center) {
+                                    MapLocationDot(tint: .red)
+                                }
+                            }
+                        }
+
+                        if isEditingManualRoute {
+                            ForEach(Array(manualRouteWaypointCoordinates.enumerated()), id: \.offset) { index, coordinate in
+                                Annotation("Waypoint", coordinate: coordinate, anchor: .center) {
+                                    ManualRouteWaypointMarker(isActive: index == activeManualRouteWaypointIndex)
+                                }
+                            }
+                        }
+
+                        if let proposedSplit {
+                            Annotation("Split point", coordinate: proposedSplit.coordinate, anchor: .center) {
+                                SplitRoutePointMarker()
+                            }
                         }
                     }
+                    .simultaneousGesture(manualRouteEditGesture(proxy: proxy))
+                    .simultaneousGesture(splitPointSelectionGesture(proxy: proxy))
                 }
-
-                if activeRenderedRoute.shadowCoordinates.count > 1 {
-                    MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
-                        .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
-                }
-
-                ForEach(Array(activeRenderedRoute.coordinateSegments.enumerated()), id: \.offset) { _, coordinates in
-                    MapPolyline(coordinates: coordinates)
-                        .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
-                }
-
-                if let end = segment.endPlace?.coordinate {
-                    if showsBigMarkers {
-                        Marker("End", coordinate: end)
-                            .tint(.red)
-                    } else {
-                        Annotation("End", coordinate: end, anchor: .center) {
-                            MapLocationDot(tint: .red)
-                        }
-                    }
-                }
-
-                if isEditingManualRoute {
-                    ForEach(Array(manualRouteWaypointCoordinates.enumerated()), id: \.offset) { index, coordinate in
-                        Annotation("Waypoint", coordinate: coordinate, anchor: .center) {
-                            ManualRouteWaypointMarker(isActive: index == activeManualRouteWaypointIndex)
-                        }
-                    }
-                }
-
-                if let proposedSplit {
-                    Annotation("Split point", coordinate: proposedSplit.coordinate, anchor: .center) {
-                        SplitRoutePointMarker()
-                    }
-                }
+            } else {
+                Color.clear
             }
-            .simultaneousGesture(manualRouteEditGesture(proxy: proxy))
-            .simultaneousGesture(splitPointSelectionGesture(proxy: proxy))
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
     }

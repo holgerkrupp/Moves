@@ -2,10 +2,12 @@ import Compression
 import Foundation
 
 struct RouteImportAcquisitionConfiguration: Sendable {
-    var maximumStagedFiles: Int = 512
+    /// Keep a generous file-count bound for exports that store every route in a separate
+    /// file. The byte limit remains the primary disk-space safeguard.
+    var maximumStagedFiles: Int = 25_000
     var maximumStagedBytes: Int64 = 512 * 1024 * 1024
 
-    init(maximumStagedFiles: Int = 512, maximumStagedBytes: Int64 = 512 * 1024 * 1024) {
+    init(maximumStagedFiles: Int = 25_000, maximumStagedBytes: Int64 = 512 * 1024 * 1024) {
         self.maximumStagedFiles = maximumStagedFiles
         self.maximumStagedBytes = maximumStagedBytes
     }
@@ -16,11 +18,19 @@ struct RouteImportAcquisitionResult: Sendable {
     let sourceNames: [String]
     let sourceIdentifiers: [String]
     let bookmarkData: [Data]
+    let accessRoots: [RouteImportAccessRoot]
+    let filesAreStaged: Bool
+}
+
+struct RouteImportAccessRoot: Codable, Hashable, Sendable {
+    let path: String
+    let bookmarkData: Data?
 }
 
 enum RouteImportAcquisitionError: LocalizedError, Sendable, Equatable {
     case sourceUnavailable(String)
-    case stagingLimitExceeded
+    case stagingFileLimitExceeded(maximum: Int)
+    case stagingByteLimitExceeded(maximum: Int64)
     case invalidArchive
 
     var isRecoverable: Bool { true }
@@ -29,17 +39,19 @@ enum RouteImportAcquisitionError: LocalizedError, Sendable, Equatable {
         switch self {
         case .sourceUnavailable(let source):
             return "The selected source is unavailable. Reconnect it or select it again: \(source)"
-        case .stagingLimitExceeded:
-            return "The selected route import is too large to stage safely. Select fewer or smaller files."
+        case .stagingFileLimitExceeded(let maximum):
+            return "This route import contains more than \(maximum.formatted()) supported files. Select a smaller folder."
+        case .stagingByteLimitExceeded(let maximum):
+            let formatted = ByteCountFormatter.string(fromByteCount: maximum, countStyle: .file)
+            return "This route import needs more than \(formatted) of temporary space. Select fewer or smaller files."
         case .invalidArchive:
             return "The route archive is invalid or uses an unsupported compression format."
         }
     }
 }
 
-/// Acquires picker/File Provider URLs into app-owned storage before parsing begins.
-/// The limits are deliberately enforced before each copy, so a partial staging directory
-/// can be safely removed and a job can be retried without touching the source.
+/// Enumerates picker/File Provider URLs and, when requested, copies them into app-owned
+/// storage. One-at-a-time imports retain source access and defer each copy until parsing.
 struct RouteImportAcquirer {
     let stagingDirectory: URL
     let configuration: RouteImportAcquisitionConfiguration
@@ -55,12 +67,13 @@ struct RouteImportAcquirer {
         self.fileManager = fileManager
     }
 
-    func acquire(urls: [URL]) throws -> RouteImportAcquisitionResult {
+    func acquire(urls: [URL], stageFiles: Bool = true) throws -> RouteImportAcquisitionResult {
         try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
         var files: [URL] = []
         var sourceNames: [String] = []
         var sourceIdentifiers: [String] = []
         var bookmarks: [Data] = []
+        var accessRoots: [RouteImportAccessRoot] = []
         var seen = Set<String>()
         var stagedBytes: Int64 = 0
         var succeeded = false
@@ -69,6 +82,7 @@ struct RouteImportAcquirer {
         defer { _ = succeeded }
 
         for source in urls.sorted(by: stableURLOrder) {
+            try Task.checkCancellation()
             let resolved = try resolve(source)
             let didAccess = resolved.url.startAccessingSecurityScopedResource()
             defer { if didAccess { resolved.url.stopAccessingSecurityScopedResource() } }
@@ -90,6 +104,7 @@ struct RouteImportAcquirer {
             }
 
             for (candidate, archiveData) in candidates {
+                try Task.checkCancellation()
                 let identity = candidate.standardizedFileURL.resolvingSymlinksInPath().path
                 guard seen.insert(identity).inserted else { continue }
                 let dataSize: Int64
@@ -98,27 +113,43 @@ struct RouteImportAcquirer {
                 } else {
                     dataSize = Int64(try fileSize(candidate))
                 }
-                guard files.count < configuration.maximumStagedFiles,
-                      stagedBytes <= configuration.maximumStagedBytes - dataSize else {
-                    throw RouteImportAcquisitionError.stagingLimitExceeded
+                guard files.count < configuration.maximumStagedFiles else {
+                    throw RouteImportAcquisitionError.stagingFileLimitExceeded(
+                        maximum: configuration.maximumStagedFiles
+                    )
+                }
+                guard dataSize <= configuration.maximumStagedBytes,
+                      !stageFiles || stagedBytes <= configuration.maximumStagedBytes - dataSize else {
+                    throw RouteImportAcquisitionError.stagingByteLimitExceeded(
+                        maximum: configuration.maximumStagedBytes
+                    )
                 }
 
-                let destination = stagingDirectory.appendingPathComponent(
-                    String(format: "%06d-%@", files.count, safeFileName(candidate.lastPathComponent))
-                )
-                if let archiveData {
-                    try archiveData.write(to: destination, options: .atomic)
+                if stageFiles {
+                    let destination = stagingDirectory.appendingPathComponent(
+                        String(format: "%06d-%@", files.count, safeFileName(candidate.lastPathComponent))
+                    )
+                    if let archiveData {
+                        try archiveData.write(to: destination, options: .atomic)
+                    } else {
+                        do { try fileManager.copyItem(at: candidate, to: destination) }
+                        catch { throw RouteImportAcquisitionError.sourceUnavailable(candidate.path) }
+                    }
+                    files.append(destination)
+                    stagedBytes += dataSize
                 } else {
-                    do { try fileManager.copyItem(at: candidate, to: destination) }
-                    catch { throw RouteImportAcquisitionError.sourceUnavailable(candidate.path) }
+                    // The importer will acquire access, copy, process, and remove this file
+                    // immediately. ZIP imports use the all-at-once path because their entries
+                    // do not have independent source URLs.
+                    guard archiveData == nil else { throw RouteImportAcquisitionError.invalidArchive }
+                    files.append(candidate)
                 }
-                files.append(destination)
-                stagedBytes += dataSize
                 sourceNames.append(candidate.lastPathComponent)
             }
 
             sourceIdentifiers.append(resolved.url.path)
             if let bookmark = resolved.bookmark { bookmarks.append(bookmark) }
+            accessRoots.append(RouteImportAccessRoot(path: resolved.url.path, bookmarkData: resolved.bookmark))
         }
 
         succeeded = true
@@ -126,7 +157,9 @@ struct RouteImportAcquirer {
             files: files,
             sourceNames: sourceNames,
             sourceIdentifiers: sourceIdentifiers,
-            bookmarkData: bookmarks
+            bookmarkData: bookmarks,
+            accessRoots: accessRoots,
+            filesAreStaged: stageFiles
         )
     }
 
@@ -138,13 +171,38 @@ struct RouteImportAcquirer {
     private func resolve(_ source: URL) throws -> ResolvedSource {
         // A URL can be passed directly by tests and by older callers. For picker URLs,
         // resolving a bookmark is best-effort because File Provider URLs may not vend one.
-        if let data = try? source.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) {
+        let didAccess = source.startAccessingSecurityScopedResource()
+        defer { if didAccess { source.stopAccessingSecurityScopedResource() } }
+#if os(macOS)
+        let creationOptions: URL.BookmarkCreationOptions = .withSecurityScope
+        let resolutionOptions: URL.BookmarkResolutionOptions = .withSecurityScope
+#else
+        let creationOptions: URL.BookmarkCreationOptions = []
+        let resolutionOptions: URL.BookmarkResolutionOptions = []
+#endif
+        if let data = try? source.bookmarkData(
+            options: creationOptions,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
             var isStale = false
-            if let resolved = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale) {
+            if let resolved = try? URL(
+                resolvingBookmarkData: data,
+                options: resolutionOptions,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
                 return ResolvedSource(url: resolved, bookmark: data)
             }
         }
-        return ResolvedSource(url: source, bookmark: try? source.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil))
+        return ResolvedSource(
+            url: source,
+            bookmark: try? source.bookmarkData(
+                options: creationOptions,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        )
     }
 
     private func enumerate(directory: URL) throws -> [URL] {

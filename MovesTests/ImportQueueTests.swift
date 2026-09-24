@@ -115,6 +115,35 @@ final class ImportQueueTests: XCTestCase {
         ])
     }
 
+    func testImportJobProvidesCurrentAndUpcomingFileNames() {
+        var job = ImportJobRecord(
+            displayName: "Routes",
+            source: ImportJobSourceMetadata(originalFileNames: ["one.gpx", "two.gpx", "three.gpx", "four.gpx"]),
+            state: .importing,
+            phase: .importing
+        )
+        job.counters = ImportJobCounters(itemCount: 4, completedItemCount: 1)
+
+        XCTAssertEqual(job.upcomingFileNames(limit: 2), ["two.gpx", "three.gpx"])
+    }
+
+    func testImportJobEstimatesCompletionFromCompletedFiles() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        var job = ImportJobRecord(
+            displayName: "Routes",
+            state: .importing,
+            phase: .importing,
+            createdAt: now.addingTimeInterval(-100)
+        )
+        job.counters = ImportJobCounters(itemCount: 10, completedItemCount: 2)
+
+        let estimate = try XCTUnwrap(job.estimatedCompletionDate(at: now))
+
+        XCTAssertEqual(estimate.timeIntervalSince(now), 400, accuracy: 0.001)
+        job.state = .paused
+        XCTAssertNil(job.estimatedCompletionDate(at: now))
+    }
+
     @MainActor
     func testCoordinatorTransitionsAndAggregateProgress() throws {
         let (store, directory) = try makeStore()
@@ -216,6 +245,28 @@ final class ImportQueueTests: XCTestCase {
         XCTAssertTrue(result.files[0].path.hasSuffix("-route.gpx"))
     }
 
+    func testAcquirerCanLeaveFilesInPlaceForOneAtATimeImport() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = root.appendingPathComponent("routes")
+        let staging = root.appendingPathComponent("staged")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = folder.appendingPathComponent("first.gpx")
+        let second = folder.appendingPathComponent("second.gpx")
+        try Data("first".utf8).write(to: first)
+        try Data("second".utf8).write(to: second)
+
+        let result = try RouteImportAcquirer(stagingDirectory: staging).acquire(
+            urls: [folder],
+            stageFiles: false
+        )
+
+        XCTAssertFalse(result.filesAreStaged)
+        XCTAssertEqual(result.files, [first, second])
+        XCTAssertEqual(result.accessRoots.map(\.path), [folder.path])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staging.path), [])
+    }
+
     func testAcquirerEnumeratesFoldersDeterministicallyAndDeduplicates() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let folder = root.appendingPathComponent("routes")
@@ -252,7 +303,46 @@ final class ImportQueueTests: XCTestCase {
             stagingDirectory: root.appendingPathComponent("staged"),
             configuration: RouteImportAcquisitionConfiguration(maximumStagedFiles: 1, maximumStagedBytes: 9)
         ).acquire(urls: [source])) { error in
-            XCTAssertEqual(error as? RouteImportAcquisitionError, .stagingLimitExceeded)
+            XCTAssertEqual(error as? RouteImportAcquisitionError, .stagingByteLimitExceeded(maximum: 9))
         }
+    }
+
+    func testDefaultAcquisitionLimitSupportsTwelveThousandFileExports() {
+        XCTAssertGreaterThanOrEqual(
+            RouteImportAcquisitionConfiguration().maximumStagedFiles,
+            12_000
+        )
+    }
+
+    func testImportConfigurationDefaultsNewFileHandlingModeWhenDecodingOlderData() throws {
+        let data = Data(#"{"mappingMode":"automatic","dedicatedTransportMode":"unknown","existingDataPolicy":"skipDate"}"#.utf8)
+
+        let configuration = try JSONDecoder().decode(RouteFileImportConfiguration.self, from: data)
+
+        XCTAssertEqual(configuration.fileHandlingMode, .oneAtATime)
+    }
+
+    func testFailureReportExportsEscapedCSVAndReadableText() throws {
+        let report = RouteFileFailureReport(
+            displayName: "Large import",
+            createdAt: Date(timeIntervalSince1970: 0),
+            attemptedFileCount: 12_000,
+            entries: [
+                RouteFileFailureEntry(
+                    fileName: "route, \"bad\".gpx",
+                    sourceIdentifier: "/Routes/route, \"bad\".gpx",
+                    reason: "Could not parse"
+                )
+            ]
+        )
+
+        let csv = try XCTUnwrap(String(data: report.exportData(format: .csv), encoding: .utf8))
+        XCTAssertTrue(csv.hasPrefix("file_name,reason,source_identifier\n"))
+        XCTAssertTrue(csv.contains(#""route, ""bad"".gpx","Could not parse","/Routes/route, ""bad"".gpx""#))
+
+        let text = try XCTUnwrap(String(data: report.exportData(format: .text), encoding: .utf8))
+        XCTAssertTrue(text.contains("Attempted files: 12000"))
+        XCTAssertTrue(text.contains("Failed files: 1"))
+        XCTAssertTrue(text.contains("route, \"bad\".gpx\tCould not parse\t/Routes/route, \"bad\".gpx"))
     }
 }

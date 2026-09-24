@@ -9,6 +9,7 @@ import Foundation
 import Combine
 import CloudKitSyncMonitor
 import CoreLocation
+import ESADesignKit
 import HealthKit
 import SwiftData
 import SwiftUI
@@ -21,6 +22,7 @@ struct MovesSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var locationServiceSyncManager: LocationServiceSyncManager
+    @EnvironmentObject private var routeWatchFolderManager: RouteWatchFolderManager
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     @AppStorage(LandscapeLayoutSettings.controlsOnLeftKey) private var landscapeControlsOnLeft = false
     @AppStorage(DailyTimelineBackup.isEnabledKey) private var dailyBackupIsEnabled = false
@@ -242,6 +244,17 @@ struct MovesSettingsView: View {
 
                     SettingsCard(title: "Import") {
                         NavigationLink {
+                            RouteWatchFolderSettingsView()
+                        } label: {
+                            SettingsNavigationRow(
+                                title: "Automatic route import",
+                                systemImage: "folder.badge.gearshape",
+                                status: routeWatchFolderManager.isEnabled ? "On" : nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
                             HealthWorkoutRouteImportSettingsView()
                         } label: {
                             SettingsNavigationRow(
@@ -357,7 +370,9 @@ struct MovesSettingsView: View {
 
                     }
 
-                    CreatedByView()
+                    CreatedByView(
+                        gitURL: URL(string: "https://github.com/holgerkrupp/Moves")
+                    )
                         .panelSurface()
                 }
                 .padding(.horizontal, 14)
@@ -907,7 +922,7 @@ struct SettingsCard<Content: View>: View {
     }
 }
 
-private struct SettingsActionRow: View {
+struct SettingsActionRow: View {
     let title: String
     let systemImage: String
     let isDisabled: Bool

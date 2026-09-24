@@ -102,6 +102,53 @@ final class LocationServiceSyncTests: XCTestCase {
         XCTAssertEqual(object["topic"] as? String, "owntracks/moves/moves-device")
     }
 
+    func testMappedRouteExportUsesDisplayedCoordinatesAndMoveTimeRange() throws {
+        let start = Date(timeIntervalSince1970: 1_735_000_000)
+        let end = start.addingTimeInterval(120)
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.5200, longitude: 13.4050),
+            CLLocationCoordinate2D(latitude: 52.5210, longitude: 13.4050),
+            CLLocationCoordinate2D(latitude: 52.5230, longitude: 13.4050),
+        ]
+
+        let samples = MappedRouteExport.samples(
+            coordinates: coordinates,
+            startDate: start,
+            endDate: end
+        )
+
+        XCTAssertEqual(samples.count, coordinates.count)
+        XCTAssertEqual(samples.map(\.latitude), coordinates.map(\.latitude))
+        XCTAssertEqual(samples.map(\.longitude), coordinates.map(\.longitude))
+        XCTAssertEqual(try XCTUnwrap(samples.first).timestamp, start)
+        XCTAssertEqual(try XCTUnwrap(samples.last).timestamp, end)
+        XCTAssertEqual(samples[1].timestamp.timeIntervalSince(start), 40, accuracy: 0.5)
+        XCTAssertGreaterThan(try XCTUnwrap(samples[1].speedMetersPerSecond), 0)
+    }
+
+    func testMappedRouteExportRejectsInvalidOrZeroDurationRoutes() {
+        let now = Date(timeIntervalSince1970: 1_735_000_000)
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.52, longitude: 13.405),
+            CLLocationCoordinate2D(latitude: 52.53, longitude: 13.415),
+        ]
+
+        XCTAssertTrue(
+            MappedRouteExport.samples(
+                coordinates: coordinates,
+                startDate: now,
+                endDate: now
+            ).isEmpty
+        )
+        XCTAssertTrue(
+            MappedRouteExport.samples(
+                coordinates: [CLLocationCoordinate2D(latitude: .nan, longitude: 13.405)],
+                startDate: now,
+                endDate: now.addingTimeInterval(60)
+            ).isEmpty
+        )
+    }
+
     func testReittiConnectionUsesDeviceTokenEndpoint() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.url?.path, "/base/api/v1/ingest/owntracks")

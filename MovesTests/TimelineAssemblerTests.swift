@@ -80,6 +80,63 @@ final class MovesTimelinePeriodTests: XCTestCase {
 
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
+    func testMapRegionAndPolylineIgnoreMalformedCoordinates() {
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.5200, longitude: 13.4050),
+            CLLocationCoordinate2D(latitude: .nan, longitude: 13.4060),
+            CLLocationCoordinate2D(latitude: 52.5210, longitude: .infinity),
+            CLLocationCoordinate2D(latitude: 52.5220, longitude: 13.4070)
+        ]
+
+        let region = MapRegionFactory.region(for: coordinates)
+        let segments = RouteCoordinateOps.mapPolylineSegments(coordinates)
+
+        XCTAssertEqual(region.center.latitude, 52.521, accuracy: 0.001)
+        XCTAssertEqual(region.center.longitude, 13.406, accuracy: 0.001)
+        XCTAssertTrue(region.span.latitudeDelta.isFinite)
+        XCTAssertTrue(region.span.longitudeDelta.isFinite)
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments.first?.count, 2)
+    }
+
+    func testImportedRoutePresentationUsesRecordedGeometryWithoutPersisting() async {
+        let move = MoveSegment(
+            dedupeKey: "imported-route",
+            startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: Date(timeIntervalSince1970: 1_700_000_060),
+            transportMode: .cycling,
+            distanceMeters: 999,
+            stepCount: nil
+        )
+        let first = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 52.5200, longitude: 13.4050),
+            altitude: 0,
+            horizontalAccuracy: 5,
+            verticalAccuracy: -1,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let second = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 52.5210, longitude: 13.4060),
+            altitude: 0,
+            horizontalAccuracy: 5,
+            verticalAccuracy: -1,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_060)
+        )
+        move.samples = [
+            LocationSample(location: first, source: .fileRouteImport, dedupeKey: "1"),
+            LocationSample(location: second, source: .fileRouteImport, dedupeKey: "2")
+        ]
+
+        let coordinates = await RoadRouteMatcher.matchedCoordinates(for: move, persistResult: false)
+
+        XCTAssertEqual(coordinates.count, 2)
+        XCTAssertEqual(coordinates.first?.latitude ?? .nan, first.coordinate.latitude, accuracy: 0.000_001)
+        XCTAssertEqual(coordinates.last?.longitude ?? .nan, second.coordinate.longitude, accuracy: 0.000_001)
+        XCTAssertEqual(move.distanceMeters, 999)
+        XCTAssertNil(move.routeCacheSignature)
+        XCTAssertNil(move.routeCacheCoordinatesData)
+    }
+
     func testTrackSplitInterpolatesTimeBetweenSurroundingSamples() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let route = [
@@ -849,6 +906,37 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<VisitPlace>()), 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<DayTimeline>()), 0)
+    }
+
+    func testImportedRouteKeepsPhoneSamplesAsFallbackRoute() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = SwiftDataTimelineRepository(modelContext: context)
+        let start = Date(timeIntervalSince1970: 1_710_100_000)
+        let locations = [
+            makeLocation(latitude: 52.5200, longitude: 13.4050, speed: 4, timestamp: start),
+            makeLocation(latitude: 52.5210, longitude: 13.4070, speed: 4, timestamp: start.addingTimeInterval(60)),
+            makeLocation(latitude: 52.5220, longitude: 13.4090, speed: 4, timestamp: start.addingTimeInterval(120)),
+        ]
+
+        _ = try repository.importRouteTrack(
+            locations: locations,
+            source: .significantChange,
+            transportMode: .walking,
+            resolvePlaceNames: false
+        )
+        let importedMove = try XCTUnwrap(repository.importRouteTrack(
+            locations: locations,
+            source: .fileRouteImport,
+            transportMode: .walking,
+            resolvePlaceNames: false
+        ))
+
+        XCTAssertEqual(importedMove.samples.filter { $0.source == .significantChange }.count, locations.count)
+        XCTAssertEqual(importedMove.samples.filter { $0.source == .fileRouteImport }.count, locations.count)
+        XCTAssertEqual(importedMove.samples.preferredRouteDisplaySamples.count, locations.count)
+        XCTAssertTrue(importedMove.usesHighAccuracyRouteTracking)
+        XCTAssertEqual(RouteFileImportConfiguration().existingDataPolicy, .keepExistingData)
     }
 
     func testInvalidImportedTrackDoesNotCreateIndependentSamplesOrVisits() throws {

@@ -1,4 +1,5 @@
 import CoreLocation
+import ESADesignKit
 import MapKit
 import SwiftData
 import SwiftUI
@@ -55,7 +56,11 @@ private final class MovesMacAppDelegate: NSObject, NSApplicationDelegate {
 
 @main
 struct MovesMacApp: App {
+    private static let mainWindowID = "moves.main-window"
+    private static let aboutWindowID = "moves.about-window"
+
     @NSApplicationDelegateAdaptor(MovesMacAppDelegate.self) private var appDelegate
+    @Environment(\.openWindow) private var openWindow
     private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
     private let modelContainer: ModelContainer
 #if DEBUG
@@ -64,6 +69,9 @@ struct MovesMacApp: App {
     @State private var isDemoMode = false
     @StateObject private var importCoordinator: ImportCoordinator
     @StateObject private var routeFileImporter: RouteFileImporter
+    @StateObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
+    @AppStorage(RouteFileImportPreferenceKey.showsMacMenuBarStatus)
+    private var showsImportStatusInMenuBar = true
 
     init() {
         do {
@@ -83,6 +91,9 @@ struct MovesMacApp: App {
 #endif
             _importCoordinator = StateObject(wrappedValue: coordinator)
             _routeFileImporter = StateObject(wrappedValue: importer)
+            _importedRouteDataSummary = StateObject(
+                wrappedValue: ImportedRouteDataSummaryStore(modelContainer: container)
+            )
         } catch {
             fatalError("Could not create the Moves macOS model container: \(error)")
         }
@@ -95,10 +106,11 @@ struct MovesMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Moves") {
+        WindowGroup("Moves", id: Self.mainWindowID) {
             MovesMacBrowser(
                 importCoordinator: importCoordinator,
                 importer: routeFileImporter,
+                importedRouteDataSummary: importedRouteDataSummary,
                 isDemoMode: $isDemoMode
             )
         }
@@ -111,6 +123,19 @@ struct MovesMacApp: App {
             .environmentObject(routeFileImporter)
             .defaultSize(width: 1_180, height: 760)
             .commands {
+                CommandGroup(after: .windowList) {
+                    Button("Open Moves") {
+                        openWindow(id: Self.mainWindowID)
+                    }
+                    .keyboardShortcut("0", modifiers: .command)
+                }
+
+                CommandGroup(replacing: .appInfo) {
+                    Button("About Moves") {
+                        openWindow(id: Self.aboutWindowID)
+                    }
+                }
+
                 MovesMacCommands()
             }
 
@@ -120,10 +145,254 @@ struct MovesMacApp: App {
                 .environmentObject(importCoordinator)
         }
         .defaultSize(width: 880, height: 620)
+
+        Window("About Moves", id: Self.aboutWindowID) {
+            MovesMacAboutView()
+        }
+        .defaultSize(width: 420, height: 390)
+        .windowResizability(.contentSize)
+
+        MenuBarExtra(isInserted: importMenuBarInsertion) {
+            MacImportMenuBarView(
+                coordinator: importCoordinator,
+                importer: routeFileImporter
+            )
+        } label: {
+            MacImportMenuBarLabel(coordinator: importCoordinator)
+        }
+        .menuBarExtraStyle(.window)
+    }
+
+    private var importMenuBarInsertion: Binding<Bool> {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
+            return .constant(false)
+        }
+        // MenuBarExtra writes equivalent insertion values back during every AppKit menu update on
+        // macOS 27. Feeding those writes into AppStorage invalidates the complete app graph.
+        return Binding(
+            get: { showsImportStatusInMenuBar },
+            set: { _ in }
+        )
+    }
+}
+
+private extension ImportQueueSnapshot {
+    var menuBarImportJob: ImportJobRecord? {
+        let visibleStates: Set<ImportJobState> = [
+            .queued, .acquiring, .parsing, .importing, .postProcessing, .paused
+        ]
+        return jobs
+            .filter { visibleStates.contains($0.state) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .first
+    }
+}
+
+private struct MacImportMenuBarLabel: View {
+    @ObservedObject var coordinator: ImportCoordinator
+
+    var body: some View {
+        let job = coordinator.snapshot.menuBarImportJob
+        ImportCircularProgressView(
+            progress: job?.counters.progress,
+            isActive: job != nil && job?.state != .paused
+        )
+        .frame(width: 17, height: 17)
+        .accessibilityLabel(job == nil ? "No active import" : "Route import progress")
+    }
+}
+
+private struct MacImportMenuBarView: View {
+    @ObservedObject var coordinator: ImportCoordinator
+    @ObservedObject var importer: RouteFileImporter
+    @State private var isConfirmingStop = false
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            VStack(alignment: .leading, spacing: 14) {
+                if let job = coordinator.snapshot.menuBarImportJob {
+                    activeImport(job, now: timeline.date)
+                } else {
+                    idleView(now: timeline.date)
+                }
+            }
+            .padding(16)
+            .frame(width: 340)
+        }
+        .confirmationDialog(
+            "Stop this import?",
+            isPresented: $isConfirmingStop,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Import", role: .destructive) {
+                importer.cancel()
+            }
+            Button("Keep Importing", role: .cancel) {}
+        } message: {
+            Text("Progress for the current import will be discarded. Files already imported remain in your timeline.")
+        }
+    }
+
+    @ViewBuilder
+    private func activeImport(_ job: ImportJobRecord, now: Date) -> some View {
+        HStack(spacing: 12) {
+            ImportCircularProgressView(
+                progress: job.counters.progress,
+                isActive: job.state != .paused
+            )
+            .frame(width: 38, height: 38)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(statusTitle(for: job))
+                    .font(.headline)
+                Text(progressDescription(for: job))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            Spacer(minLength: 8)
+
+            if let progress = job.counters.progress {
+                Text(progress, format: .percent.precision(.fractionLength(0)))
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+            }
+        }
+
+        ProgressView(value: job.counters.progress ?? 0)
+
+        HStack(alignment: .top, spacing: 20) {
+            timeValue(title: "Current time", value: now.formatted(date: .omitted, time: .standard))
+            timeValue(title: "Estimated end", value: estimatedEndDescription(for: job, now: now))
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Files")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            let files = job.upcomingFileNames()
+            if files.isEmpty {
+                Label("Discovering files…", systemImage: "folder.badge.gearshape")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(files.enumerated()), id: \.offset) { index, fileName in
+                    HStack(spacing: 8) {
+                        Image(systemName: index == 0 ? "play.circle.fill" : "doc")
+                            .foregroundStyle(index == 0 ? Color.accentColor : Color.secondary)
+                            .frame(width: 16)
+                        Text(fileName)
+                            .font(index == 0 ? .subheadline.weight(.medium) : .subheadline)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Text(index == 0 ? "Current" : "Next")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                let additionalCount = max(
+                    job.source.originalFileNames.count - job.counters.completedItemCount - files.count,
+                    0
+                )
+                if additionalCount > 0 {
+                    Text("+\(additionalCount.formatted()) more")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 24)
+                }
+            }
+        }
+
+        HStack(spacing: 8) {
+            Button {
+                if job.state == .paused {
+                    importer.resume()
+                } else {
+                    importer.pause()
+                }
+            } label: {
+                Label(job.state == .paused ? "Resume" : "Pause", systemImage: job.state == .paused ? "play.fill" : "pause.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button(role: .destructive) {
+                isConfirmingStop = true
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func idleView(now: Date) -> some View {
+        VStack(spacing: 12) {
+            ImportCircularProgressView(progress: nil, isActive: false)
+                .frame(width: 38, height: 38)
+                .overlay {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            Text("No active import")
+                .font(.headline)
+            Text(now.formatted(date: .omitted, time: .standard))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func timeValue(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func statusTitle(for job: ImportJobRecord) -> String {
+        switch job.state {
+        case .queued: "Waiting to import"
+        case .acquiring: "Preparing files"
+        case .parsing: "Reading route file"
+        case .importing: "Importing routes"
+        case .postProcessing: "Finishing import"
+        case .paused: "Import paused"
+        default: "Route import"
+        }
+    }
+
+    private func progressDescription(for job: ImportJobRecord) -> String {
+        guard job.counters.itemCount > 0 else { return importer.importProgressText }
+        return "\(job.counters.completedItemCount.formatted()) of \(job.counters.itemCount.formatted()) files"
+    }
+
+    private func estimatedEndDescription(for job: ImportJobRecord, now: Date) -> String {
+        guard job.state != .paused else { return "Paused" }
+        guard let estimate = job.estimatedCompletionDate(at: now) else { return "Calculating…" }
+        return estimate.formatted(
+            date: Calendar.autoupdatingCurrent.isDate(estimate, inSameDayAs: now) ? .omitted : .abbreviated,
+            time: .shortened
+        )
     }
 }
 
 private enum MovesMacSettingsKey {
+    static let hasCompletedOnboarding = "Moves.mac.hasCompletedOnboarding"
     static let showsInspector = "Moves.mac.showsInspector"
     static let showsLargeMapMarkers = "showBigMapMarkers"
     static let selectsLatestDay = "Moves.mac.selectsLatestDay"
@@ -158,6 +427,7 @@ private enum MacTimelineExportFormat: CaseIterable, Hashable {
 private struct MovesMacCommandActions {
     let importRoutes: () -> Void
     let showImportQueue: () -> Void
+    let showOnboarding: () -> Void
     let selectToday: () -> Void
     let selectOlderDay: () -> Void
     let selectNewerDay: () -> Void
@@ -213,6 +483,11 @@ private struct MovesMacCommands: Commands {
                 Button("CSV…") { actions?.exportTimeline(.csv, .allDays) }
             }
             .disabled(actions?.canExportAllDays != true)
+        }
+
+        CommandGroup(after: .help) {
+            Button("Welcome to Moves") { actions?.showOnboarding() }
+                .disabled(actions == nil)
         }
 
         CommandMenu("History") {
@@ -315,6 +590,126 @@ private struct MacImportRequest: Identifiable {
     }
 }
 
+private struct MovesMacOnboardingPage: Identifiable {
+    let id: String
+    let title: String
+    let message: String
+    let details: String
+    let systemImage: String
+    let appStoreURL: URL?
+}
+
+private struct MovesMacOnboardingView: View {
+    let onComplete: () -> Void
+
+    @State private var selectedPage = 0
+
+    private let pages = [
+        MovesMacOnboardingPage(
+            id: "iphone",
+            title: "Your timeline starts on iPhone",
+            message: "Moves for iPhone records the places you visit and the trips between them.",
+            details: "Keep Moves running in the background for low-power daily tracking. Your timeline is stored privately and syncs through iCloud, so it can appear here on your Mac.",
+            systemImage: "iphone",
+            appStoreURL: URL(string: "https://apps.apple.com/de/app/moves-daily-log/id6762114616?l=en-GB")
+        ),
+        MovesMacOnboardingPage(
+            id: "import",
+            title: "Bring in routes from anywhere",
+            message: "Add route history from other apps and services with a file import.",
+            details: "Choose Import Route Files… from the File menu, drag files onto this window, or open them with Moves. Folders, ZIP archives, JSON, GPX, TCX, KML, and GeoJSON files are supported.",
+            systemImage: "square.and.arrow.down",
+            appStoreURL: nil
+        )
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Welcome to Moves", systemImage: "mappin.and.ellipse")
+                    .font(.title3.weight(.semibold))
+
+                Spacer()
+
+                Button("Skip") {
+                    onComplete()
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 12)
+
+            pageView(for: pages[selectedPage])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack(spacing: 6) {
+                ForEach(pages.indices, id: \.self) { index in
+                    Circle()
+                        .fill(index == selectedPage ? Color.accentColor : Color.secondary.opacity(0.3))
+                        .frame(width: 7, height: 7)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Page \(selectedPage + 1) of \(pages.count)")
+
+            HStack {
+                if selectedPage > 0 {
+                    Button("Back") {
+                        withAnimation { selectedPage -= 1 }
+                    }
+                }
+
+                Spacer()
+
+                Button(selectedPage == pages.count - 1 ? "Start using Moves" : "Continue") {
+                    if selectedPage == pages.count - 1 {
+                        onComplete()
+                    } else {
+                        withAnimation { selectedPage += 1 }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.top, 12)
+        }
+        .padding(28)
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 500, idealHeight: 540)
+    }
+
+    private func pageView(for page: MovesMacOnboardingPage) -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: page.systemImage)
+                .font(.system(size: 58, weight: .medium))
+                .foregroundStyle(.tint)
+                .frame(width: 116, height: 116)
+                .background(.tint.opacity(0.12), in: Circle())
+
+            VStack(spacing: 10) {
+                Text(page.title)
+                    .font(.title.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(page.message)
+                    .font(.title3.weight(.medium))
+                    .multilineTextAlignment(.center)
+
+                Text(page.details)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 560)
+
+                if let appStoreURL = page.appStoreURL {
+                    Link("Moves - daily log on the App Store", destination: appStoreURL)
+                        .font(.body.weight(.medium))
+                }
+            }
+        }
+        .padding(.horizontal, 28)
+    }
+}
+
 private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
     case general
     case appearance
@@ -351,7 +746,7 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "workspace window inspector latest day startup"
         case .appearance: "map marker route line elevation"
-        case .importDefaults: "route mapping transport overlap existing data"
+        case .importDefaults: "route mapping transport overlap existing data progress menu bar pause stop"
         case .export: "gpx geojson csv places comments"
         case .data: "timeline samples moves imports recovery storage"
         case .about: "version privacy application"
@@ -373,6 +768,7 @@ private struct MovesMacSettingsView: View {
     @AppStorage(MovesMacSettingsKey.defaultImportMappingMode) private var defaultMappingMode = RouteFileImportMappingMode.automatic.rawValue
     @AppStorage(MovesMacSettingsKey.defaultImportTransportMode) private var defaultTransportMode = TransportMode.unknown.rawValue
     @AppStorage(MovesMacSettingsKey.defaultImportExistingDataPolicy) private var defaultExistingDataPolicy = RouteFileExistingDataPolicy.skipDate.rawValue
+    @AppStorage(RouteFileImportPreferenceKey.showsMacMenuBarStatus) private var showsImportStatusInMenuBar = true
     @AppStorage(MovesMacSettingsKey.exportIncludesPlaces) private var exportIncludesPlaces = true
     @AppStorage(MovesMacSettingsKey.exportIncludesComments) private var exportIncludesComments = true
 
@@ -454,6 +850,13 @@ private struct MovesMacSettingsView: View {
 
         case .importDefaults:
             settingsForm(title: section.title) {
+                Section("Progress") {
+                    Toggle("Show import status in the menu bar", isOn: $showsImportStatusInMenuBar)
+                    Text("The menu bar item shows the current and upcoming files, progress, the estimated completion time, and controls to pause or stop an import.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Route Mapping") {
                     Picker("Default mapping", selection: $defaultMappingMode) {
                         ForEach(RouteFileImportMappingMode.allCases) { mode in
@@ -533,10 +936,14 @@ private struct MovesMacSettingsView: View {
                             .frame(width: 64, height: 64)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Moves").font(.title2.weight(.semibold))
-                            Text(versionDescription).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 8)
+
+                    CreatedByView(
+                        gitURL: URL(string: "https://github.com/holgerkrupp/Moves")
+                    )
+                    .padding(.vertical, 12)
                 }
 
                 Section("Privacy") {
@@ -558,10 +965,29 @@ private struct MovesMacSettingsView: View {
         .navigationTitle(title)
     }
 
-    private var versionDescription: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
-        return "Version \(version) (\(build))"
+}
+
+private struct MovesMacAboutView: View {
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .frame(width: 80, height: 80)
+
+            Text("Moves")
+                .font(.title.weight(.semibold))
+
+            CreatedByView(
+                gitURL: URL(string: "https://github.com/holgerkrupp/Moves")
+            )
+
+            Text("Your location history stays in your private app data and iCloud container unless you explicitly import, export, or configure an external service.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(28)
+        .frame(width: 420)
     }
 }
 
@@ -569,14 +995,14 @@ private struct MovesMacBrowser: View {
     @ObservedObject private var importCoordinator: ImportCoordinator
     @ObservedObject private var externalRouteOpenRouter = MacRouteOpenRouter.shared
     @ObservedObject private var importer: RouteFileImporter
+    @ObservedObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
     @Binding private var isDemoMode: Bool
     @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
-    @Query private var allSamples: [LocationSample]
-    @Query private var allMoves: [MoveSegment]
     @Query(sort: \DayTimeline.dayStart, order: .reverse) private var timelines: [DayTimeline]
     @State private var selection: MacSelection?
-    @AppStorage(MovesMacSettingsKey.showsInspector) private var isInspectorPresented = true
+    @AppStorage(MovesMacSettingsKey.hasCompletedOnboarding) private var hasCompletedOnboarding = false
+    @State private var isInspectorPresented: Bool
     @AppStorage(MovesMacSettingsKey.selectsLatestDay) private var selectsLatestDay = true
     @AppStorage(MovesMacSettingsKey.defaultImportMappingMode) private var defaultImportMappingMode = RouteFileImportMappingMode.automatic.rawValue
     @AppStorage(MovesMacSettingsKey.defaultImportTransportMode) private var defaultImportTransportMode = TransportMode.unknown.rawValue
@@ -585,6 +1011,7 @@ private struct MovesMacBrowser: View {
     @AppStorage(MovesMacSettingsKey.exportIncludesComments) private var exportIncludesComments = true
     @State private var searchText = ""
     @State private var isShowingDatePicker = false
+    @State private var isShowingOnboarding = false
     @State private var isShowingImportQueue = false
     @State private var importRequest: MacImportRequest?
     @State private var isShowingFileImporter = false
@@ -600,15 +1027,28 @@ private struct MovesMacBrowser: View {
     @State private var isConfirmingDayDeletion = false
     @State private var deletionErrorMessage: String?
 
-    init(importCoordinator: ImportCoordinator, importer: RouteFileImporter, isDemoMode: Binding<Bool>) {
+    init(
+        importCoordinator: ImportCoordinator,
+        importer: RouteFileImporter,
+        importedRouteDataSummary: ImportedRouteDataSummaryStore,
+        isDemoMode: Binding<Bool>
+    ) {
         _importCoordinator = ObservedObject(wrappedValue: importCoordinator)
         _importer = ObservedObject(wrappedValue: importer)
+        _importedRouteDataSummary = ObservedObject(wrappedValue: importedRouteDataSummary)
         _isDemoMode = isDemoMode
+        _isInspectorPresented = State(
+            initialValue: UserDefaults.standard.object(forKey: MovesMacSettingsKey.showsInspector) as? Bool ?? true
+        )
     }
 
-    private var importedSampleCount: Int { allSamples.filter { $0.source == .fileRouteImport }.count }
-    private var importedMoveCount: Int { allMoves.filter { $0.samples.contains { $0.source == .fileRouteImport } }.count }
-    private var recordedTimelines: [DayTimeline] { timelines.filter(\.hasRecordedActivity) }
+    private var importedDataSummary: ImportedRouteDataSummary {
+        isDemoMode ? .empty : importedRouteDataSummary.summary
+    }
+    /// The query already contains only lightweight day records. Do not filter it in `body`: even
+    /// reading one managed property per item becomes expensive when SwiftUI evaluates this getter
+    /// repeatedly while constructing a large sidebar.
+    private var recordedTimelines: [DayTimeline] { timelines }
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -696,7 +1136,7 @@ private struct MovesMacBrowser: View {
             }
         }
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search places, moves, or dates")
-        .inspector(isPresented: $isInspectorPresented) {
+        .inspector(isPresented: inspectorPresentation) {
             MacInspector(
                 selection: selection,
                 timelines: timelines,
@@ -707,12 +1147,12 @@ private struct MovesMacBrowser: View {
         }
         .onChange(of: timelines) { _, current in
             if case let .day(key) = selection,
-               !current.contains(where: { $0.dayKey == key && $0.hasRecordedActivity }) {
+               !current.contains(where: { $0.dayKey == key }) {
                 selection = nil
             }
             if selection == nil,
                selectsLatestDay,
-               let latest = current.first(where: \.hasRecordedActivity) {
+               let latest = current.first {
                 selection = .day(latest.dayKey)
             }
         }
@@ -721,6 +1161,15 @@ private struct MovesMacBrowser: View {
             if selection == nil, selectsLatestDay, let latest = recordedTimelines.first {
                 selection = .day(latest.dayKey)
             }
+            if !hasCompletedOnboarding {
+                isShowingOnboarding = true
+            }
+        }
+        .task {
+            guard importedRouteDataSummary.daySummaries.isEmpty else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            importedRouteDataSummary.refresh()
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -748,7 +1197,7 @@ private struct MovesMacBrowser: View {
                 )
 
                 Button {
-                    isInspectorPresented.toggle()
+                    toggleInspector()
                 } label: {
                     Label(
                         isInspectorPresented ? "Hide Inspector" : "Show Inspector",
@@ -764,12 +1213,13 @@ private struct MovesMacBrowser: View {
             MovesMacCommandActions(
                 importRoutes: beginImport,
                 showImportQueue: { isShowingImportQueue = true },
+                showOnboarding: { isShowingOnboarding = true },
                 selectToday: selectToday,
                 selectOlderDay: selectOlderDay,
                 selectNewerDay: selectNewerDay,
                 showImportedData: { selection = .imported },
                 showFailedImports: { selection = .recovery },
-                toggleInspector: { isInspectorPresented.toggle() },
+                toggleInspector: toggleInspector,
                 exportTimeline: exportTimeline,
                 toggleDemoMode: { isDemoMode.toggle() },
                 canSelectToday: todayTimeline != nil,
@@ -807,6 +1257,12 @@ private struct MovesMacBrowser: View {
         .popover(isPresented: $isShowingImportQueue) {
             ImportQueueView(coordinator: importCoordinator)
                 .frame(minWidth: 420, minHeight: 420)
+        }
+        .sheet(isPresented: $isShowingOnboarding) {
+            MovesMacOnboardingView {
+                hasCompletedOnboarding = true
+                isShowingOnboarding = false
+            }
         }
         .sheet(item: $importRequest) { request in
             VStack(spacing: 0) {
@@ -1128,7 +1584,11 @@ private struct MovesMacBrowser: View {
                 }
             } else {
                 Section("Library") {
-                    MacSidebarRow(title: "Imported", subtitle: "\(importedMoveCount) routes · \(importedSampleCount) samples", systemImage: "arrow.down.to.line.compact")
+                    MacSidebarRow(
+                        title: "Imported",
+                        subtitle: "\(importedDataSummary.moveCount) routes · \(importedDataSummary.sampleCount) samples",
+                        systemImage: "arrow.down.to.line.compact"
+                    )
                         .tag(MacSelection.imported)
                     MacSidebarRow(title: "Failed Imports", subtitle: recoverySubtitle, systemImage: "exclamationmark.triangle")
                         .tag(MacSelection.recovery)
@@ -1181,7 +1641,7 @@ private struct MovesMacBrowser: View {
         .overlay {
             if isSearching && filteredTimelines.isEmpty {
                 ContentUnavailableView.search(text: searchText)
-            } else if recordedTimelines.isEmpty && importedSampleCount == 0 {
+            } else if recordedTimelines.isEmpty && importedDataSummary.sampleCount == 0 {
                 ContentUnavailableView("No History", systemImage: "map", description: Text("Timeline data shared through your private iCloud container will appear here."))
             }
         }
@@ -1194,7 +1654,27 @@ private struct MovesMacBrowser: View {
         return missing == count ? "\(count) missing information" : "\(count) unresolved · \(missing) missing information"
     }
 
-    private func summary(for timeline: DayTimeline) -> String { "\(timeline.places.count) places · \(timeline.moves.count) moves · \(timeline.samples.count) samples" }
+    /// `inspector(isPresented:)` alternates writes to its presentation binding during layout on
+    /// macOS 27. Accepting those writes invalidates the complete navigation hierarchy in a tight
+    /// loop. Treat the binding as an input and let only explicit app actions change the state.
+    private var inspectorPresentation: Binding<Bool> {
+        Binding(
+            get: { isInspectorPresented },
+            set: { _ in }
+        )
+    }
+
+    private func toggleInspector() {
+        isInspectorPresented.toggle()
+        UserDefaults.standard.set(isInspectorPresented, forKey: MovesMacSettingsKey.showsInspector)
+    }
+
+    private func summary(for timeline: DayTimeline) -> String {
+        guard let summary = importedRouteDataSummary.daySummaries[timeline.dayKey] else {
+            return "Calculating in background…"
+        }
+        return "\(summary.placeCount) places · \(summary.moveCount) moves · \(summary.sampleCount) samples"
+    }
 
 }
 
@@ -1250,10 +1730,13 @@ private struct MacDayWorkspace: View {
     let exportActivity: (MacSelection, MacTimelineExportFormat) -> Void
     @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
-    @State private var camera: MapCameraPosition = .automatic
-
     private var coordinates: [CLLocationCoordinate2D] {
         day.places.map(\.coordinate) + day.samples.map(\.coordinate) + day.moves.flatMap { RouteCoordinateStorage.decode($0.manualRouteCoordinatesData ?? $0.routeCacheCoordinatesData) }
+    }
+
+    private var initialMapRect: MKMapRect? {
+        guard !coordinates.isEmpty else { return nil }
+        return .bounding(coordinates: coordinates)
     }
 
     private var cameraRefreshKey: String {
@@ -1263,20 +1746,12 @@ private struct MacDayWorkspace: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MacDayMap(day: day, camera: $camera).frame(minHeight: 260, idealHeight: 390, maxHeight: .infinity)
+            MacDayMap(day: day, initialVisibleRect: initialMapRect)
+                .id(cameraRefreshKey)
+                .frame(minHeight: 260, idealHeight: 390, maxHeight: .infinity)
             Divider()
             activityList
         }
-        .onAppear(perform: reframeMap)
-        .onChange(of: cameraRefreshKey) { _, _ in reframeMap() }
-    }
-
-    private func reframeMap() {
-        guard !coordinates.isEmpty else {
-            camera = .automatic
-            return
-        }
-        camera = .rect(MKMapRect.bounding(coordinates: coordinates))
     }
 
     private var activityList: some View {
@@ -1408,12 +1883,27 @@ private struct MacDayMap: View {
     }
 
     let day: DayTimeline
-    @Binding var camera: MapCameraPosition
+    let initialVisibleRect: MKMapRect?
     @Environment(\.modelContext) private var modelContext
-    @AppStorage(MovesMacSettingsKey.showsLargeMapMarkers) private var showsLargeMapMarkers = false
-    @AppStorage(MovesMacSettingsKey.showsMapElevation) private var showsMapElevation = true
-    @AppStorage(MovesMacSettingsKey.routeLineWidth) private var routeLineWidth = 4.0
+    @State private var showsLargeMapMarkers: Bool
+    @State private var showsMapElevation: Bool
+    @State private var routeLineWidth: Double
     @State private var matchedRoutes: [UUID: MatchedRoute] = [:]
+
+    init(day: DayTimeline, initialVisibleRect: MKMapRect?) {
+        self.day = day
+        self.initialVisibleRect = initialVisibleRect
+        let defaults = UserDefaults.standard
+        _showsLargeMapMarkers = State(
+            initialValue: defaults.object(forKey: MovesMacSettingsKey.showsLargeMapMarkers) as? Bool ?? false
+        )
+        _showsMapElevation = State(
+            initialValue: defaults.object(forKey: MovesMacSettingsKey.showsMapElevation) as? Bool ?? true
+        )
+        _routeLineWidth = State(
+            initialValue: (defaults.object(forKey: MovesMacSettingsKey.routeLineWidth) as? NSNumber)?.doubleValue ?? 4
+        )
+    }
 
     private var routeMatchingKey: String {
         day.moves.map { move in
@@ -1423,23 +1913,58 @@ private struct MacDayMap: View {
         .joined(separator: ";")
     }
 
-    var body: some View {
-        Map(position: $camera) {
-            ForEach(day.places) { place in
-                Annotation(place.displayTitle, coordinate: place.coordinate, anchor: .bottom) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(showsLargeMapMarkers ? .title2 : .body)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .blue)
-                }
-            }
-            ForEach(day.moves) { move in
-                let route = displayedRoute(for: move)
-                if route.count > 1 { MapPolyline(coordinates: route).stroke(routeColor(move.transportMode), lineWidth: routeLineWidth) }
-                else if let start = move.startPlace?.coordinate, let end = move.endPlace?.coordinate { MapPolyline(coordinates: [start, end]).stroke(routeColor(move.transportMode), style: StrokeStyle(lineWidth: max(2, routeLineWidth - 1), dash: [6, 5])) }
-            }
+    private var renderedPlaces: [MacNativeMap.Place] {
+        day.places.map {
+            MacNativeMap.Place(
+                id: $0.id,
+                title: $0.displayTitle,
+                coordinate: $0.coordinate,
+                usesLargeMarker: showsLargeMapMarkers
+            )
         }
-        .mapStyle(.standard(elevation: showsMapElevation ? .realistic : .flat))
+    }
+
+    private var renderedRoutes: [MacNativeMap.Route] {
+        day.moves.compactMap { move in
+            let route = displayedRoute(for: move)
+            if route.count > 1 {
+                return MacNativeMap.Route(
+                    id: move.id,
+                    coordinates: route,
+                    color: routeNSColor(move.transportMode),
+                    lineWidth: routeLineWidth,
+                    isDashed: false
+                )
+            }
+            if let start = move.startPlace?.coordinate, let end = move.endPlace?.coordinate {
+                return MacNativeMap.Route(
+                    id: move.id,
+                    coordinates: [start, end],
+                    color: routeNSColor(move.transportMode),
+                    lineWidth: max(2, routeLineWidth - 1),
+                    isDashed: true
+                )
+            }
+            return nil
+        }
+    }
+
+    private var renderedContentID: String {
+        let resolvedKeys = matchedRoutes.keys.map(\.uuidString).sorted().joined(separator: ",")
+        return "\(routeMatchingKey)|\(resolvedKeys)|\(showsLargeMapMarkers)|\(showsMapElevation)|\(routeLineWidth)"
+    }
+
+    var body: some View {
+        // SwiftUI's Map bridge on macOS 27 repeatedly re-applies an equivalent configuration,
+        // invalidating the complete observation graph and leaking memory. The native map wrapper
+        // below applies content only when this stable identifier changes.
+        MacNativeMap(
+            contentID: renderedContentID,
+            places: renderedPlaces,
+            routes: renderedRoutes,
+            initialVisibleRect: initialVisibleRect,
+            showsElevation: showsMapElevation
+        )
         .overlay(alignment: .topLeading) {
             Label("\(day.places.count) places · \(day.moves.count) moves", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                 .font(.caption.weight(.medium)).padding(8).background(.regularMaterial, in: Capsule()).padding(12)
@@ -1447,6 +1972,19 @@ private struct MacDayMap: View {
         .task(id: routeMatchingKey) {
             await resolveRoutes()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            refreshMapSettings()
+        }
+    }
+
+    private func refreshMapSettings() {
+        let defaults = UserDefaults.standard
+        let largeMarkers = defaults.object(forKey: MovesMacSettingsKey.showsLargeMapMarkers) as? Bool ?? false
+        let elevation = defaults.object(forKey: MovesMacSettingsKey.showsMapElevation) as? Bool ?? true
+        let lineWidth = (defaults.object(forKey: MovesMacSettingsKey.routeLineWidth) as? NSNumber)?.doubleValue ?? 4
+        if showsLargeMapMarkers != largeMarkers { showsLargeMapMarkers = largeMarkers }
+        if showsMapElevation != elevation { showsMapElevation = elevation }
+        if routeLineWidth != lineWidth { routeLineWidth = lineWidth }
     }
 
     private func displayedRoute(for move: MoveSegment) -> [CLLocationCoordinate2D] {
@@ -1479,6 +2017,117 @@ private struct MacDayMap: View {
 
         if modelContext.hasChanges {
             try? modelContext.save()
+        }
+    }
+}
+
+private struct MacNativeMap: NSViewRepresentable {
+    struct Place {
+        let id: UUID
+        let title: String
+        let coordinate: CLLocationCoordinate2D
+        let usesLargeMarker: Bool
+    }
+
+    struct Route {
+        let id: UUID
+        let coordinates: [CLLocationCoordinate2D]
+        let color: NSColor
+        let lineWidth: CGFloat
+        let isDashed: Bool
+    }
+
+    private final class PlaceAnnotation: NSObject, MKAnnotation {
+        let id: UUID
+        let title: String?
+        let coordinate: CLLocationCoordinate2D
+        let usesLargeMarker: Bool
+
+        init(place: Place) {
+            id = place.id
+            title = place.title
+            coordinate = place.coordinate
+            usesLargeMarker = place.usesLargeMarker
+        }
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate {
+        struct RouteStyle {
+            let color: NSColor
+            let lineWidth: CGFloat
+            let isDashed: Bool
+        }
+
+        var appliedContentID: String?
+        var routeStyles: [ObjectIdentifier: RouteStyle] = [:]
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+            guard let annotation = annotation as? PlaceAnnotation else { return nil }
+            let identifier = "MovesPlaceMarker"
+            let marker = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
+                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            marker.annotation = annotation
+            marker.markerTintColor = .systemBlue
+            marker.glyphImage = NSImage(
+                systemSymbolName: annotation.usesLargeMarker ? "mappin.circle.fill" : "mappin",
+                accessibilityDescription: annotation.title
+            )
+            marker.canShowCallout = true
+            return marker
+        }
+
+        func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
+            guard let polyline = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            if let style = routeStyles[ObjectIdentifier(polyline)] {
+                renderer.strokeColor = style.color
+                renderer.lineWidth = style.lineWidth
+                if style.isDashed { renderer.lineDashPattern = [6, 5] }
+            }
+            return renderer
+        }
+    }
+
+    let contentID: String
+    let places: [Place]
+    let routes: [Route]
+    let initialVisibleRect: MKMapRect?
+    let showsElevation: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> MKMapView {
+        let mapView = MKMapView(frame: .zero)
+        mapView.delegate = context.coordinator
+        mapView.showsCompass = true
+        mapView.showsScale = true
+        return mapView
+    }
+
+    func updateNSView(_ mapView: MKMapView, context: Context) {
+        guard context.coordinator.appliedContentID != contentID else { return }
+        context.coordinator.appliedContentID = contentID
+
+        mapView.preferredConfiguration = MKStandardMapConfiguration(
+            elevationStyle: showsElevation ? .realistic : .flat
+        )
+        mapView.removeAnnotations(mapView.annotations)
+        mapView.removeOverlays(mapView.overlays)
+        context.coordinator.routeStyles.removeAll(keepingCapacity: true)
+
+        mapView.addAnnotations(places.map(PlaceAnnotation.init))
+        for route in routes where route.coordinates.count > 1 {
+            let polyline = MKPolyline(coordinates: route.coordinates, count: route.coordinates.count)
+            context.coordinator.routeStyles[ObjectIdentifier(polyline)] = .init(
+                color: route.color,
+                lineWidth: route.lineWidth,
+                isDashed: route.isDashed
+            )
+            mapView.addOverlay(polyline)
+        }
+
+        if let initialVisibleRect {
+            mapView.setVisibleMapRect(initialVisibleRect, animated: false)
         }
     }
 }
@@ -1923,8 +2572,16 @@ private enum MacTimelineExporter {
     }
 }
 
-private func routeColor(_ mode: TransportMode) -> Color {
-    switch mode { case .walking, .running: .green; case .cycling: .orange; case .train: .purple; case .plane: .pink; case .boat: .teal; case .stationary: .gray; default: .blue }
+private func routeNSColor(_ mode: TransportMode) -> NSColor {
+    switch mode {
+    case .walking, .running: .systemGreen
+    case .cycling: .systemOrange
+    case .train: .systemPurple
+    case .plane: .systemPink
+    case .boat: .systemTeal
+    case .stationary: .systemGray
+    default: .systemBlue
+    }
 }
 
 private func formatDistance(_ meters: Double) -> String { MovesMeasurementFormatter.distance(meters: meters) }

@@ -195,6 +195,9 @@
         }
       }
     },
+    "+%@ more" : {
+
+    },
     "1 hour" : {
 
     },
@@ -208,6 +211,9 @@
 
     },
     "A route is needed to share this move as GPX" : {
+
+    },
+    "About Moves" : {
 
     },
     "Accuracy" : {
@@ -273,10 +279,19 @@
     "Auto-off %@." : {
 
     },
+    "Automatic Route Import" : {
+
+    },
     "Automatically fill missing moves" : {
 
     },
+    "Automatically import new route files" : {
+
+    },
     "Automatically upload new points" : {
+
+    },
+    "Back" : {
 
     },
     "Back up yesterday every night" : {
@@ -303,6 +318,9 @@
     "Cancel" : {
 
     },
+    "Cancel track split" : {
+
+    },
     "Captured location" : {
 
     },
@@ -313,6 +331,9 @@
 
     },
     "Choose a day from the sidebar to browse your location history." : {
+
+    },
+    "Choose Another Point" : {
 
     },
     "Choose Date" : {
@@ -345,10 +366,16 @@
     "Contains imported data" : {
 
     },
+    "Continue" : {
+
+    },
     "Controls on left in landscape" : {
 
     },
     "Copied Raw Data" : {
+
+    },
+    "Copies the complete selection into temporary storage before importing." : {
 
     },
     "Copy Raw Data" : {
@@ -378,6 +405,9 @@
     "Could Not Save Location" : {
 
     },
+    "Could Not Split Track" : {
+
+    },
     "Could Not Update Statistics" : {
 
     },
@@ -396,9 +426,6 @@
     "Created" : {
 
     },
-    "Created in Buxtehude by" : {
-
-    },
     "CSV" : {
 
     },
@@ -406,6 +433,9 @@
 
     },
     "CSV…" : {
+
+    },
+    "Current" : {
 
     },
     "Custom device name (optional)" : {
@@ -451,6 +481,9 @@
 
     },
     "Delete all data for the selected day" : {
+
+    },
+    "Delete and Merge Routes" : {
 
     },
     "Delete Day" : {
@@ -510,6 +543,9 @@
     "Disconnect %@?" : {
 
     },
+    "Discovering files…" : {
+
+    },
     "Display" : {
 
     },
@@ -546,7 +582,7 @@
     "End" : {
 
     },
-    "Every location sample stored in Moves will be sent to %@. Repeating this action may create duplicate points if the server does not deduplicate them." : {
+    "Every mapped route and location point stored in Moves will be sent to %@. Repeating this action may create duplicate points if the server does not deduplicate them." : {
 
     },
     "Exclude from Calculations" : {
@@ -556,6 +592,9 @@
 
     },
     "Excluded from commute calculations" : {
+
+    },
+    "Existing data" : {
 
     },
     "Existing Timeline Data" : {
@@ -600,10 +639,16 @@
     "Failed Imports" : {
 
     },
-    "Failed Imports (%lld)" : {
+    "Failed Imports & Reports" : {
+
+    },
+    "File preparation" : {
 
     },
     "File Route Import" : {
+
+    },
+    "Files" : {
 
     },
     "Files with ambiguous or missing timestamps will appear here before any timeline data is written." : {
@@ -628,6 +673,15 @@
 
     },
     "for %@" : {
+
+    },
+    "Forget Folder" : {
+
+    },
+    "Forget this folder" : {
+
+    },
+    "Forget watch folder?" : {
 
     },
     "Format" : {
@@ -732,6 +786,9 @@
     "Import Route Files…" : {
 
     },
+    "Imported %lld new route file(s)." : {
+
+    },
     "Imported Data" : {
 
     },
@@ -792,6 +849,9 @@
     "Jump to Date" : {
 
     },
+    "Keep Importing" : {
+
+    },
     "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
 
     },
@@ -802,6 +862,9 @@
 
     },
     "Last 7 days" : {
+
+    },
+    "Last scan: %@" : {
 
     },
     "Last successful upload %@." : {
@@ -910,7 +973,16 @@
     "Moves" : {
 
     },
+    "Moves - daily log on the App Store" : {
+
+    },
     "Moves · %@" : {
+
+    },
+    "Moves keeps the 10 most recent reports on this device." : {
+
+    },
+    "Moves keeps the original phone samples, adds detailed GPS files, and prefers the imported route when displaying the move." : {
 
     },
     "Moves needs notification permission to send a stop alert. You can allow it in Settings." : {
@@ -931,6 +1003,9 @@
     "Moves will merge old duplicate places and moves. For duplicate stays at the same location/time, it keeps the one that best fits surrounding moves (or the longer stay if there is no move context). A snapshot is saved first so you can undo." : {
 
     },
+    "Moves will stop scanning this folder. Already imported timeline data will remain." : {
+
+    },
     "Needs attention" : {
 
     },
@@ -940,10 +1015,16 @@
     "Newest first" : {
 
     },
+    "Next" : {
+
+    },
     "Next %@" : {
 
     },
     "Next Day" : {
+
+    },
+    "No active import" : {
 
     },
     "No activity" : {
@@ -1027,6 +1108,9 @@
     "Open in Apple Health" : {
 
     },
+    "Open Moves" : {
+
+    },
     "Open Settings" : {
 
     },
@@ -1041,6 +1125,16 @@
     },
     "Overall progress" : {
 
+    },
+    "Page %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Page %1$lld of %2$lld"
+          }
+        }
+      }
     },
     "Pause" : {
 
@@ -1084,7 +1178,13 @@
     "Privacy" : {
 
     },
+    "Progress" : {
+
+    },
     "Progress for (job.displayName)" : {
+
+    },
+    "Progress for the current import will be discarded. Files already imported remain in your timeline." : {
 
     },
     "Proximity radius" : {
@@ -1109,6 +1209,9 @@
 
     },
     "Recent Dates" : {
+
+    },
+    "Recent failed-file reports" : {
 
     },
     "Record" : {
@@ -1190,6 +1293,9 @@
     "Route files you import will appear here." : {
 
     },
+    "Route import progress" : {
+
+    },
     "Route line width" : {
 
     },
@@ -1239,6 +1345,9 @@
 
     },
     "Select the latest recorded day when opening a window" : {
+
+    },
+    "Selected split point" : {
 
     },
     "Server" : {
@@ -1292,6 +1401,9 @@
     "Show Import Queue" : {
 
     },
+    "Show import status in the menu bar" : {
+
+    },
     "Show inspector" : {
 
     },
@@ -1322,6 +1434,9 @@
     "Simplify Route" : {
 
     },
+    "Skip" : {
+
+    },
     "Skip dates that already contain data" : {
 
     },
@@ -1329,6 +1444,15 @@
 
     },
     "Source" : {
+
+    },
+    "Split track" : {
+
+    },
+    "Split Track" : {
+
+    },
+    "Split Track Here?" : {
 
     },
     "Start" : {
@@ -1346,6 +1470,9 @@
     "Start Route Tracking" : {
 
     },
+    "Start using Moves" : {
+
+    },
     "Started" : {
 
     },
@@ -1361,13 +1488,22 @@
     "Statistics & Share" : {
 
     },
+    "Stop" : {
+
+    },
     "Stop editing route" : {
+
+    },
+    "Stop Import" : {
 
     },
     "Stop Real Route Tracking" : {
 
     },
     "Stop Route Tracking" : {
+
+    },
+    "Stop this import?" : {
 
     },
     "Stops frequent GPS tracking and returns to low-energy tracking." : {
@@ -1388,6 +1524,9 @@
     "Tap images to select several, or use the share button on a single design. Statistics are calculated entirely on this device." : {
 
     },
+    "Tap the track where the second activity should begin" : {
+
+    },
     "Tap to open settings. Touch and hold to start tracking." : {
 
     },
@@ -1400,16 +1539,25 @@
     "Testing…" : {
 
     },
+    "The folder is scanned when Moves becomes active and opportunistically in the background. iOS may delay background scans, so imports are automatic but not necessarily immediate." : {
+
+    },
     "The JSON below includes the persisted move, its endpoints, and every recorded location sample." : {
 
     },
     "The last %@" : {
 
     },
+    "The menu bar item shows the current and upcoming files, progress, the estimated completion time, and controls to pause or stop an import." : {
+
+    },
     "The quarantined file will be deleted. No timeline data has been written from it." : {
 
     },
     "The saved server and credentials will be removed. Data already uploaded to %@ is not deleted." : {
+
+    },
+    "The two activities will meet at %@. The time is interpolated from the surrounding recorded points." : {
 
     },
     "There are no recorded places or movements in this time span." : {
@@ -1541,7 +1689,7 @@
     "Upload New Points Now" : {
 
     },
-    "Uploading location points…" : {
+    "Uploading routes and location points…" : {
 
     },
     "URLs may include a port or path. HTTPS is required outside your local network; local HTTP hosts are supported." : {
@@ -1559,10 +1707,16 @@
     "Used by Places Map, All Tracks, Heat Map, and Calendar." : {
 
     },
+    "Uses only enough temporary space for the file currently being imported." : {
+
+    },
     "Visited %@" : {
 
     },
     "Visited Place" : {
+
+    },
+    "Welcome to Moves" : {
 
     },
     "When imported times overlap" : {

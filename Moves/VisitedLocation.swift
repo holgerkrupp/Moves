@@ -258,16 +258,97 @@ extension DayTimeline {
 @MainActor
 enum TimelineDeletion {
     static func delete(place: VisitPlace, in context: ModelContext, undoManager: UndoManager?) throws {
+        try delete(place: place, mergeAdjacentRoutes: false, in: context, undoManager: undoManager)
+    }
+
+    static func canMergeAdjacentRoutes(for place: VisitPlace) -> Bool {
+        adjacentMoves(for: place) != nil
+    }
+
+    static func delete(
+        place: VisitPlace,
+        mergeAdjacentRoutes: Bool,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws {
+        if mergeAdjacentRoutes, let (incoming, outgoing) = adjacentMoves(for: place) {
+            let payload = DeletedTimelineMergedPlace(
+                place: place,
+                incoming: incoming,
+                outgoing: outgoing
+            )
+
+            let incomingCoordinates = MoveRouteGeometry.rawCoordinates(for: incoming)
+            let outgoingCoordinates = MoveRouteGeometry.rawCoordinates(for: outgoing)
+            let shouldStoreMergedRoute = incoming.hasManualRouteCoordinates || outgoing.hasManualRouteCoordinates
+            let outgoingEndPlace = outgoing.endPlace
+            let outgoingEndDate = outgoing.endDate
+            let outgoingDistance = outgoing.distanceMeters
+            let outgoingStepCount = outgoing.stepCount
+            let outgoingTransportMode = outgoing.transportMode
+            let outgoingSamples = outgoing.samples
+
+            context.delete(outgoing)
+            incoming.endPlace = outgoingEndPlace
+            incoming.endDate = max(incoming.endDate, outgoingEndDate)
+            incoming.distanceMeters += max(outgoingDistance, 0)
+            if let lhs = incoming.stepCount, let rhs = outgoingStepCount {
+                incoming.stepCount = lhs + rhs
+            } else {
+                incoming.stepCount = nil
+            }
+            if incoming.transportMode != outgoingTransportMode {
+                incoming.transportMode = .unknown
+            }
+            incoming.clearCachedRouteCoordinates()
+
+            for sample in outgoingSamples {
+                sample.moveSegment = incoming
+            }
+
+            if shouldStoreMergedRoute {
+                let mergedCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+                    incomingCoordinates + outgoingCoordinates,
+                    minimumDistanceMeters: 0
+                )
+                if mergedCoordinates.count > 1 {
+                    incoming.storeManualRouteCoordinates(mergedCoordinates)
+                }
+            }
+
+            context.delete(place)
+            try context.save()
+            notifyImportedSummaryChanged()
+            registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Place and Merge Routes")
+            return
+        }
+
         let payload = DeletedTimelinePlace(place: place)
         context.delete(place)
         try context.save()
+        notifyImportedSummaryChanged()
         registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Place")
+    }
+
+    private static func adjacentMoves(for place: VisitPlace) -> (incoming: MoveSegment, outgoing: MoveSegment)? {
+        guard let incoming = place.incomingMoves
+            .filter({ $0.dayTimeline?.dayKey == place.dayTimeline?.dayKey })
+            .max(by: { $0.endDate < $1.endDate }),
+              let outgoing = place.outgoingMoves
+                .filter({ $0.dayTimeline?.dayKey == place.dayTimeline?.dayKey })
+                .min(by: { $0.startDate < $1.startDate }),
+              incoming.id != outgoing.id else {
+            return nil
+        }
+
+        return (incoming, outgoing)
     }
 
     static func delete(move: MoveSegment, in context: ModelContext, undoManager: UndoManager?) throws {
         let payload = DeletedTimelineMove(move: move)
         context.delete(move)
         try context.save()
+        notifyImportedSummaryChanged()
         registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Move")
     }
 
@@ -275,6 +356,7 @@ enum TimelineDeletion {
         let payload = DeletedTimelineSample(sample: sample)
         context.delete(sample)
         try context.save()
+        notifyImportedSummaryChanged()
         registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Location Sample")
     }
 
@@ -282,6 +364,7 @@ enum TimelineDeletion {
         let payload = DeletedTimelineDay(day: day)
         context.delete(day)
         try context.save()
+        notifyImportedSummaryChanged()
         registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Day")
     }
 
@@ -295,8 +378,13 @@ enum TimelineDeletion {
         undoManager.registerUndo(withTarget: context) { context in
             payload.restore(in: context)
             try? context.save()
+            notifyImportedSummaryChanged()
         }
         undoManager.setActionName(actionName)
+    }
+
+    private static func notifyImportedSummaryChanged() {
+        NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
     }
 }
 
@@ -347,6 +435,24 @@ private struct DeletedTimelinePlace: TimelineDeletionUndoPayload {
         context.insert(place)
         outgoingMoves.forEach { $0.startPlace = place }
         incomingMoves.forEach { $0.endPlace = place }
+    }
+}
+
+private struct DeletedTimelineMergedPlace: TimelineDeletionUndoPayload {
+    let place: DeletedTimelinePlace
+    let incoming: DeletedTimelineMove
+    let outgoing: DeletedTimelineMove
+
+    init(place: VisitPlace, incoming: MoveSegment, outgoing: MoveSegment) {
+        self.place = DeletedTimelinePlace(place: place)
+        self.incoming = DeletedTimelineMove(move: incoming)
+        self.outgoing = DeletedTimelineMove(move: outgoing)
+    }
+
+    @MainActor func restore(in context: ModelContext) {
+        place.restore(in: context)
+        incoming.restoreExisting(in: context)
+        outgoing.restore(in: context)
     }
 }
 
@@ -407,6 +513,32 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         move.samples = samples
         samples.forEach { $0.moveSegment = move }
         context.insert(move)
+    }
+
+    @MainActor func restoreExisting(in context: ModelContext) {
+        guard let move = try? context.fetch(FetchDescriptor<MoveSegment>()).first(where: { $0.id == id }) else {
+            restore(in: context)
+            return
+        }
+
+        move.deviceIdentifier = deviceIdentifier
+        move.dedupeKey = dedupeKey
+        move.startDate = startDate
+        move.endDate = endDate
+        move.transportMode = transportMode
+        move.distanceMeters = distanceMeters
+        move.stepCount = stepCount
+        move.comment = comment
+        move.isExcludedFromConnectionStatistics = isExcluded
+        move.createdAt = createdAt
+        move.startPlace = startPlace
+        move.endPlace = endPlace
+        move.dayTimeline = day
+        move.routeCacheSignature = routeCacheSignature
+        move.routeCacheCoordinatesData = routeCacheCoordinatesData
+        move.manualRouteCoordinatesData = manualRouteCoordinatesData
+        move.samples = samples
+        samples.forEach { $0.moveSegment = move }
     }
 }
 
@@ -716,6 +848,10 @@ final class MoveSegment {
 
     var usesHealthWorkoutRoute: Bool {
         samples.contains { $0.source == .healthWorkoutRoute }
+    }
+
+    var usesImportedRoute: Bool {
+        samples.contains { $0.source == .fileRouteImport }
     }
 
     func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
@@ -1310,8 +1446,20 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         for location in locations {
             let dedupeKey = Self.makeSampleDedupeKey(for: location)
-            let existing = try findSample(byDedupeKey: dedupeKey)
-                ?? (source.preservesRouteResolution ? nil : findNearbySample(matching: location))
+            // Keep a detailed route as a separate source from an existing sparse phone
+            // sample, even when the coordinates happen to be identical. This allows an
+            // imported Garmin/Suunto route to become the preferred display route while the
+            // phone trace remains available as a fallback/comparison route. Re-imports stay
+            // idempotent because an existing route sample with the same key is reused.
+            let exactMatches = try findSamples(byDedupeKey: dedupeKey)
+            let existing: LocationSample?
+            if source.preservesRouteResolution {
+                existing = exactMatches.first(where: { $0.source.isRouteTrack })
+            } else if let exact = exactMatches.first {
+                existing = exact
+            } else {
+                existing = try findNearbySample(matching: location)
+            }
             if let existing {
                 existing.source = Self.preferredSource(existing: existing.source, new: source)
                 inserted.append(existing)
@@ -1341,7 +1489,12 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         continuingFrom visit: VisitPlace? = nil
     ) throws -> MoveSegment? {
         let orderedLocations = locations
-            .filter { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= 200 }
+            .filter {
+                CLLocationCoordinate2DIsValid($0.coordinate)
+                    && $0.horizontalAccuracy >= 0
+                    && $0.horizontalAccuracy <= 200
+                    && $0.timestamp.timeIntervalSinceReferenceDate.isFinite
+            }
             .sorted(by: { $0.timestamp < $1.timestamp })
 
         guard let firstLocation = orderedLocations.first,
@@ -1385,9 +1538,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             samples: samples
         )
 
+        let importedCoordinates = MoveRouteGeometry.rawCoordinates(for: move)
         move.storeCachedRouteCoordinates(
-            orderedLocations.map(\.coordinate),
-            signature: "imported-\(source.rawValue)-\(samples.count)-\(Int(distance.rounded()))"
+            importedCoordinates,
+            signature: MoveRouteGeometry.cacheSignature(for: move, fallback: importedCoordinates)
         )
 
         try saveIfNeeded()
@@ -1503,6 +1657,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let canonical = try collapseDuplicateMoves(around: move)
         try saveIfNeeded()
+        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
         return canonical
     }
 
@@ -1609,13 +1764,17 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 
     private func findSample(byDedupeKey dedupeKey: String) throws -> LocationSample? {
+        try findSamples(byDedupeKey: dedupeKey).first
+    }
+
+    private func findSamples(byDedupeKey dedupeKey: String) throws -> [LocationSample] {
         var descriptor = FetchDescriptor<LocationSample>(
             predicate: #Predicate { sample in
                 sample.dedupeKey == dedupeKey
             }
         )
-        descriptor.fetchLimit = 16
-        return try modelContext.fetch(descriptor).first {
+        descriptor.fetchLimit = 32
+        return try modelContext.fetch(descriptor).filter {
             belongsToCurrentDevice($0.deviceIdentifier)
         }
     }
@@ -2617,6 +2776,7 @@ enum MultiDeviceTimelineResolver {
 }
 
 #if DEBUG
+@MainActor
 enum DemoDataSeeder {
     private static var roadCoordinatesCache: [String: [CLLocationCoordinate2D]] = [:]
     private static var roadCoordinatesRequestCount = 0

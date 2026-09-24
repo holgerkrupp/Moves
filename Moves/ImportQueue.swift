@@ -172,6 +172,22 @@ struct ImportJobRecord: Codable, Hashable, Identifiable, Sendable {
         self.updatedAt = updatedAt
         self.lastError = lastError
     }
+
+    func upcomingFileNames(limit: Int = 4) -> [String] {
+        guard limit > 0, counters.completedItemCount < source.originalFileNames.count else { return [] }
+        return Array(source.originalFileNames.dropFirst(counters.completedItemCount).prefix(limit))
+    }
+
+    func estimatedCompletionDate(at now: Date = .now) -> Date? {
+        guard [.acquiring, .parsing, .importing, .postProcessing].contains(state),
+              counters.completedItemCount > 0,
+              counters.completedItemCount < counters.itemCount else { return nil }
+        let elapsed = now.timeIntervalSince(createdAt)
+        guard elapsed > 0 else { return nil }
+        let secondsPerFile = elapsed / Double(counters.completedItemCount)
+        let remainingFiles = counters.itemCount - counters.completedItemCount
+        return now.addingTimeInterval(secondsPerFile * Double(remainingFiles))
+    }
 }
 
 struct ImportQueueSnapshot: Equatable, Sendable {

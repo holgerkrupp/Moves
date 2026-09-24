@@ -155,6 +155,7 @@ struct ImportQueueView: View {
                                 Text(item.reason)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .accessibilityElement(children: .combine)
                         }
@@ -251,7 +252,10 @@ private struct ImportQueueJobRow: View {
                         .font(.subheadline)
                         .foregroundStyle(job.state == .failed ? .red : .secondary)
                     if let error = job.lastError {
-                        Text(error.message).font(.caption).foregroundStyle(.red)
+                        Text(error.message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)

@@ -192,6 +192,20 @@ struct RenderedRoute: Identifiable {
     let usesHealthWorkoutRoute: Bool
     let transportMode: TransportMode
 
+    init(
+        id: String,
+        coordinates: [CLLocationCoordinate2D],
+        usesHighAccuracyRouteTracking: Bool,
+        usesHealthWorkoutRoute: Bool,
+        transportMode: TransportMode
+    ) {
+        self.id = id
+        self.coordinates = RouteCoordinateOps.validCoordinates(coordinates)
+        self.usesHighAccuracyRouteTracking = usesHighAccuracyRouteTracking
+        self.usesHealthWorkoutRoute = usesHealthWorkoutRoute
+        self.transportMode = transportMode
+    }
+
     var coordinateSegments: [[CLLocationCoordinate2D]] {
         RouteCoordinateOps.mapPolylineSegments(coordinates)
     }
@@ -539,6 +553,7 @@ func liveRouteAnchorCoordinate(
 }
 
 func routeDistance(for coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {
+    let coordinates = RouteCoordinateOps.validCoordinates(coordinates)
     guard coordinates.count > 1 else { return 0 }
 
     return zip(coordinates, coordinates.dropFirst()).reduce(0) { partialResult, pair in
@@ -548,7 +563,7 @@ func routeDistance(for coordinates: [CLLocationCoordinate2D]) -> CLLocationDista
 
 enum MapRegionFactory {
     static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
-        let validCoordinates = coordinates.filter(CLLocationCoordinate2DIsValid)
+        let validCoordinates = RouteCoordinateOps.validCoordinates(coordinates)
         guard let first = validCoordinates.first else {
             return MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: 37.3349, longitude: -122.0090),
@@ -566,14 +581,16 @@ enum MapRegionFactory {
 
         let longitudeBounds = longitudeBounds(for: validCoordinates.map(\.longitude))
 
+        let centerLatitude = min(max((minLat + maxLat) / 2, -89.999), 89.999)
         let center = CLLocationCoordinate2D(
-            latitude: (minLat + maxLat) / 2,
+            latitude: centerLatitude,
             longitude: longitudeBounds.center
         )
 
         // MapKit raises NSInvalidArgumentException instead of returning an error for
         // oversized regions. Keep both spans strictly inside their global limits.
-        let latitudeDelta = min(max((maxLat - minLat) * 1.5, 0.01), 179)
+        let maximumLatitudeDelta = max(0.01, min(179, 2 * (90 - abs(centerLatitude))))
+        let latitudeDelta = min(max((maxLat - minLat) * 1.5, 0.01), maximumLatitudeDelta)
         let longitudeDelta = min(max(longitudeBounds.delta * 1.5, 0.01), 359)
 
         return MKCoordinateRegion(
@@ -728,9 +745,16 @@ extension MoveSegment {
 }
 
 enum RouteCoordinateOps {
+    static func validCoordinates(
+        _ coordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationCoordinate2D] {
+        coordinates.filter(CLLocationCoordinate2DIsValid)
+    }
+
     static func mapPolylineSegments(
         _ coordinates: [CLLocationCoordinate2D]
     ) -> [[CLLocationCoordinate2D]] {
+        let coordinates = validCoordinates(coordinates)
         guard let first = coordinates.first else { return [] }
         var segments: [[CLLocationCoordinate2D]] = []
         var current = [first]
@@ -759,6 +783,7 @@ enum RouteCoordinateOps {
         _ coordinates: [CLLocationCoordinate2D],
         minimumDistanceMeters: CLLocationDistance
     ) -> [CLLocationCoordinate2D] {
+        let coordinates = validCoordinates(coordinates)
         guard let first = coordinates.first else { return [] }
 
         var deduped: [CLLocationCoordinate2D] = [first]
@@ -1253,21 +1278,36 @@ enum RoadRouteMatcher {
     private static let memo = RouteMatchMemo()
     private static let transientFallbackMemoTTL: TimeInterval = 3 * 60
 
-    static func matchedCoordinates(for move: MoveSegment) async -> [CLLocationCoordinate2D] {
-        let coordinates = await resolveDisplayedCoordinates(for: move)
-        let displayedDistance = routeDistance(for: coordinates)
-        if abs(move.distanceMeters - displayedDistance) > 0.01 {
-            move.distanceMeters = displayedDistance
+    static func matchedCoordinates(
+        for move: MoveSegment,
+        persistResult: Bool = true
+    ) async -> [CLLocationCoordinate2D] {
+        let coordinates = await resolveDisplayedCoordinates(for: move, persistResult: persistResult)
+        if persistResult {
+            let displayedDistance = routeDistance(for: coordinates)
+            if abs(move.distanceMeters - displayedDistance) > 0.01 {
+                move.distanceMeters = displayedDistance
+            }
         }
         return coordinates
     }
 
-    private static func resolveDisplayedCoordinates(for move: MoveSegment) async -> [CLLocationCoordinate2D] {
+    private static func resolveDisplayedCoordinates(
+        for move: MoveSegment,
+        persistResult: Bool
+    ) async -> [CLLocationCoordinate2D] {
         if let manualCoordinates = move.manualRouteCoordinates {
             return manualCoordinates
         }
 
         let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+        // Imported files already contain the user's detailed route. Re-running them through
+        // the road matcher is unnecessary and can rewrite route/cache fields during a view
+        // update, which in turn schedules avoidable SwiftData/CloudKit work.
+        if move.usesImportedRoute {
+            return fallback
+        }
+
         let cacheKey = MoveRouteGeometry.cacheKey(for: move, fallback: fallback)
         let cacheSignature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
 
@@ -1277,7 +1317,9 @@ enum RoadRouteMatcher {
                 minimumDistanceMeters: MoveRouteGeometry.highAccuracyDisplayDedupeDistance(for: move)
             )
             await memo.storePersistent(coordinates, for: cacheKey)
-            move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
+            if persistResult {
+                move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
+            }
             return coordinates
         }
 
@@ -1289,7 +1331,9 @@ enum RoadRouteMatcher {
         if let cached = await memo.cached(for: cacheKey) {
             switch cached {
             case .persistent(let coordinates):
-                move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
+                if persistResult {
+                    move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
+                }
                 return coordinates
             case .transient(let coordinates):
                 return coordinates
@@ -1300,7 +1344,9 @@ enum RoadRouteMatcher {
             let result = await task.value
             if result.cacheable {
                 await memo.storePersistent(result.coordinates, for: cacheKey)
-                move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+                if persistResult {
+                    move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+                }
             } else {
                 await memo.storeTransient(
                     result.coordinates,
@@ -1321,7 +1367,9 @@ enum RoadRouteMatcher {
         await memo.setInFlightTask(nil, for: cacheKey)
         if result.cacheable {
             await memo.storePersistent(result.coordinates, for: cacheKey)
-            move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+            if persistResult {
+                move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+            }
         } else {
             await memo.storeTransient(
                 result.coordinates,

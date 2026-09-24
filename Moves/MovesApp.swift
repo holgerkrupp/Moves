@@ -24,6 +24,7 @@ final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
         DailyTimelineBackup.registerBackgroundTask()
         ShareMapAggregateBackgroundTask.register()
         RouteFileImportBackgroundTask.register()
+        RouteWatchFolderBackgroundTask.register()
         return true
     }
 
@@ -120,6 +121,7 @@ struct MovesApp: App {
     @StateObject private var multiDevicePresenceManager: MultiDevicePresenceManager
     @StateObject private var importCoordinator: ImportCoordinator
     @StateObject private var routeFileImporter: RouteFileImporter
+    @StateObject private var routeWatchFolderManager: RouteWatchFolderManager
 
     init() {
         SyncMonitor.default.startMonitoring()
@@ -154,6 +156,9 @@ struct MovesApp: App {
             importCoordinator.attach(routeFileImporter: routeFileImporter)
             _importCoordinator = StateObject(wrappedValue: importCoordinator)
             _routeFileImporter = StateObject(wrappedValue: routeFileImporter)
+            _routeWatchFolderManager = StateObject(
+                wrappedValue: RouteWatchFolderManager(importer: routeFileImporter)
+            )
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
                 captureManager: captureManager
@@ -245,6 +250,7 @@ struct MovesApp: App {
                 .environmentObject(multiDevicePresenceManager)
                 .environmentObject(importCoordinator)
                 .environmentObject(routeFileImporter)
+                .environmentObject(routeWatchFolderManager)
         }
         .modelContainer(sharedModelContainer)
         #if targetEnvironment(macCatalyst)
@@ -259,6 +265,8 @@ struct MovesApp: App {
                 DailyTimelineBackup.scheduleNextRun()
                 ShareMapAggregateBackgroundTask.scheduleNextRun()
                 RouteFileImportBackgroundTask.schedule()
+                RouteWatchFolderBackgroundTask.schedule()
+                routeWatchFolderManager.scanIfNeeded()
                 Task {
                     if captureManager.isLocationTrackingAvailable {
                         multiDevicePresenceManager.refreshPresence()

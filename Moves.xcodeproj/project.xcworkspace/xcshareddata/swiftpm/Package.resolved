@@ -1,5 +1,5 @@
 {
-  "originHash" : "0c3631f9b1915cf33a564660a09fb7a7fe7fb72e0dd67984638c1c1538dd72f9",
+  "originHash" : "b712a3152462977e1e1f4ef960b6f0321383578ca08d8a42c5b6d0beeeaea2b6",
   "pins" : [
     {
       "identity" : "clouddatapresence",
@@ -17,6 +17,24 @@
       "state" : {
         "revision" : "a421ba7b38fa2e37bb78fc1425db491ca5e93c9a",
         "version" : "3.1.0"
+      }
+    },
+    {
+      "identity" : "esadesignkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/holgerkrupp/ESADesignKit",
+      "state" : {
+        "branch" : "main",
+        "revision" : "d73bab968958639fa9f53d2a53c2728be8af2a9a"
+      }
+    },
+    {
+      "identity" : "swiftdeviceinfo",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/holgerkrupp/SwiftDeviceInfo.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "c917442072d9e9fd64e299f1e5b261f210383191"
       }
     }
   ],

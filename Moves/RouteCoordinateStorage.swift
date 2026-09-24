@@ -24,7 +24,9 @@ enum RouteCoordinateStorage {
     private static let decoder = JSONDecoder()
 
     static func encode(_ coordinates: [CLLocationCoordinate2D]) -> Data? {
-        try? encoder.encode(coordinates.map(RouteCoordinateStoragePoint.init))
+        try? encoder.encode(
+            RouteCoordinateOps.validCoordinates(coordinates).map(RouteCoordinateStoragePoint.init)
+        )
     }
 
     static func decode(_ data: Data?) -> [CLLocationCoordinate2D] {
@@ -32,10 +34,11 @@ enum RouteCoordinateStorage {
               let payload = try? decoder.decode([RouteCoordinateStoragePoint].self, from: data) else {
             return []
         }
-        return payload.map(\.coordinate)
+        return RouteCoordinateOps.validCoordinates(payload.map(\.coordinate))
     }
 }
 
 extension Notification.Name {
     static let movesLocationSamplesDidChange = Notification.Name("Moves.locationSamplesDidChange")
+    static let movesImportedRouteDataDidChange = Notification.Name("Moves.importedRouteDataDidChange")
 }
