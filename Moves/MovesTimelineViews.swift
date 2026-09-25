@@ -5,8 +5,9 @@
 //  Timeline, map strip, and row rendering extracted from ContentView.
 //
 
-import Foundation
 import CryptoKit
+import ESADesignKit
+import Foundation
 import MapKit
 import SwiftData
 import SwiftUI
@@ -81,6 +82,7 @@ struct DayTimelinePage: View {
 }
 
 struct DayTimelinePageContent: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var undoController: AppUndoController
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
@@ -410,11 +412,13 @@ struct DayTimelinePageContent: View {
     private var portraitContent: some View {
         ScrollView {
             VStack(spacing: 10) {
-                DayMapStrip(
-                    dayTimeline: dayTimeline,
-                    isActive: isActive,
-                    selection: $mapSelection
-                )
+                if horizontalSizeClass != .compact {
+                    DayMapStrip(
+                        dayTimeline: dayTimeline,
+                        isActive: isActive,
+                        selection: $mapSelection
+                    )
+                }
 
                 importedDataReviewButton
 
@@ -426,6 +430,18 @@ struct DayTimelinePageContent: View {
             .safeAreaPadding(.bottom, 24)
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
+        .scrollingHero(
+            height: DayMapStrip.collapsedMapHeight,
+            enabled: horizontalSizeClass == .compact
+        ) {
+            DayMapStrip(
+                dayTimeline: dayTimeline,
+                isActive: isActive,
+                selection: $mapSelection,
+                fillsAvailableSpace: true,
+                usesHeroStyle: true
+            )
+        }
     }
 
     private var landscapeContent: some View {
@@ -1603,7 +1619,8 @@ struct DayMapStrip: View {
     let isActive: Bool
     @Binding var selection: TimelineMapSelection?
     let fillsAvailableSpace: Bool
-    private static let collapsedMapHeight: CGFloat = 180
+    let usesHeroStyle: Bool
+    static let collapsedMapHeight: CGFloat = 180
     private static let collapsedMapCornerRadius: CGFloat = 14
     private static let fullScreenMapAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
     private static let expandedMapVerticalMargin: CGFloat = 150
@@ -1646,12 +1663,14 @@ struct DayMapStrip: View {
         dayTimeline: DayTimeline,
         isActive: Bool,
         selection: Binding<TimelineMapSelection?> = .constant(nil),
-        fillsAvailableSpace: Bool = false
+        fillsAvailableSpace: Bool = false,
+        usesHeroStyle: Bool = false
     ) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
         _selection = selection
         self.fillsAvailableSpace = fillsAvailableSpace
+        self.usesHeroStyle = usesHeroStyle
         let initialPresentation: DayMapPresentationCache
         if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey) {
             initialPresentation = cached
@@ -1679,10 +1698,17 @@ struct DayMapStrip: View {
                 maxHeight: fillsAvailableSpace ? .infinity : nil
             )
             .frame(height: fillsAvailableSpace ? nil : (isShowingFullScreenMap ? Self.expandedMapHeight : Self.collapsedMapHeight))
-            .clipShape(RoundedRectangle(cornerRadius: Self.collapsedMapCornerRadius, style: .continuous))
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: usesHeroStyle ? 0 : Self.collapsedMapCornerRadius,
+                    style: .continuous
+                )
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: Self.collapsedMapCornerRadius, style: .continuous)
-                    .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
+                if !usesHeroStyle {
+                    RoundedRectangle(cornerRadius: Self.collapsedMapCornerRadius, style: .continuous)
+                        .stroke(MovesPalette.border.opacity(0.8), lineWidth: 1)
+                }
             }
             .overlay(alignment: isShowingFullScreenMap ? .topTrailing : .bottomTrailing) {
                 if !fillsAvailableSpace {

@@ -687,7 +687,7 @@
 			packageReferences = (
 				A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */,
 				E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */,
-				F30000013130000100000002 /* XCRemoteSwiftPackageReference "ESADesignKit" */,
+				F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */,
 			);
 			productRefGroup = 489A76322C4FC6F300F43B69 /* Products */;
 			projectDirPath = "";
@@ -1464,15 +1464,14 @@
 				minimumVersion = 3.1.0;
 			};
 		};
-		F30000013130000100000002 /* XCRemoteSwiftPackageReference "ESADesignKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/holgerkrupp/ESADesignKit";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../ESADesignKit;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A50000012FD0000100000004 /* CloudDataPresence */ = {
@@ -1487,7 +1486,7 @@
 		};
 		F30000013130000100000003 /* ESADesignKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F30000013130000100000002 /* XCRemoteSwiftPackageReference "ESADesignKit" */;
+			package = F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */;
 			productName = ESADesignKit;
 		};
 /* End XCSwiftPackageProductDependency section */
