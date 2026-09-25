@@ -176,14 +176,64 @@ struct ImportedRouteDataSummary: Codable, Equatable, Sendable {
 }
 
 struct TimelineDaySummary: Codable, Equatable, Sendable {
+    var dayStart: Date = .distantPast
     var placeCount: Int
+    var uniquePlaceCount: Int
     var moveCount: Int
     var sampleCount: Int
+    var totalDistanceMeters: Double
+    var totalMoveDuration: TimeInterval
+    var transportDistanceMeters: [String: Double]
+    var transportDuration: [String: TimeInterval]
+    var hasImportedRouteData: Bool
 
-    static let empty = TimelineDaySummary(placeCount: 0, moveCount: 0, sampleCount: 0)
+    init(
+        dayStart: Date = .distantPast,
+        placeCount: Int = 0,
+        uniquePlaceCount: Int = 0,
+        moveCount: Int = 0,
+        sampleCount: Int = 0,
+        totalDistanceMeters: Double = 0,
+        totalMoveDuration: TimeInterval = 0,
+        transportDistanceMeters: [String: Double] = [:],
+        transportDuration: [String: TimeInterval] = [:],
+        hasImportedRouteData: Bool = false
+    ) {
+        self.dayStart = dayStart
+        self.placeCount = placeCount
+        self.uniquePlaceCount = uniquePlaceCount
+        self.moveCount = moveCount
+        self.sampleCount = sampleCount
+        self.totalDistanceMeters = totalDistanceMeters
+        self.totalMoveDuration = totalMoveDuration
+        self.transportDistanceMeters = transportDistanceMeters
+        self.transportDuration = transportDuration
+        self.hasImportedRouteData = hasImportedRouteData
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dayStart = try container.decodeIfPresent(Date.self, forKey: .dayStart) ?? .distantPast
+        placeCount = try container.decodeIfPresent(Int.self, forKey: .placeCount) ?? 0
+        uniquePlaceCount = try container.decodeIfPresent(Int.self, forKey: .uniquePlaceCount) ?? placeCount
+        moveCount = try container.decodeIfPresent(Int.self, forKey: .moveCount) ?? 0
+        sampleCount = try container.decodeIfPresent(Int.self, forKey: .sampleCount) ?? 0
+        totalDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .totalDistanceMeters) ?? 0
+        totalMoveDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .totalMoveDuration) ?? 0
+        transportDistanceMeters = try container.decodeIfPresent([String: Double].self, forKey: .transportDistanceMeters) ?? [:]
+        transportDuration = try container.decodeIfPresent([String: TimeInterval].self, forKey: .transportDuration) ?? [:]
+        hasImportedRouteData = try container.decodeIfPresent(Bool.self, forKey: .hasImportedRouteData) ?? false
+    }
 
     var hasRecordedActivity: Bool {
         placeCount > 0 || moveCount > 0 || sampleCount > 0
+    }
+
+    var activityScore: Double {
+        Double(uniquePlaceCount) * 1_200
+            + Double(moveCount) * 900
+            + totalDistanceMeters
+            + totalMoveDuration / 8
     }
 }
 
@@ -228,7 +278,7 @@ actor ImportedRouteDataSummaryWorker {
         result.reserveCapacity(timelines.count)
 
         for timeline in timelines {
-            result[timeline.dayKey] = .empty
+            result[timeline.dayKey] = TimelineDaySummary(dayStart: timeline.dayStart)
         }
 
         // Count from the child records instead of the cached inverse arrays on DayTimeline.
@@ -236,6 +286,7 @@ actor ImportedRouteDataSummaryWorker {
         // freshly-created SwiftData context can temporarily expose an empty inverse collection.
         // Reading the owning relationship also avoids materializing an entire day's route data.
         let batchSize = 2_048
+        var locationKeysByDay = [String: Set<String>]()
 
         let placeCount = try modelContext.fetchCount(FetchDescriptor<VisitPlace>())
         var placeOffset = 0
@@ -250,7 +301,12 @@ actor ImportedRouteDataSummaryWorker {
             guard !batch.isEmpty else { break }
             for place in batch {
                 guard let dayKey = place.dayTimeline?.dayKey else { continue }
-                result[dayKey, default: .empty].placeCount += 1
+                var summary = result[dayKey, default: TimelineDaySummary(dayStart: place.dayTimeline?.dayStart ?? .distantPast)]
+                summary.placeCount += 1
+                let latitudeBucket = Int((place.latitude * 10_000).rounded())
+                let longitudeBucket = Int((place.longitude * 10_000).rounded())
+                locationKeysByDay[dayKey, default: []].insert("\(latitudeBucket)|\(longitudeBucket)")
+                result[dayKey] = summary
             }
             placeOffset += batch.count
         }
@@ -268,7 +324,16 @@ actor ImportedRouteDataSummaryWorker {
             guard !batch.isEmpty else { break }
             for move in batch {
                 guard let dayKey = move.dayTimeline?.dayKey else { continue }
-                result[dayKey, default: .empty].moveCount += 1
+                var summary = result[dayKey, default: TimelineDaySummary(dayStart: move.dayTimeline?.dayStart ?? .distantPast)]
+                summary.moveCount += 1
+                summary.hasImportedRouteData = summary.hasImportedRouteData || move.importedRouteData != nil
+                summary.totalDistanceMeters += max(move.distanceMeters, 0)
+                summary.totalMoveDuration += max(move.timelineDuration, 0)
+                if let bucket = transportBucketRawValue(for: move.transportMode) {
+                    summary.transportDistanceMeters[bucket, default: 0] += max(move.distanceMeters, 0)
+                    summary.transportDuration[bucket, default: 0] += max(move.timelineDuration, 0)
+                }
+                result[dayKey] = summary
             }
             moveOffset += batch.count
         }
@@ -286,11 +351,32 @@ actor ImportedRouteDataSummaryWorker {
             guard !batch.isEmpty else { break }
             for sample in batch {
                 guard let dayKey = sample.dayTimeline?.dayKey else { continue }
-                result[dayKey, default: .empty].sampleCount += 1
+                var summary = result[dayKey, default: TimelineDaySummary(dayStart: sample.dayTimeline?.dayStart ?? .distantPast)]
+                summary.sampleCount += 1
+                summary.hasImportedRouteData = summary.hasImportedRouteData
+                    || sample.sourceRawValue == LocationSampleSource.fileRouteImport.rawValue
+                result[dayKey] = summary
             }
             sampleOffset += batch.count
         }
+        for (dayKey, keys) in locationKeysByDay {
+            result[dayKey, default: TimelineDaySummary()].uniquePlaceCount = keys.count
+        }
         return result
+    }
+
+    private func transportBucketRawValue(for mode: TransportMode) -> String? {
+        switch mode {
+        case .walking, .running: return "walking"
+        case .swimming: return "swimming"
+        case .cycling: return "cycling"
+        case .automotive: return "automotive"
+        case .motorcycle: return "motorcycle"
+        case .train: return "train"
+        case .plane: return "plane"
+        case .boat: return "boat"
+        case .stationary, .unknown: return nil
+        }
     }
 }
 
@@ -395,7 +481,8 @@ extension DayTimeline {
     var hasImportedRouteData: Bool {
         samples.contains { $0.source == .fileRouteImport }
             || moves.contains { move in
-                move.samples.contains { $0.source == .fileRouteImport }
+                move.importedRouteData != nil
+                    || move.samples.contains { $0.source == .fileRouteImport }
             }
     }
 }
@@ -431,15 +518,48 @@ final class ImportedRouteDataManager: ObservableObject {
     }
 
     private func matchingData(for filter: ImportedRouteDataFilter) throws -> ([LocationSample], [MoveSegment]) {
-        let importedSamples = try modelContext.fetch(FetchDescriptor<LocationSample>()).filter {
-            $0.source == .fileRouteImport && filter.includes($0.timestamp)
+        let importedSource = LocationSampleSource.fileRouteImport.rawValue
+        let importedSamples: [LocationSample]
+        switch (filter.startDate, filter.endDate) {
+        case let (start?, end?):
+            let predicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource
+                    && sample.timestamp >= start && sample.timestamp <= end
+            }
+            importedSamples = try modelContext.fetch(FetchDescriptor(predicate: predicate))
+        case let (start?, nil):
+            let predicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource && sample.timestamp >= start
+            }
+            importedSamples = try modelContext.fetch(FetchDescriptor(predicate: predicate))
+        case let (nil, end?):
+            let predicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource && sample.timestamp <= end
+            }
+            importedSamples = try modelContext.fetch(FetchDescriptor(predicate: predicate))
+        case (nil, nil):
+            let predicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource
+            }
+            importedSamples = try modelContext.fetch(FetchDescriptor(predicate: predicate))
         }
-        let importedIDs = Set(importedSamples.map(\.dedupeKey))
-        let allMoves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
-        let moves = allMoves.filter { move in
-            let modeMatches = filter.transportMode == nil || move.transportMode == filter.transportMode
-            return modeMatches && move.samples.contains { importedIDs.contains($0.dedupeKey) }
+
+        let moveIDs = Set(importedSamples.compactMap { $0.moveSegment?.id })
+        guard !moveIDs.isEmpty else { return (importedSamples, []) }
+        let moves: [MoveSegment]
+        if let transportMode = filter.transportMode {
+            let modeRawValue = transportMode.rawValue
+            let predicate = #Predicate<MoveSegment> { move in
+                moveIDs.contains(move.id) && move.transportModeRawValue == modeRawValue
+            }
+            moves = try modelContext.fetch(FetchDescriptor(predicate: predicate))
+        } else {
+            let predicate = #Predicate<MoveSegment> { move in
+                moveIDs.contains(move.id)
+            }
+            moves = try modelContext.fetch(FetchDescriptor(predicate: predicate))
         }
+
         guard filter.transportMode != nil else { return (importedSamples, moves) }
         let modeSampleIDs = Set(moves.flatMap(\.samples).filter { $0.source == .fileRouteImport }.map(\.dedupeKey))
         return (importedSamples.filter { modeSampleIDs.contains($0.dedupeKey) }, moves)
@@ -482,15 +602,29 @@ final class ImportedRoutePreviewStore: ObservableObject {
     ) {
         do {
             let search = searchText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-            routes = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+            let importedSource = LocationSampleSource.fileRouteImport.rawValue
+            let importedPredicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource
+            }
+            let importedSamples = try modelContext.fetch(FetchDescriptor(predicate: importedPredicate))
+            var importedCounts = [UUID: Int]()
+            for sample in importedSamples {
+                if let moveID = sample.moveSegment?.id {
+                    importedCounts[moveID, default: 0] += 1
+                }
+            }
+            let importedMoveIDs = Set(importedCounts.keys)
+            let movePredicate = #Predicate<MoveSegment> { move in
+                importedMoveIDs.contains(move.id)
+            }
+
+            routes = try modelContext.fetch(FetchDescriptor(predicate: movePredicate))
                 .filter { move in
-                    let imported = move.samples.filter { $0.source == .fileRouteImport }
-                    guard !imported.isEmpty else { return false }
                     guard transportMode == nil || move.transportMode == transportMode else { return false }
                     guard startDate == nil || move.endDate >= startDate! else { return false }
                     guard endDate == nil || move.startDate <= endDate! else { return false }
                     guard minimumDistance == nil || move.distanceMeters >= minimumDistance! else { return false }
-                    guard minimumPoints == nil || imported.count >= minimumPoints! else { return false }
+                    guard minimumPoints == nil || importedCounts[move.id, default: 0] >= minimumPoints! else { return false }
                     guard search.isEmpty || move.transportMode.title.lowercased().contains(search) else { return false }
                     return true
                 }
@@ -501,7 +635,7 @@ final class ImportedRoutePreviewStore: ObservableObject {
                         endDate: move.endDate,
                         transportMode: move.transportMode,
                         distanceMeters: move.distanceMeters,
-                        sampleCount: move.samples.filter { $0.source == .fileRouteImport }.count
+                        sampleCount: importedCounts[move.id, default: 0]
                     )
                 }
                 .sorted { sortDescending ? $0.startDate > $1.startDate : $0.startDate < $1.startDate }
@@ -515,7 +649,10 @@ final class ImportedRoutePreviewStore: ObservableObject {
     func remove(routeIDs: Set<UUID>) throws {
         isWorking = true
         defer { isWorking = false }
-        let moves = try modelContext.fetch(FetchDescriptor<MoveSegment>()).filter { routeIDs.contains($0.id) }
+        let predicate = #Predicate<MoveSegment> { move in
+            routeIDs.contains(move.id)
+        }
+        let moves = try modelContext.fetch(FetchDescriptor(predicate: predicate))
         let importedSamples = moves.flatMap(\.samples).filter { $0.source == .fileRouteImport }
         try removeImportedRouteRecords(samples: importedSamples, moves: moves, from: modelContext)
         NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
@@ -545,6 +682,15 @@ private func removeImportedRouteRecords(
             + movesToDelete.compactMap { $0.dayTimeline?.dayKey }
             + endpointPlaces.values.compactMap { $0.dayTimeline?.dayKey }
     )
+
+    #if os(iOS)
+    ShareMapAggregateDirtyPeriods.mark(
+        ShareMapAggregateStore.periodKeys(
+            for: samples.map(\.timestamp)
+                + movesToDelete.flatMap { [$0.startDate, $0.endDate] }
+        )
+    )
+    #endif
 
     let remainingMoves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
         .filter { !moveIDsToDelete.contains($0.id) }
@@ -1172,6 +1318,7 @@ final class RouteFileImporter: ObservableObject {
             job.updatedAt = .now
         }
         let worker = await makeRouteFileImportWorker(modelContainer: modelContainer)
+        var dirtyAggregatePeriodKeys = Set<String>()
         do {
             while persisted.nextIndex < persisted.files.count {
                 try Task.checkCancellation()
@@ -1248,6 +1395,7 @@ final class RouteFileImporter: ObservableObject {
                     )
                     persisted.routeCount += result.routeCount
                     persisted.sampleCount += result.sampleCount
+                    dirtyAggregatePeriodKeys.formUnion(result.dirtyAggregatePeriodKeys)
                 }
                 completeCurrentFile(&persisted)
             }
@@ -1285,7 +1433,10 @@ final class RouteFileImporter: ObservableObject {
             NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
             NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
             if persisted.routeCount > 0 {
-                await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+                #if os(iOS)
+                ShareMapAggregateDirtyPeriods.mark(dirtyAggregatePeriodKeys)
+                await ShareMapAggregateBuilder.refreshDirty(in: modelContainer)
+                #endif
             }
         } catch RouteFileImportError.paused {
             persisted.state = .paused
@@ -1378,7 +1529,10 @@ final class RouteFileImporter: ObservableObject {
         removeFailedImport(id, deleteFile: true)
         NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
         NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
-        await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+        #if os(iOS)
+        ShareMapAggregateDirtyPeriods.mark(result.dirtyAggregatePeriodKeys)
+        await ShareMapAggregateBuilder.refreshDirty(in: modelContainer)
+        #endif
     }
 
     func discardFailedImport(_ id: UUID) {
@@ -1642,17 +1796,23 @@ final class RouteFileImporter: ObservableObject {
     }
 
     private func hasExistingData(for locations: [CLLocation], in context: ModelContext) throws -> Bool {
-        let dayKeys = Set(locations.map { DayTimeline.makeDayKey(for: $0.timestamp) })
-        let timelines = try context.fetch(FetchDescriptor<DayTimeline>())
-        return timelines.contains { dayKeys.contains($0.dayKey) && $0.hasRecordedActivity }
-    }
-
-    private func occupiedIntervals(in context: ModelContext) throws -> [(Date, Date)] {
-        try context.fetch(FetchDescriptor<MoveSegment>()).map { ($0.startDate, $0.endDate) }
+        guard let start = locations.map(\.timestamp).min(),
+              let end = locations.map(\.timestamp).max() else { return false }
+        let dayStart = Calendar.current.startOfDay(for: start)
+        let dayEnd = Calendar.current.startOfDay(for: end)
+        let predicate = #Predicate<DayTimeline> { day in
+            day.dayStart >= dayStart && day.dayStart <= dayEnd
+        }
+        return try context.fetch(FetchDescriptor(predicate: predicate)).contains(where: { $0.hasRecordedActivity })
     }
 
     private func expandedImportChunks(for locations: [CLLocation], in context: ModelContext) throws -> [[CLLocation]] {
-        let intervals = try occupiedIntervals(in: context)
+        guard let start = locations.map(\.timestamp).min(),
+              let end = locations.map(\.timestamp).max() else { return [] }
+        let predicate = #Predicate<MoveSegment> { move in
+            move.startDate <= end && move.endDate >= start
+        }
+        let intervals = try context.fetch(FetchDescriptor(predicate: predicate)).map { ($0.startDate, $0.endDate) }
         let available = locations.filter { location in
             !intervals.contains { location.timestamp >= $0.0 && location.timestamp <= $0.1 }
         }
@@ -1670,12 +1830,14 @@ final class RouteFileImporter: ObservableObject {
 
     private func removeExistingData(overlapping locations: [CLLocation], in context: ModelContext) throws {
         guard let start = locations.map(\.timestamp).min(), let end = locations.map(\.timestamp).max() else { return }
-        let moves = try context.fetch(FetchDescriptor<MoveSegment>()).filter {
-            $0.startDate <= end && $0.endDate >= start
+        let movePredicate = #Predicate<MoveSegment> { move in
+            move.startDate <= end && move.endDate >= start
         }
-        let samples = try context.fetch(FetchDescriptor<LocationSample>()).filter {
-            $0.timestamp >= start && $0.timestamp <= end
+        let samplePredicate = #Predicate<LocationSample> { sample in
+            sample.timestamp >= start && sample.timestamp <= end
         }
+        let moves = try context.fetch(FetchDescriptor(predicate: movePredicate))
+        let samples = try context.fetch(FetchDescriptor(predicate: samplePredicate))
         moves.forEach(context.delete)
         samples.forEach(context.delete)
         try context.save()
@@ -1684,16 +1846,24 @@ final class RouteFileImporter: ObservableObject {
     private func geocodeImportedPlaces(in context: ModelContext) async throws {
         let places: [VisitPlace]
         do {
-            let importedMoveIDs = Set(
-                try context.fetch(FetchDescriptor<MoveSegment>())
-                    .filter { $0.samples.contains { $0.source == .fileRouteImport } }
-                    .map(\.id)
-            )
-            places = try context.fetch(FetchDescriptor<VisitPlace>()).filter { place in
+            let importedSource = LocationSampleSource.fileRouteImport.rawValue
+            let samplePredicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource
+            }
+            let importedSampleMoveIDs = Set(try context.fetch(FetchDescriptor(predicate: samplePredicate))
+                .compactMap { $0.moveSegment?.id })
+            let movePredicate = #Predicate<MoveSegment> { move in
+                importedSampleMoveIDs.contains(move.id)
+            }
+            let importedMoveIDs = Set(try context.fetch(FetchDescriptor(predicate: movePredicate)).map(\.id))
+            let placePredicate = #Predicate<VisitPlace> { place in
+                place.horizontalAccuracy <= 180
+            }
+            places = try context.fetch(FetchDescriptor(predicate: placePredicate)).filter { place in
                 let hasImportedMove = place.dayTimeline?.moves.contains { importedMoveIDs.contains($0.id) } == true
                 let hasLabel = !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
                     || !(place.autoLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-                return hasImportedMove && !hasLabel && place.horizontalAccuracy <= 180
+                return hasImportedMove && !hasLabel
             }
         } catch {
             return
@@ -2893,6 +3063,7 @@ private actor RouteFileImportExecution {
         guard var persisted = RouteFileImportStore.state,
               persisted.nextIndex < persisted.files.count else { return true }
         let worker = await makeRouteFileImportWorker(modelContainer: modelContainer)
+        var dirtyAggregatePeriodKeys = Set<String>()
         do {
             persisted.state = .running
             RouteFileImportStore.state = persisted
@@ -2924,6 +3095,7 @@ private actor RouteFileImportExecution {
                     )
                     persisted.routeCount += result.routeCount
                     persisted.sampleCount += result.sampleCount
+                    dirtyAggregatePeriodKeys.formUnion(result.dirtyAggregatePeriodKeys)
                 }
                 persisted.nextIndex += 1
                 persisted.importedFileCount = persisted.nextIndex
@@ -2954,7 +3126,10 @@ private actor RouteFileImportExecution {
             NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
             NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
             if persisted.routeCount > 0 {
-                await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+                #if os(iOS)
+                ShareMapAggregateDirtyPeriods.mark(dirtyAggregatePeriodKeys)
+                await ShareMapAggregateBuilder.refreshDirty(in: modelContainer)
+                #endif
             }
             return true
         } catch ExecutionError.paused {

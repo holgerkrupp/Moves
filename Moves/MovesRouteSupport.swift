@@ -641,7 +641,14 @@ enum MoveRouteGeometry {
     private static let routeMatchingVersion = "route-v10-sparse-automotive-detours"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
-        rawCoordinates(
+        if let importedCoordinates = move.importedRouteCoordinates,
+           importedCoordinates.count > 1 {
+            return RouteCoordinateOps.dedupeSequentialCoordinates(
+                importedCoordinates,
+                minimumDistanceMeters: rawCoordinateDedupeDistance(for: move)
+            )
+        }
+        return rawCoordinates(
             for: move,
             samples: move.samples,
             usesHealthWorkoutRoute: move.usesHealthWorkoutRoute

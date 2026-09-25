@@ -631,9 +631,9 @@ private struct DeletedTimelineDayPlace {
 }
 
 private struct DeletedTimelineDayMove {
-    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?
-    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData }
-    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; return m }
+    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?, importedRouteData: Data?
+    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData; importedRouteData = move.importedRouteData }
+    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; m.importedRouteData = importedRouteData; return m }
 }
 
 private struct DeletedTimelineDaySample {
@@ -798,6 +798,11 @@ final class MoveSegment {
     var routeCacheSignature: String? = nil
     var routeCacheCoordinatesData: Data? = nil
     var manualRouteCoordinatesData: Data? = nil
+    /// Versioned, externalized payload for dense file imports. Existing sample rows remain
+    /// readable during the incremental migration; new route rendering can use this payload
+    /// without faulting the sample relationship.
+    @Attribute(.externalStorage)
+    var importedRouteData: Data? = nil
 
     @Relationship(deleteRule: .nullify, originalName: "samples", inverse: \LocationSample.moveSegment)
     var samplesStorage: [LocationSample]? = nil
@@ -851,7 +856,7 @@ final class MoveSegment {
     }
 
     var usesImportedRoute: Bool {
-        samples.contains { $0.source == .fileRouteImport }
+        importedRouteData != nil || samples.contains { $0.source == .fileRouteImport }
     }
 
     func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
@@ -870,6 +875,52 @@ final class MoveSegment {
     func clearCachedRouteCoordinates() {
         routeCacheSignature = nil
         routeCacheCoordinatesData = nil
+    }
+
+    var importedRouteCoordinates: [CLLocationCoordinate2D]? {
+        ImportedRoutePayloadCodec.decode(importedRouteData)?.map {
+            CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+        }
+    }
+}
+
+struct ImportedRoutePayloadPoint: Codable, Sendable {
+    let timestamp: Date
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let horizontalAccuracy: Double
+    let speed: Double
+
+    init(_ location: CLLocation) {
+        timestamp = location.timestamp
+        latitude = location.coordinate.latitude
+        longitude = location.coordinate.longitude
+        altitude = location.altitude
+        horizontalAccuracy = location.horizontalAccuracy
+        speed = location.speed
+    }
+}
+
+enum ImportedRoutePayloadCodec {
+    private struct Envelope: Codable {
+        let version: Int
+        let points: [ImportedRoutePayloadPoint]
+    }
+
+    private static let currentVersion = 1
+
+    static func encode(_ locations: [CLLocation]) -> Data? {
+        var encoder = PropertyListEncoder()
+        encoder.outputFormat = .binary
+        return try? encoder.encode(Envelope(version: currentVersion, points: locations.map(ImportedRoutePayloadPoint.init)))
+    }
+
+    static func decode(_ data: Data?) -> [ImportedRoutePayloadPoint]? {
+        guard let data,
+              let envelope = try? PropertyListDecoder().decode(Envelope.self, from: data),
+              envelope.version == currentVersion else { return nil }
+        return envelope.points
     }
 }
 
@@ -1537,6 +1588,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             stepCount: nil,
             samples: samples
         )
+
+        if source == .fileRouteImport {
+            move.importedRouteData = ImportedRoutePayloadCodec.encode(orderedLocations)
+        }
 
         let importedCoordinates = MoveRouteGeometry.rawCoordinates(for: move)
         move.storeCachedRouteCoordinates(

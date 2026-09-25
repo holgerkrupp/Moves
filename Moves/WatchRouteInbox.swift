@@ -76,8 +76,9 @@ final class WatchRouteInbox: NSObject, ObservableObject {
             lastImportSummary = "Imported \(locations.count) watch GPS point(s)."
             WidgetCenter.shared.reloadAllTimelines()
             if importedMove != nil {
+                ShareMapAggregateDirtyPeriods.mark(ShareMapAggregateStore.periodKeys(for: locations.map(\.timestamp)))
                 Task(priority: .utility) {
-                    await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+                    await ShareMapAggregateBuilder.refreshDirty(in: modelContainer)
                 }
             }
         } catch {

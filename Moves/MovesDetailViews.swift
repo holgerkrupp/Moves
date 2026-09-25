@@ -979,6 +979,7 @@ struct MoveMapDetailView: View {
 
         do {
             try modelContext.save()
+            markMapAggregateDirty(for: segment)
             Task { @MainActor in
                 await refreshRouteCoordinates()
             }
@@ -1006,6 +1007,7 @@ struct MoveMapDetailView: View {
         if modelContext.hasChanges {
             do {
                 try modelContext.save()
+                markMapAggregateDirty(for: segment)
             } catch {
                 print("Failed to persist matched route cache: \(error.localizedDescription)")
             }
@@ -1182,6 +1184,7 @@ struct MoveMapDetailView: View {
 
         do {
             try modelContext.save()
+            markMapAggregateDirty(for: segment)
             Task { @MainActor in
                 await refreshRouteCoordinates()
                 if isEditingManualRoute {
@@ -1198,6 +1201,14 @@ struct MoveMapDetailView: View {
             isSavingManualRoute = false
             print("Failed to revert manual route: \(error.localizedDescription)")
         }
+    }
+
+    private func markMapAggregateDirty(for segment: MoveSegment) {
+        #if os(iOS)
+        ShareMapAggregateDirtyPeriods.mark(
+            ShareMapAggregateStore.periodKeys(for: [segment.startDate, segment.endDate])
+        )
+        #endif
     }
 
     private func deleteMove() {

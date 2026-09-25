@@ -108,15 +108,10 @@ struct DayTimelinePageContent: View {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
         _mapSelection = mapSelection
-        let initialCache: DayTimelinePresentationCache
-        if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey) {
-            initialCache = cached
-        } else {
-            let source = DayPresentationSourceCache.source(for: dayTimeline, generation: 0)
-            let cache = Self.makePresentationCache(for: dayTimeline, source: source)
-            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey)
-            initialCache = cache
-        }
+        // Do not fault SwiftData relationships while SwiftUI constructs a page. A nearby
+        // cache hit is still displayed immediately; misses are loaded by the task below.
+        let initialCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey)
+            ?? Self.initialPresentationCache()
         _presentationCache = State(initialValue: initialCache)
     }
 

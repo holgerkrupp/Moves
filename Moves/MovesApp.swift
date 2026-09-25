@@ -122,6 +122,7 @@ struct MovesApp: App {
     @StateObject private var importCoordinator: ImportCoordinator
     @StateObject private var routeFileImporter: RouteFileImporter
     @StateObject private var routeWatchFolderManager: RouteWatchFolderManager
+    @StateObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
 
     init() {
         SyncMonitor.default.startMonitoring()
@@ -161,6 +162,9 @@ struct MovesApp: App {
             _routeFileImporter = StateObject(wrappedValue: routeFileImporter)
             _routeWatchFolderManager = StateObject(
                 wrappedValue: RouteWatchFolderManager(importer: routeFileImporter)
+            )
+            _importedRouteDataSummary = StateObject(
+                wrappedValue: ImportedRouteDataSummaryStore(modelContainer: container)
             )
             MovesIntentRuntime.shared.configure(
                 modelContainer: container,
@@ -270,6 +274,7 @@ struct MovesApp: App {
                 .environmentObject(importCoordinator)
                 .environmentObject(routeFileImporter)
                 .environmentObject(routeWatchFolderManager)
+                .environmentObject(importedRouteDataSummary)
         }
         .modelContainer(sharedModelContainer)
         #if targetEnvironment(macCatalyst)

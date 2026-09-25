@@ -17,6 +17,7 @@ struct HealthWorkoutRouteImportReport {
     let routeCount: Int
     let sampleCount: Int
     let didResumeInterruptedImport: Bool
+    let dirtyAggregatePeriodKeys: Set<String>
 }
 
 private enum HealthWorkoutRouteImportError: LocalizedError {
@@ -170,7 +171,8 @@ final class HealthWorkoutRouteImporter: ObservableObject {
             lastReport = report
             lastErrorMessage = nil
             if report.routeCount > 0 {
-                await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+                ShareMapAggregateDirtyPeriods.mark(report.dirtyAggregatePeriodKeys)
+                await ShareMapAggregateBuilder.refreshDirty(in: modelContainer)
             }
             if report.workoutCount == 0 {
                 updateProgressText("No supported workouts found.")
@@ -239,6 +241,7 @@ private actor HealthWorkoutRouteImportWorker {
             : nil
         var importedRouteCount = persistedState?.importedRouteCount ?? 0
         var importedSampleCount = persistedState?.importedSampleCount ?? 0
+        var dirtyAggregatePeriodKeys = Set<String>()
         var importedWorkoutCount = persistedState?.importedWorkoutCount ?? 0
         var cursorEndDate = persistedState?.nextEndDate
         await progress(persistedState == nil ? "Preparing import..." : "Resuming saved import...")
@@ -267,6 +270,9 @@ private actor HealthWorkoutRouteImportWorker {
                     )
                     importedRouteCount += 1
                     importedSampleCount += locations.count
+                    dirtyAggregatePeriodKeys.formUnion(
+                        ShareMapAggregateStore.periodKeys(for: locations.map(\.timestamp))
+                    )
                 }
 
                 importedWorkoutCount += 1
@@ -293,7 +299,8 @@ private actor HealthWorkoutRouteImportWorker {
             workoutCount: importedWorkoutCount,
             routeCount: importedRouteCount,
             sampleCount: importedSampleCount,
-            didResumeInterruptedImport: persistedState != nil
+            didResumeInterruptedImport: persistedState != nil,
+            dirtyAggregatePeriodKeys: dirtyAggregatePeriodKeys
         )
     }
 

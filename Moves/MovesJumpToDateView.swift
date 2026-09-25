@@ -1,4 +1,3 @@
-import CoreLocation
 import SwiftUI
 
 struct MovesJumpToDateView: View {
@@ -62,7 +61,7 @@ struct MovesJumpToDateView: View {
         }
     }
 
-    private let dayTimelines: [DayTimeline]
+    private let daySummaries: [TimelineDaySummary]
     private let onSelectDate: (Date) -> Void
     private let onDismiss: () -> Void
 
@@ -70,27 +69,29 @@ struct MovesJumpToDateView: View {
     @State private var activityFilter: ActivityFilter = .overall
 
     init(
-        dayTimelines: [DayTimeline],
+        daySummaries: [String: TimelineDaySummary],
         selectedDate: Date,
         onSelectDate: @escaping (Date) -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        self.dayTimelines = dayTimelines
+        self.daySummaries = daySummaries.values
+            .filter { $0.dayStart != .distantPast }
+            .sorted { $0.dayStart < $1.dayStart }
         self.onSelectDate = onSelectDate
         self.onDismiss = onDismiss
         _pickerDate = State(initialValue: selectedDate)
     }
 
     private var earliestRecordedDayStart: Date? {
-        dayTimelines.first?.dayStart
+        daySummaries.first?.dayStart
     }
 
     private var latestSelectableDayStart: Date {
         Calendar.autoupdatingCurrent.startOfDay(for: .now)
     }
 
-    private var mostActiveDays: [DayTimeline] {
-        dayTimelines
+    private var mostActiveDays: [TimelineDaySummary] {
+        daySummaries
             .sorted { lhs, rhs in
                 activityScore(for: lhs, filter: activityFilter) > activityScore(for: rhs, filter: activityFilter)
             }
@@ -195,7 +196,7 @@ struct MovesJumpToDateView: View {
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 6)
                         } else {
-                            ForEach(mostActiveDays, id: \.dayKey) { day in
+                            ForEach(Array(mostActiveDays.enumerated()), id: \.offset) { _, day in
                                 Button {
                                     pickerDate = day.dayStart
                                     onSelectDate(day.dayStart)
@@ -216,9 +217,9 @@ struct MovesJumpToDateView: View {
 
                                         Spacer(minLength: 4)
 
-                                        Text("\(day.uniqueLocationCount) places")
-                                        Text("\(day.moves.count) moves")
-                                        Text(Measurement(value: totalDistance(for: day), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
+                                        Text("\(day.uniquePlaceCount) places")
+                                        Text("\(day.moveCount) moves")
+                                        Text(Measurement(value: day.totalDistanceMeters, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))
                                     }
                                     .font(.system(size: 12, weight: .medium, design: .rounded))
                                     .foregroundStyle(.secondary)
@@ -249,75 +250,52 @@ struct MovesJumpToDateView: View {
         }
     }
 
-    private func activityScore(for day: DayTimeline, filter: ActivityFilter) -> Double {
-        let totalDistance = day.moves.reduce(0) { $0 + max($1.distanceMeters, 0) }
-        let totalMoveDuration = day.moves.reduce(0) { $0 + max($1.timelineDuration, 0) }
-        let filteredMoves: [MoveSegment]
-
+    private func activityScore(for day: TimelineDaySummary, filter: ActivityFilter) -> Double {
         switch filter {
         case .overall:
-            filteredMoves = day.moves
+            return day.activityScore
         case .placeCount:
-            return Double(day.uniqueLocationCount)
+            return Double(day.uniquePlaceCount)
         case .onFoot:
-            filteredMoves = day.moves.filter { $0.transportMode == .walking || $0.transportMode == .running }
+            return filteredScore(for: day, bucket: "walking")
         case .swimming:
-            filteredMoves = day.moves.filter { $0.transportMode == .swimming }
+            return filteredScore(for: day, bucket: "swimming")
         case .cycling:
-            filteredMoves = day.moves.filter { $0.transportMode == .cycling }
+            return filteredScore(for: day, bucket: "cycling")
         case .automotive:
-            filteredMoves = day.moves.filter { $0.transportMode == .automotive }
+            return filteredScore(for: day, bucket: "automotive")
         case .motorcycle:
-            filteredMoves = day.moves.filter { $0.transportMode == .motorcycle }
+            return filteredScore(for: day, bucket: "motorcycle")
         case .train:
-            filteredMoves = day.moves.filter { $0.transportMode == .train }
+            return filteredScore(for: day, bucket: "train")
         case .plane:
-            filteredMoves = day.moves.filter { $0.transportMode == .plane }
+            return filteredScore(for: day, bucket: "plane")
         case .boat:
-            filteredMoves = day.moves.filter { $0.transportMode == .boat }
+            return filteredScore(for: day, bucket: "boat")
         }
-
-        if filter == .overall {
-            let placeComponent = Double(day.uniqueLocationCount) * 1_200
-            let moveComponent = Double(day.moves.count) * 900
-            return placeComponent + moveComponent + totalDistance + totalMoveDuration / 8
-        }
-
-        let filteredDistance = filteredMoves.reduce(0) { $0 + max($1.distanceMeters, 0) }
-        let filteredDuration = filteredMoves.reduce(0) { $0 + max($1.timelineDuration, 0) }
-        return filteredDistance + filteredDuration / 8
     }
 
-    private func totalDistance(for day: DayTimeline) -> CLLocationDistance {
-        day.moves.reduce(0) { $0 + max($1.distanceMeters, 0) }
+    private func filteredScore(for day: TimelineDaySummary, bucket: String) -> Double {
+        day.transportDistanceMeters[bucket, default: 0]
+            + day.transportDuration[bucket, default: 0] / 8
     }
 
-    private func totalDistance(for filter: ActivityFilter) -> CLLocationDistance {
-        dayTimelines.reduce(0) { partial, day in
-            partial + day.moves.reduce(0) { moveTotal, move in
-                let matches: Bool
-                switch filter {
-                case .onFoot:
-                    matches = move.transportMode == .walking || move.transportMode == .running
-                case .swimming:
-                    matches = move.transportMode == .swimming
-                case .cycling:
-                    matches = move.transportMode == .cycling
-                case .automotive:
-                    matches = move.transportMode == .automotive
-                case .motorcycle:
-                    matches = move.transportMode == .motorcycle
-                case .train:
-                    matches = move.transportMode == .train
-                case .plane:
-                    matches = move.transportMode == .plane
-                case .boat:
-                    matches = move.transportMode == .boat
-                case .overall, .placeCount:
-                    matches = false
-                }
-                return moveTotal + (matches ? max(move.distanceMeters, 0) : 0)
-            }
+    private func totalDistance(for filter: ActivityFilter) -> Double {
+        guard let bucket = transportBucket(for: filter) else { return 0 }
+        return daySummaries.reduce(0) { $0 + $1.transportDistanceMeters[bucket, default: 0] }
+    }
+
+    private func transportBucket(for filter: ActivityFilter) -> String? {
+        switch filter {
+        case .onFoot: return "walking"
+        case .swimming: return "swimming"
+        case .cycling: return "cycling"
+        case .automotive: return "automotive"
+        case .motorcycle: return "motorcycle"
+        case .train: return "train"
+        case .plane: return "plane"
+        case .boat: return "boat"
+        case .overall, .placeCount: return nil
         }
     }
 }

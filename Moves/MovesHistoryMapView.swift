@@ -6,6 +6,59 @@ import SwiftUI
 import UIKit
 #endif
 
+private struct HistoryMapPlaceDTO: Sendable {
+    let id: String
+    let title: String
+    let latitude: Double
+    let longitude: Double
+    let visitCount: Int
+}
+
+@ModelActor
+private actor HistoryMapPlaceLoader {
+    func load(period: MovesSharePeriod, periodStart: Date) throws -> [HistoryMapPlaceDTO] {
+        let places: [VisitPlace]
+        if let interval = period.dateInterval(containing: periodStart) {
+            let predicate = #Predicate<VisitPlace> { place in
+                place.arrivalDate >= interval.start && place.arrivalDate < interval.end
+            }
+            places = try modelContext.fetch(FetchDescriptor(predicate: predicate))
+        } else {
+            places = try modelContext.fetch(FetchDescriptor<VisitPlace>())
+        }
+
+        struct Accumulator {
+            var title: String
+            var latitude: Double
+            var longitude: Double
+            var visitCount: Int
+        }
+        var grouped = [String: Accumulator]()
+        for place in places {
+            let latitudeBucket = Int((place.latitude * 10_000).rounded())
+            let longitudeBucket = Int((place.longitude * 10_000).rounded())
+            let key = "\(latitudeBucket)|\(longitudeBucket)"
+            var accumulator = grouped[key] ?? Accumulator(
+                title: place.displayTitle,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                visitCount: 0
+            )
+            accumulator.visitCount += 1
+            grouped[key] = accumulator
+        }
+        return grouped.map { key, value in
+            HistoryMapPlaceDTO(
+                id: key,
+                title: value.title,
+                latitude: value.latitude,
+                longitude: value.longitude,
+                visitCount: value.visitCount
+            )
+        }
+    }
+}
+
 /// An interactive history map that keeps the user's camera framing when it is exported.
 struct MovesHistoryMapView: View {
     fileprivate enum Display: String, CaseIterable, Identifiable {
@@ -68,6 +121,7 @@ struct MovesHistoryMapView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
 
     private let dayTimelines: [DayTimeline]
     @State private var selectedPeriod: MovesSharePeriod = .day
@@ -75,6 +129,7 @@ struct MovesHistoryMapView: View {
     @State private var display: Display = .standard
     @State private var baseMap: BaseMap = .standard
     @State private var tracks: [Track] = []
+    @State private var dataRevision = 0
     @State private var isLoadingTracks = false
     @State private var cacheBuildProgress: Double?
     @State private var camera: MapCameraPosition
@@ -87,11 +142,7 @@ struct MovesHistoryMapView: View {
     init(dayTimelines: [DayTimeline], initialDate: Date) {
         self.dayTimelines = dayTimelines
         _selectedDate = State(initialValue: initialDate)
-        let initialCoordinates = dayTimelines
-            .filter { MovesSharePeriod.day.contains($0.dayStart, periodStart: initialDate) }
-            .flatMap(\.places)
-            .map(\.coordinate)
-        let region = MapRegionFactory.region(for: initialCoordinates)
+        let region = MapRegionFactory.region(for: [])
         _camera = State(initialValue: .region(region))
         _visibleRegion = State(initialValue: region)
     }
@@ -107,31 +158,7 @@ struct MovesHistoryMapView: View {
         }
     }
 
-    private var places: [Place] {
-        struct Accumulator {
-            var title: String
-            var coordinate: CLLocationCoordinate2D
-            var visitCount: Int
-        }
-
-        var grouped: [String: Accumulator] = [:]
-        for place in selectedTimelines.flatMap(\.places) {
-            let latitudeBucket = Int((place.latitude * 10_000).rounded())
-            let longitudeBucket = Int((place.longitude * 10_000).rounded())
-            let key = "\(latitudeBucket)|\(longitudeBucket)"
-            var accumulator = grouped[key] ?? Accumulator(
-                title: place.displayTitle,
-                coordinate: place.coordinate,
-                visitCount: 0
-            )
-            accumulator.visitCount += 1
-            grouped[key] = accumulator
-        }
-        return grouped.map { key, value in
-            Place(id: key, title: value.title, coordinate: value.coordinate, visitCount: value.visitCount)
-        }
-        .sorted { $0.visitCount > $1.visitCount }
-    }
+    @State private var places: [Place] = []
 
     private var allCoordinates: [CLLocationCoordinate2D] {
         tracks.flatMap(\.coordinates) + places.map(\.coordinate)
@@ -189,9 +216,21 @@ struct MovesHistoryMapView: View {
             .task(id: dataRefreshKey) {
                 await loadTracks()
             }
+            .task {
+                for await _ in NotificationCenter.default.notifications(named: .movesLocationSamplesDidChange) {
+                    guard !Task.isCancelled else { return }
+                    dataRevision &+= 1
+                }
+            }
+            .task {
+                for await _ in NotificationCenter.default.notifications(named: .movesImportedRouteDataDidChange) {
+                    guard !Task.isCancelled else { return }
+                    dataRevision &+= 1
+                }
+            }
             .sheet(isPresented: $isShowingDatePicker) {
                 MovesJumpToDateView(
-                    dayTimelines: dayTimelines,
+                    daySummaries: importedRouteDataSummary.daySummaries,
                     selectedDate: selectedDate,
                     onSelectDate: { selectedDate = $0 },
                     onDismiss: { isShowingDatePicker = false }
@@ -205,10 +244,7 @@ struct MovesHistoryMapView: View {
     }
 
     private var dataRefreshKey: String {
-        let daySignature = selectedTimelines.map { day in
-            "\(day.dayKey):\(day.places.count):\(day.moves.count)"
-        }.joined(separator: ";")
-        return "\(selectedPeriod.rawValue)|\(selectedPeriodStart.timeIntervalSinceReferenceDate)|\(daySignature)"
+        return "\(selectedPeriod.rawValue)|\(selectedPeriodStart.timeIntervalSinceReferenceDate)|\(dataRevision)"
     }
 
     private var map: some View {
@@ -365,6 +401,19 @@ struct MovesHistoryMapView: View {
         let periodStart = selectedPeriodStart
         let selectedDays = selectedTimelines
         let container = modelContext.container
+
+        if let loadedPlaces = try? await HistoryMapPlaceLoader(modelContainer: container)
+            .load(period: period, periodStart: periodStart), !Task.isCancelled {
+            places = loadedPlaces.map {
+                Place(
+                    id: $0.id,
+                    title: $0.title,
+                    coordinate: CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude),
+                    visitCount: $0.visitCount
+                )
+            }
+            .sorted { $0.visitCount > $1.visitCount }
+        }
 
         func cachedTracks() -> [ShareMapAggregateTrack]? {
             let cacheContext = ModelContext(container)

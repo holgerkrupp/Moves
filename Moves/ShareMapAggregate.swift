@@ -66,6 +66,34 @@ enum ShareMapAggregateStore {
         return String(format: "month:%04d-%02d", year, month)
     }
 
+    static func periodKeys(
+        for dates: [Date],
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Set<String> {
+        Set(dates.flatMap { date in
+            [periodKey(for: .month, date: date, calendar: calendar),
+             periodKey(for: .year, date: date, calendar: calendar)].compactMap { $0 }
+        })
+    }
+
+    static func dateInterval(for key: String) -> DateInterval? {
+        let components = key.split(separator: ":", maxSplits: 1)
+        guard components.count == 2,
+              let value = Int(components[1]) else {
+            if key.hasPrefix("month:"),
+               let date = DateFormatter.shareAggregateMonth.date(from: String(components.last ?? "")) {
+                return MovesSharePeriod.month.dateInterval(containing: date)
+            }
+            return nil
+        }
+        if key.hasPrefix("year:") {
+            let calendar = Calendar.autoupdatingCurrent
+            guard let date = calendar.date(from: DateComponents(year: value)) else { return nil }
+            return MovesSharePeriod.year.dateInterval(containing: date, calendar: calendar)
+        }
+        return nil
+    }
+
     static func sourceSignature(for timelines: [DayTimeline]) -> String {
         let source = timelines
             .sorted { $0.dayKey < $1.dayKey }
@@ -112,13 +140,13 @@ enum ShareMapAggregateStore {
         in context: ModelContext
     ) -> [ShareMapAggregateTrack]? {
         guard let key = periodKey(for: period, date: periodStart) else { return nil }
+        guard !ShareMapAggregateDirtyPeriods.contains(key) else { return nil }
         var descriptor = FetchDescriptor<ShareMapAggregate>(
             predicate: #Predicate { $0.periodKey == key },
             sortBy: [SortDescriptor(\.generatedAt, order: .reverse)]
         )
         descriptor.fetchLimit = 1
         guard let aggregate = try? context.fetch(descriptor).first,
-              aggregate.sourceSignature == sourceSignature(for: timelines),
               let data = aggregate.tracksData else {
             return nil
         }
@@ -156,22 +184,84 @@ enum ShareMapAggregateStore {
     }
 }
 
+private extension DateFormatter {
+    static let shareAggregateMonth: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+}
+
+/// Persisted outside the CloudKit timeline schema so an interrupted import can resume
+/// aggregate reconciliation without adding cache metadata to synced user data.
+enum ShareMapAggregateDirtyPeriods {
+    private static let key = "Moves.shareMapAggregateDirtyPeriods"
+    private static let lock = NSLock()
+
+    static func mark(_ periodKeys: Set<String>) {
+        guard !periodKeys.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let existing = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        UserDefaults.standard.set(Array(existing.union(periodKeys)).sorted(), forKey: key)
+    }
+
+    static func contains(_ periodKey: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return (UserDefaults.standard.stringArray(forKey: key) ?? []).contains(periodKey)
+    }
+
+    static func take() -> Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        let periods = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        UserDefaults.standard.removeObject(forKey: key)
+        return periods
+    }
+
+    static func restore(_ periodKeys: Set<String>) {
+        mark(periodKeys)
+    }
+
+    static func clear(_ periodKeys: Set<String>) {
+        guard !periodKeys.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let remaining = Set(UserDefaults.standard.stringArray(forKey: key) ?? []).subtracting(periodKeys)
+        UserDefaults.standard.set(Array(remaining).sorted(), forKey: key)
+    }
+}
+
 enum ShareMapAggregateBuilder {
     private static let log = Logger(subsystem: "de.holgerkrupp.Moves", category: "ShareMapAggregate")
 
     static func refreshAll(in modelContainer: ModelContainer) async {
+        await refreshDirty(in: modelContainer)
+    }
+
+    static func refreshDirty(in modelContainer: ModelContainer) async {
+        let periodKeys = ShareMapAggregateDirtyPeriods.take()
+        guard !periodKeys.isEmpty else { return }
+        await refresh(periodKeys: periodKeys, in: modelContainer)
+    }
+
+    static func refresh(periodKeys: Set<String>, in modelContainer: ModelContainer) async {
+        guard !periodKeys.isEmpty else { return }
         let work = Task.detached(priority: .utility) {
             do {
                 try Task.checkCancellation()
                 let context = ModelContext(modelContainer)
-                let timelines = try context.fetch(
-                    FetchDescriptor<DayTimeline>(sortBy: [SortDescriptor(\.dayStart, order: .forward)])
-                )
-                try refresh(timelines: timelines, in: context)
+                try refresh(periodKeys: periodKeys, in: context)
+                ShareMapAggregateDirtyPeriods.clear(periodKeys)
             } catch is CancellationError {
-                return
+                ShareMapAggregateDirtyPeriods.restore(periodKeys)
             } catch {
                 log.error("Could not refresh map aggregates: \(error.localizedDescription, privacy: .public)")
+                ShareMapAggregateDirtyPeriods.restore(periodKeys)
             }
         }
         await withTaskCancellationHandler(operation: { await work.value }, onCancel: { work.cancel() })
@@ -190,25 +280,27 @@ enum ShareMapAggregateBuilder {
                 try Task.checkCancellation()
                 progress(0.05)
                 let context = ModelContext(modelContainer)
-                let timelines = try context.fetch(
-                    FetchDescriptor<DayTimeline>(sortBy: [SortDescriptor(\.dayStart, order: .forward)])
-                )
+                guard let interval = period.dateInterval(containing: periodStart) else { return }
+                let predicate = #Predicate<DayTimeline> { day in
+                    day.dayStart >= interval.start && day.dayStart < interval.end
+                }
+                let timelines = try context.fetch(FetchDescriptor(predicate: predicate))
                 progress(0.12)
-                let selected = selectedTimelines(
-                    from: timelines,
-                    period: period,
-                    periodStart: periodStart
-                )
                 try rebuildIfNeeded(
-                    timelines: selected,
+                    timelines: timelines.filter(\.hasRecordedActivity),
                     period: period,
                     periodStart: period.start(for: periodStart),
                     in: context,
                     progress: progress
                 )
+                ShareMapAggregateDirtyPeriods.clear(Set([
+                    ShareMapAggregateStore.periodKey(for: period, date: periodStart)
+                ].compactMap { $0 }))
                 progress(1)
             } catch is CancellationError {
-                return
+                if let key = ShareMapAggregateStore.periodKey(for: period, date: periodStart) {
+                    ShareMapAggregateDirtyPeriods.restore([key])
+                }
             } catch {
                 log.error("Could not refresh requested map aggregate: \(error.localizedDescription, privacy: .public)")
             }
@@ -216,22 +308,21 @@ enum ShareMapAggregateBuilder {
         await withTaskCancellationHandler(operation: { await work.value }, onCancel: { work.cancel() })
     }
 
-    private static func refresh(timelines: [DayTimeline], in context: ModelContext) throws {
-        let activeTimelines = timelines.filter(\.hasRecordedActivity)
-        for period in [MovesSharePeriod.month, .year] {
+    private static func refresh(periodKeys: Set<String>, in context: ModelContext) throws {
+        for key in periodKeys.sorted() {
             try Task.checkCancellation()
-            let grouped = Dictionary(grouping: activeTimelines) {
-                period.start(for: $0.dayStart)
+            guard let interval = ShareMapAggregateStore.dateInterval(for: key) else { continue }
+            let period: MovesSharePeriod = key.hasPrefix("month:") ? .month : .year
+            let predicate = #Predicate<DayTimeline> { day in
+                day.dayStart >= interval.start && day.dayStart < interval.end
             }
-            for periodStart in grouped.keys.sorted() {
-                try Task.checkCancellation()
-                try rebuildIfNeeded(
-                    timelines: grouped[periodStart] ?? [],
-                    period: period,
-                    periodStart: periodStart,
-                    in: context
-                )
-            }
+            let timelines = try context.fetch(FetchDescriptor(predicate: predicate))
+            try rebuildIfNeeded(
+                timelines: timelines.filter(\.hasRecordedActivity),
+                period: period,
+                periodStart: interval.start,
+                in: context
+            )
         }
     }
 
@@ -242,9 +333,17 @@ enum ShareMapAggregateBuilder {
         in context: ModelContext,
         progress: (@Sendable (Double) -> Void)? = nil
     ) throws {
-        guard !timelines.isEmpty,
-              let key = ShareMapAggregateStore.periodKey(for: period, date: periodStart) else { return }
+        guard let key = ShareMapAggregateStore.periodKey(for: period, date: periodStart) else { return }
         progress?(0.16)
+        if timelines.isEmpty {
+            let descriptor = FetchDescriptor<ShareMapAggregate>(predicate: #Predicate { $0.periodKey == key })
+            for aggregate in try context.fetch(descriptor) {
+                context.delete(aggregate)
+            }
+            try context.save()
+            progress?(1)
+            return
+        }
         let signature = ShareMapAggregateStore.sourceSignature(for: timelines)
         let descriptor = FetchDescriptor<ShareMapAggregate>(
             predicate: #Predicate { $0.periodKey == key },
@@ -310,16 +409,6 @@ enum ShareMapAggregateBuilder {
         try context.save()
         progress?(1)
         log.info("Stored \(tracks.count) tracks for \(key, privacy: .public)")
-    }
-
-    private static func selectedTimelines(
-        from timelines: [DayTimeline],
-        period: MovesSharePeriod,
-        periodStart: Date
-    ) -> [DayTimeline] {
-        timelines.filter {
-            $0.hasRecordedActivity && period.contains($0.dayStart, periodStart: periodStart)
-        }
     }
 
     private static func downsampled(

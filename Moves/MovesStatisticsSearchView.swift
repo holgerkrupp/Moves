@@ -64,6 +64,14 @@ struct MovesStatisticsSnapshot {
     let visits: [VisitPlace]
     let moves: [MoveSegment]
 
+    static let empty = MovesStatisticsSnapshot(locations: [], visits: [], moves: [])
+
+    private init(locations: [MovesLocationSummary], visits: [VisitPlace], moves: [MoveSegment]) {
+        self.locations = locations
+        self.visits = visits
+        self.moves = moves
+    }
+
     init(dayTimelines: [DayTimeline], now: Date = .now) {
         var placesByID: [UUID: VisitPlace] = [:]
         var movesByID: [UUID: MoveSegment] = [:]
@@ -233,7 +241,8 @@ struct MovesStatisticsSearchView: View {
 
     private let dayTimelines: [DayTimeline]
     private let initialDate: Date
-    private let snapshot: MovesStatisticsSnapshot
+    @State private var snapshot: MovesStatisticsSnapshot
+    @State private var isLoadingSnapshot = true
 
     @State private var visitSearchText = ""
     @State private var originKey: String?
@@ -245,7 +254,7 @@ struct MovesStatisticsSearchView: View {
     init(dayTimelines: [DayTimeline], initialDate: Date = .now) {
         self.dayTimelines = dayTimelines
         self.initialDate = initialDate
-        snapshot = MovesStatisticsSnapshot(dayTimelines: dayTimelines)
+        _snapshot = State(initialValue: .empty)
     }
 
     var body: some View {
@@ -258,6 +267,17 @@ struct MovesStatisticsSearchView: View {
             )
         }
         .onAppear(perform: selectCommuteDefaultsIfAvailable)
+        .task {
+            guard isLoadingSnapshot else { return }
+            // Keep the navigation transition cheap. The full-history graph is assembled
+            // after the destination is on screen; the next step is to replace this
+            // compatibility path with the Sendable statistics worker as more detail
+            // screens move to ID-based lookups.
+            await Task.yield()
+            snapshot = MovesStatisticsSnapshot(dayTimelines: dayTimelines)
+            isLoadingSnapshot = false
+            selectCommuteDefaultsIfAvailable()
+        }
     }
 
     private var compactWorkspace: some View {

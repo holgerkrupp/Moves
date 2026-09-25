@@ -21,6 +21,22 @@ final class ImportStressTests: XCTestCase {
         XCTAssertTrue(chunks.allSatisfy(\.hasOriginalTimestamps))
     }
 
+    func testImportedRoutePayloadRoundTripPreservesGPSFields() throws {
+        let locations = makeLocations(count: 9)
+        let data = try XCTUnwrap(ImportedRoutePayloadCodec.encode(locations))
+        let decoded = try XCTUnwrap(ImportedRoutePayloadCodec.decode(data))
+
+        XCTAssertEqual(decoded.count, locations.count)
+        for (point, location) in zip(decoded, locations) {
+            XCTAssertEqual(point.timestamp, location.timestamp)
+            XCTAssertEqual(point.latitude, location.coordinate.latitude, accuracy: 0.0000001)
+            XCTAssertEqual(point.longitude, location.coordinate.longitude, accuracy: 0.0000001)
+            XCTAssertEqual(point.altitude, location.altitude, accuracy: 0.0001)
+            XCTAssertEqual(point.horizontalAccuracy, location.horizontalAccuracy, accuracy: 0.0001)
+            XCTAssertEqual(point.speed, location.speed, accuracy: 0.0001)
+        }
+    }
+
     func testManyFilesMixedFormatsAndZIPAcquireDeterministically() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let source = root.appendingPathComponent("source", isDirectory: true)
@@ -77,6 +93,8 @@ final class ImportStressTests: XCTestCase {
                                                      transportMode: .walking, resolvePlaceNames: false)
         XCTAssertNotNil(first)
         XCTAssertNotNil(second)
+        XCTAssertNotNil(first?.importedRouteData)
+        XCTAssertEqual(first?.importedRouteCoordinates?.count, locations.count)
         let context = ModelContext(container)
         let samples = try context.fetch(FetchDescriptor<LocationSample>())
         XCTAssertLessThanOrEqual(samples.count, locations.count)
@@ -230,10 +248,12 @@ final class ImportStressTests: XCTestCase {
         }.value
 
         XCTAssertEqual(summary, ImportedRouteDataSummary(sampleCount: 2, moveCount: 1))
-        XCTAssertEqual(
-            daySummaries[timeline.dayKey],
-            TimelineDaySummary(placeCount: 1, moveCount: 2, sampleCount: 3)
-        )
+        let daySummary = try XCTUnwrap(daySummaries[timeline.dayKey])
+        XCTAssertEqual(daySummary.placeCount, 1)
+        XCTAssertEqual(daySummary.uniquePlaceCount, 1)
+        XCTAssertEqual(daySummary.moveCount, 2)
+        XCTAssertEqual(daySummary.sampleCount, 3)
+        XCTAssertGreaterThan(daySummary.totalDistanceMeters, 0)
     }
 }
 

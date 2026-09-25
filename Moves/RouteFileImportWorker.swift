@@ -8,6 +8,7 @@ actor RouteFileImportWorker {
     struct Result: Sendable {
         var routeCount = 0
         var sampleCount = 0
+        var dirtyAggregatePeriodKeys = Set<String>()
     }
 
     enum WorkerError: Error, Sendable {
@@ -66,6 +67,9 @@ actor RouteFileImportWorker {
                 if let move {
                     result.routeCount += 1
                     result.sampleCount += chunk.count
+                    result.dirtyAggregatePeriodKeys.formUnion(
+                        aggregatePeriodKeys(for: chunk.map(\.timestamp))
+                    )
                     lastMoveInTrack = move
                     if result.routeCount == 1
                         || result.routeCount.isMultiple(of: Self.summaryRefreshRouteInterval) {
@@ -93,10 +97,20 @@ actor RouteFileImportWorker {
         let importedMoveIDs: Set<UUID>
         let places: [VisitPlace]
         do {
-            importedMoveIDs = Set(try modelContext.fetch(FetchDescriptor<MoveSegment>())
-                .filter { $0.samples.contains { $0.source == .fileRouteImport } }
-                .map(\.id))
-            places = try modelContext.fetch(FetchDescriptor<VisitPlace>()).filter { place in
+            let importedSource = LocationSampleSource.fileRouteImport.rawValue
+            let samplePredicate = #Predicate<LocationSample> { sample in
+                sample.sourceRawValue == importedSource
+            }
+            let importedSampleMoveIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: samplePredicate))
+                .compactMap { $0.moveSegment?.id })
+            let movePredicate = #Predicate<MoveSegment> { move in
+                importedSampleMoveIDs.contains(move.id)
+            }
+            importedMoveIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: movePredicate)).map(\.id))
+            let placePredicate = #Predicate<VisitPlace> { place in
+                place.horizontalAccuracy <= 180
+            }
+            places = try modelContext.fetch(FetchDescriptor(predicate: placePredicate)).filter { place in
                 let isImported = place.dayTimeline?.moves.contains { importedMoveIDs.contains($0.id) } == true
                 let hasLabel = !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
                     || !(place.autoLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
@@ -125,15 +139,40 @@ actor RouteFileImportWorker {
         dto.makeImportedTrack()
     }
 
+    private func aggregatePeriodKeys(for dates: [Date]) -> Set<String> {
+        let calendar = Calendar.autoupdatingCurrent
+        return Set(dates.flatMap { date in
+            let components = calendar.dateComponents([.year, .month], from: date)
+            guard let year = components.year, let month = components.month else { return [String]() }
+            return [
+                String(format: "month:%04d-%02d", year, month),
+                "year:\(year)"
+            ]
+        })
+    }
+
     private func hasExistingData(for locations: [CLLocation]) throws -> Bool {
-        let keys = Set(locations.map { DayTimeline.makeDayKey(for: $0.timestamp) })
-        return try modelContext.fetch(FetchDescriptor<DayTimeline>()).contains {
-            keys.contains($0.dayKey) && $0.hasRecordedActivity
+        guard let start = locations.map(\.timestamp).min(),
+              let end = locations.map(\.timestamp).max() else { return false }
+        let dayStart = Calendar.current.startOfDay(for: start)
+        let dayEnd = Calendar.current.startOfDay(for: end)
+        let predicate = #Predicate<DayTimeline> { day in
+            day.dayStart >= dayStart && day.dayStart <= dayEnd
         }
+        // The date predicate keeps this existence check proportional to the imported
+        // window. SwiftData cannot currently express `hasRecordedActivity` because it
+        // is derived from optional relationship storage, so only the bounded candidates
+        // are inspected in memory.
+        return try modelContext.fetch(FetchDescriptor(predicate: predicate)).contains(where: { $0.hasRecordedActivity })
     }
 
     private func expandedImportChunks(for locations: [CLLocation]) throws -> [[CLLocation]] {
-        let intervals = try modelContext.fetch(FetchDescriptor<MoveSegment>()).map { ($0.startDate, $0.endDate) }
+        guard let start = locations.map(\.timestamp).min(),
+              let end = locations.map(\.timestamp).max() else { return [] }
+        let predicate = #Predicate<MoveSegment> { move in
+            move.startDate <= end && move.endDate >= start
+        }
+        let intervals = try modelContext.fetch(FetchDescriptor(predicate: predicate)).map { ($0.startDate, $0.endDate) }
         let available = locations.filter { location in
             !intervals.contains { location.timestamp >= $0.0 && location.timestamp <= $0.1 }
         }
@@ -151,12 +190,14 @@ actor RouteFileImportWorker {
 
     private func removeExistingData(overlapping locations: [CLLocation]) throws {
         guard let start = locations.map(\.timestamp).min(), let end = locations.map(\.timestamp).max() else { return }
-        let moves = try modelContext.fetch(FetchDescriptor<MoveSegment>()).filter {
-            $0.startDate <= end && $0.endDate >= start
+        let movePredicate = #Predicate<MoveSegment> { move in
+            move.startDate <= end && move.endDate >= start
         }
-        let samples = try modelContext.fetch(FetchDescriptor<LocationSample>()).filter {
-            $0.timestamp >= start && $0.timestamp <= end
+        let samplePredicate = #Predicate<LocationSample> { sample in
+            sample.timestamp >= start && sample.timestamp <= end
         }
+        let moves = try modelContext.fetch(FetchDescriptor(predicate: movePredicate))
+        let samples = try modelContext.fetch(FetchDescriptor(predicate: samplePredicate))
         moves.forEach(modelContext.delete)
         samples.forEach(modelContext.delete)
         try modelContext.save()

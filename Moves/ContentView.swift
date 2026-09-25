@@ -1,6 +1,7 @@
 import CoreLocation
 import CoreTransferable
 import Foundation
+import OSLog
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -11,6 +12,13 @@ import UIKit
 private enum TrackingPromptAction {
     case requestAuthorization
     case openSettings
+}
+
+private enum TimelinePerformanceInstrumentation {
+    static let signposter = OSSignposter(
+        subsystem: "de.holgerkrupp.Moves",
+        category: "TimelinePerformance"
+    )
 }
 
 private struct TrackingPermissionPrompt {
@@ -351,6 +359,7 @@ struct ContentView: View {
     @EnvironmentObject private var undoController: AppUndoController
     @EnvironmentObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
     @EnvironmentObject private var multiDevicePresenceManager: MultiDevicePresenceManager
+    @EnvironmentObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -424,6 +433,19 @@ struct ContentView: View {
         recordedDayTimelines.indices.contains(displayedPageIndex) && displayedPageIndex < recordedDayTimelines.count - 1
     }
 
+    @MainActor
+    private func measureTimelineWindow() {
+        let state = TimelinePerformanceInstrumentation.signposter.beginInterval(
+            "DayTimeline root query/window",
+            "days=\(dayTimelines.count)"
+        )
+        _ = visibleTimelinePages.count
+        TimelinePerformanceInstrumentation.signposter.endInterval(
+            "DayTimeline root query/window",
+            state
+        )
+    }
+
     var body: some View {
         ZStack {
             if usesSplitNavigation {
@@ -436,6 +458,12 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .task {
+            importedRouteDataSummary.refresh()
+        }
+        .onAppear {
+            measureTimelineWindow()
+        }
         .sheet(isPresented: $isShowingSettings) {
             MovesSettingsView(
                 dayTimelines: dayTimelines,
@@ -1255,7 +1283,7 @@ struct ContentView: View {
 
     private var datePickerSheet: some View {
         MovesJumpToDateView(
-            dayTimelines: recordedDayTimelines,
+            daySummaries: importedRouteDataSummary.daySummaries,
             selectedDate: selectedDay?.dayStart ?? .now,
             onSelectDate: jumpToDate,
             onDismiss: { isShowingDatePicker = false }
@@ -2223,5 +2251,6 @@ struct ContentView_Previews: PreviewProvider {
             .environmentObject(AppUndoController())
             .environmentObject(MovesCloudDataPresencePublisher(modelContainer: container))
             .environmentObject(MultiDevicePresenceManager(modelContainer: container))
+            .environmentObject(ImportedRouteDataSummaryStore(modelContainer: container))
     }
 }

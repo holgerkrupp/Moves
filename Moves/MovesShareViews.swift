@@ -738,6 +738,7 @@ private enum MovesShareAspect: String, CaseIterable, Identifiable {
 }
 
 struct MovesShareGalleryView: View {
+    @EnvironmentObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -1041,7 +1042,7 @@ struct MovesShareGalleryView: View {
         }
         .sheet(isPresented: $isShowingDatePicker) {
             MovesJumpToDateView(
-                dayTimelines: dayTimelines,
+                daySummaries: importedRouteDataSummary.daySummaries,
                 selectedDate: selectedDate,
                 onSelectDate: { selectedDate = $0 },
                 onDismiss: { isShowingDatePicker = false }

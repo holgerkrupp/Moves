@@ -1146,15 +1146,7 @@ private struct MovesMacBrowser: View {
                 .inspectorColumnWidth(min: 230, ideal: 280, max: 360)
         }
         .onChange(of: timelines) { _, current in
-            if case let .day(key) = selection,
-               !current.contains(where: { $0.dayKey == key }) {
-                selection = nil
-            }
-            if selection == nil,
-               selectsLatestDay,
-               let latest = current.first {
-                selection = .day(latest.dayKey)
-            }
+            reconcileSelection(with: current)
         }
         .onAppear {
             modelContext.undoManager = undoManager
@@ -1172,16 +1164,12 @@ private struct MovesMacBrowser: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button {
-                    isShowingDatePicker.toggle()
-                } label: {
-                    Label(datePickerToolbarTitle, systemImage: "calendar")
-                }
+                Button(datePickerToolbarTitle) { isShowingDatePicker.toggle() }
                 .help("Jump to Date")
                 .disabled(recordedTimelines.isEmpty)
                 .popover(isPresented: $isShowingDatePicker, arrowEdge: .bottom) {
                     MovesJumpToDateView(
-                        dayTimelines: recordedTimelines.sorted { $0.dayStart < $1.dayStart },
+                        daySummaries: importedRouteDataSummary.daySummaries,
                         selectedDate: selectedTimelineForExport?.dayStart ?? .now,
                         onSelectDate: jumpToDate,
                         onDismiss: { isShowingDatePicker = false }
@@ -1356,6 +1344,15 @@ private struct MovesMacBrowser: View {
         } message: {
             Text(exportMessage)
         }
+    }
+
+    private func reconcileSelection(with current: [DayTimeline]) {
+        if case let .day(selectedKey) = selection,
+           !current.contains(where: { $0.dayKey == selectedKey }) {
+            selection = nil
+        }
+        guard selection == nil, selectsLatestDay, let latest = current.first else { return }
+        selection = .day(latest.dayKey)
     }
 
     private func beginImport() {
