@@ -1575,9 +1575,22 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         descriptor.fetchLimit = 1
 
         guard let timeline = try modelContext.fetch(descriptor).first else { return [] }
-        return timeline.places
+        var places = timeline.places
             .filter { belongsToCurrentDevice($0.deviceIdentifier) }
             .sorted { $0.arrivalDate < $1.arrivalDate }
+
+        // The first move of a day normally starts at a visit that began the previous day
+        // (for example, leaving home in the morning). Include that carried-over visit so a
+        // retrospective repair produces the same move as live visit ingestion.
+        if let firstPlace = places.first,
+           let carriedOverPlace = try latestPlace(
+               before: firstPlace.arrivalDate,
+               excluding: firstPlace.id
+           ) {
+            places.insert(carriedOverPlace, at: 0)
+        }
+
+        return places
     }
 
     func samples(from startDate: Date, to endDate: Date) throws -> [LocationSample] {

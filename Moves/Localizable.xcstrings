@@ -145,16 +145,6 @@
     "%lld places" : {
 
     },
-    "%lld places   %lld moves" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld places   %2$lld moves"
-          }
-        }
-      }
-    },
     "%lld places · %lld moves" : {
       "localizations" : {
         "en" : {
@@ -325,6 +315,9 @@
 
     },
     "Change Transport" : {
+
+    },
+    "Change Transport for %lld Activities" : {
 
     },
     "Changes apply to open Moves windows and are remembered the next time the app starts." : {
@@ -1347,6 +1340,9 @@
     "Select the latest recorded day when opening a window" : {
 
     },
+    "Select to view places and moves" : {
+
+    },
     "Selected split point" : {
 
     },
@@ -1422,6 +1418,16 @@
     "Show realistic map elevation" : {
 
     },
+    "Showing the latest %lld of %lld routes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Showing the latest %1$lld of %2$lld routes."
+          }
+        }
+      }
+    },
     "Shows iCloud activity for this copy of Moves. Other devices sync independently." : {
 
     },
@@ -1468,6 +1474,9 @@
 
     },
     "Start Route Tracking" : {
+
+    },
+    "Start Time" : {
 
     },
     "Start using Moves" : {

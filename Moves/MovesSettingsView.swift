@@ -28,7 +28,7 @@ struct MovesSettingsView: View {
     @AppStorage(DailyTimelineBackup.isEnabledKey) private var dailyBackupIsEnabled = false
     @AppStorage(DailyTimelineBackup.formatKey) private var dailyBackupFormat = DailyTimelineBackupFormat.gpx.rawValue
     @AppStorage(DailyTimelineBackup.usesMonthlyFoldersKey) private var dailyBackupUsesMonthlyFolders = false
-    @AppStorage(VisitGapFillingSettings.isEnabledKey) private var automaticallyFillsVisitGaps = false
+    @AppStorage(VisitGapFillingSettings.isEnabledKey) private var automaticallyFillsVisitGaps = VisitGapFillingSettings.defaultIsEnabled
 
     let dayTimelines: [DayTimeline]
     let selectedDayKey: String

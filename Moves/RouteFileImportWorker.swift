@@ -15,6 +15,7 @@ actor RouteFileImportWorker {
     }
 
     private static let commitChunkSize = 256
+    private static let summaryRefreshRouteInterval = 16
 
     func importTracks(
         _ tracks: [RouteTrackDTO],
@@ -50,12 +51,15 @@ actor RouteFileImportWorker {
 
             for (index, chunk) in chunks.enumerated() where chunk.count >= 2 {
                 try await checkpoint(shouldPause)
+                let resolvedMode = mode == .unknown
+                    ? ImportedTransportModeInference.infer(from: chunk) ?? .unknown
+                    : mode
                 let precedingVisit = importsWholeTrack && index == 0 && track.startsAfterVisitGap
                     ? previousImportedMove?.endPlace : nil
                 let move = try repository.importRouteTrack(
                     locations: chunk,
                     source: .fileRouteImport,
-                    transportMode: mode,
+                    transportMode: resolvedMode,
                     resolvePlaceNames: false,
                     continuingFrom: precedingVisit
                 )
@@ -63,6 +67,13 @@ actor RouteFileImportWorker {
                     result.routeCount += 1
                     result.sampleCount += chunk.count
                     lastMoveInTrack = move
+                    if result.routeCount == 1
+                        || result.routeCount.isMultiple(of: Self.summaryRefreshRouteInterval) {
+                        NotificationCenter.default.post(
+                            name: .movesImportedRouteDataDidChange,
+                            object: nil
+                        )
+                    }
                 }
                 if result.routeCount % Self.commitChunkSize == 0 {
                     try repository.saveIfNeeded()

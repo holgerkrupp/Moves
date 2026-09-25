@@ -180,6 +180,8 @@ struct TimelineDaySummary: Codable, Equatable, Sendable {
     var moveCount: Int
     var sampleCount: Int
 
+    static let empty = TimelineDaySummary(placeCount: 0, moveCount: 0, sampleCount: 0)
+
     var hasRecordedActivity: Bool {
         placeCount > 0 || moveCount > 0 || sampleCount > 0
     }
@@ -226,12 +228,67 @@ actor ImportedRouteDataSummaryWorker {
         result.reserveCapacity(timelines.count)
 
         for timeline in timelines {
+            result[timeline.dayKey] = .empty
+        }
+
+        // Count from the child records instead of the cached inverse arrays on DayTimeline.
+        // Imported records are created by assigning their `dayTimeline` relationship, and a
+        // freshly-created SwiftData context can temporarily expose an empty inverse collection.
+        // Reading the owning relationship also avoids materializing an entire day's route data.
+        let batchSize = 2_048
+
+        let placeCount = try modelContext.fetchCount(FetchDescriptor<VisitPlace>())
+        var placeOffset = 0
+        while placeOffset < placeCount {
             try Task.checkCancellation()
-            result[timeline.dayKey] = TimelineDaySummary(
-                placeCount: timeline.places.count,
-                moveCount: timeline.moves.count,
-                sampleCount: timeline.samples.count
+            var descriptor = FetchDescriptor<VisitPlace>(
+                sortBy: [SortDescriptor(\VisitPlace.arrivalDate), SortDescriptor(\VisitPlace.id)]
             )
+            descriptor.fetchLimit = min(batchSize, placeCount - placeOffset)
+            descriptor.fetchOffset = placeOffset
+            let batch = try modelContext.fetch(descriptor)
+            guard !batch.isEmpty else { break }
+            for place in batch {
+                guard let dayKey = place.dayTimeline?.dayKey else { continue }
+                result[dayKey, default: .empty].placeCount += 1
+            }
+            placeOffset += batch.count
+        }
+
+        let moveCount = try modelContext.fetchCount(FetchDescriptor<MoveSegment>())
+        var moveOffset = 0
+        while moveOffset < moveCount {
+            try Task.checkCancellation()
+            var descriptor = FetchDescriptor<MoveSegment>(
+                sortBy: [SortDescriptor(\MoveSegment.startDate), SortDescriptor(\MoveSegment.id)]
+            )
+            descriptor.fetchLimit = min(batchSize, moveCount - moveOffset)
+            descriptor.fetchOffset = moveOffset
+            let batch = try modelContext.fetch(descriptor)
+            guard !batch.isEmpty else { break }
+            for move in batch {
+                guard let dayKey = move.dayTimeline?.dayKey else { continue }
+                result[dayKey, default: .empty].moveCount += 1
+            }
+            moveOffset += batch.count
+        }
+
+        let sampleCount = try modelContext.fetchCount(FetchDescriptor<LocationSample>())
+        var sampleOffset = 0
+        while sampleOffset < sampleCount {
+            try Task.checkCancellation()
+            var descriptor = FetchDescriptor<LocationSample>(
+                sortBy: [SortDescriptor(\LocationSample.timestamp), SortDescriptor(\LocationSample.dedupeKey)]
+            )
+            descriptor.fetchLimit = min(batchSize, sampleCount - sampleOffset)
+            descriptor.fetchOffset = sampleOffset
+            let batch = try modelContext.fetch(descriptor)
+            guard !batch.isEmpty else { break }
+            for sample in batch {
+                guard let dayKey = sample.dayTimeline?.dayKey else { continue }
+                result[dayKey, default: .empty].sampleCount += 1
+            }
+            sampleOffset += batch.count
         }
         return result
     }
@@ -246,6 +303,7 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
     private static let dayCacheKey = "Moves.timelineDaySummaries"
     private let modelContainer: ModelContainer
     private var refreshTask: Task<Void, Never>?
+    private var refreshAgain = false
     private var notificationTask: Task<Void, Never>?
 
     init(modelContainer: ModelContainer) {
@@ -261,7 +319,10 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
     }
 
     func refresh() {
-        refreshTask?.cancel()
+        guard refreshTask == nil else {
+            refreshAgain = true
+            return
+        }
         let container = modelContainer
         refreshTask = Task { [weak self] in
             do {
@@ -276,12 +337,21 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
                 daySummaries = updated.1
                 Self.saveCachedSummary(updated.0)
                 Self.saveCachedDaySummaries(updated.1)
+                finishRefresh()
             } catch is CancellationError {
-                return
+                self?.finishRefresh()
             } catch {
                 // Keep displaying the last successfully reconciled totals.
+                self?.finishRefresh()
             }
         }
+    }
+
+    private func finishRefresh() {
+        refreshTask = nil
+        guard refreshAgain else { return }
+        refreshAgain = false
+        refresh()
     }
 
     private func observeDataChanges() {
@@ -848,6 +918,7 @@ final class RouteFileImporter: ObservableObject {
             ))
         }
         let persistedState = RouteFileImportStore.state?.state ?? .idle
+        activeJobID = RouteFileImportStore.state?.jobID
         state = persistedState == .running ? .paused : persistedState
         if persistedState == .running, var persisted = RouteFileImportStore.state {
             persisted.state = .paused
@@ -858,7 +929,9 @@ final class RouteFileImporter: ObservableObject {
 
     private func migrateLegacyQueueStateIfNeeded() {
         guard importCoordinator.jobs.isEmpty, let persisted = RouteFileImportStore.state else { return }
+        let jobID = UUID()
         let job = ImportJobRecord(
+            id: jobID,
             displayName: "Route file import",
             source: ImportJobSourceMetadata(
                 originalFileNames: persisted.files.map { URL(fileURLWithPath: $0).lastPathComponent },
@@ -878,6 +951,9 @@ final class RouteFileImporter: ObservableObject {
             updatedAt: persisted.updatedAt
         )
         _ = try? importCoordinator.enqueue(job)
+        var updatedPersisted = persisted
+        updatedPersisted.jobID = jobID
+        RouteFileImportStore.state = updatedPersisted
     }
 
     var isImporting: Bool { state == .running }
@@ -1004,6 +1080,7 @@ final class RouteFileImporter: ObservableObject {
     func resume() {
         guard !isImporting, let persisted = RouteFileImportStore.state,
               persisted.nextIndex < persisted.files.count else { return }
+        activeJobID = persisted.jobID
         importTask?.cancel()
         importTask = Task { [weak self] in await self?.runPersistedImport() }
     }
@@ -1207,6 +1284,9 @@ final class RouteFileImporter: ObservableObject {
             importPhase = "Complete"
             NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
             NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
+            if persisted.routeCount > 0 {
+                await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+            }
         } catch RouteFileImportError.paused {
             persisted.state = .paused
             persisted.updatedAt = .now
@@ -1298,6 +1378,7 @@ final class RouteFileImporter: ObservableObject {
         removeFailedImport(id, deleteFile: true)
         NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
         NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
+        await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
     }
 
     func discardFailedImport(_ id: UUID) {
@@ -2872,6 +2953,9 @@ private actor RouteFileImportExecution {
             try? FileManager.default.removeItem(at: RouteFileImportStore.stagingDirectory)
             NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
             NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
+            if persisted.routeCount > 0 {
+                await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+            }
             return true
         } catch ExecutionError.paused {
             persisted.state = .paused

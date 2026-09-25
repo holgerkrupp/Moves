@@ -169,6 +169,9 @@ final class HealthWorkoutRouteImporter: ObservableObject {
             )
             lastReport = report
             lastErrorMessage = nil
+            if report.routeCount > 0 {
+                await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+            }
             if report.workoutCount == 0 {
                 updateProgressText("No supported workouts found.")
             }

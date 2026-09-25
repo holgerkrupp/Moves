@@ -128,6 +128,9 @@ struct MovesApp: App {
 
         do {
             let container = try Self.makeModelContainer()
+            #if !targetEnvironment(macCatalyst)
+            try Self.ensureCurrentDayExists(in: container)
+            #endif
             let captureManager = MovesLocationCaptureManager(modelContainer: container)
             self.sharedModelContainer = container
             _captureManager = StateObject(
@@ -227,6 +230,22 @@ struct MovesApp: App {
         return container
     }
 
+    static func ensureCurrentDayExists(in container: ModelContainer) throws {
+        let context = ModelContext(container)
+        let todayStart = Calendar.current.startOfDay(for: .now)
+        let todayKey = DayTimeline.makeDayKey(for: todayStart)
+        var descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayKey == todayKey
+            }
+        )
+        descriptor.fetchLimit = 1
+
+        guard try context.fetch(descriptor).isEmpty else { return }
+        context.insert(DayTimeline(dayStart: todayStart))
+        try context.save()
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -279,7 +298,7 @@ struct MovesApp: App {
                     await locationServiceSyncManager.syncNewSamplesIfEnabled()
                 }
                 Task(priority: .utility) {
-                    await ShareMapAggregateBuilder.refreshAll(in: sharedModelContainer)
+                    await ImportedTransportModeRefinement.run(in: sharedModelContainer)
                 }
             }
         }

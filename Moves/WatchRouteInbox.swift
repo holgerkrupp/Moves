@@ -65,7 +65,7 @@ final class WatchRouteInbox: NSObject, ObservableObject {
             let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
             let source = LocationSampleSource(rawValue: payload.sourceRawValue) ?? .watchRouteTracking
 
-            _ = try repository.importRouteTrack(
+            let importedMove = try repository.importRouteTrack(
                 locations: locations,
                 source: source,
                 transportMode: .unknown
@@ -75,6 +75,11 @@ final class WatchRouteInbox: NSObject, ObservableObject {
             lastImportAt = .now
             lastImportSummary = "Imported \(locations.count) watch GPS point(s)."
             WidgetCenter.shared.reloadAllTimelines()
+            if importedMove != nil {
+                Task(priority: .utility) {
+                    await ShareMapAggregateBuilder.refreshAll(in: modelContainer)
+                }
+            }
         } catch {
             lastImportSummary = "Watch route import failed: \(error.localizedDescription)"
         }

@@ -193,9 +193,17 @@ final class ImportStressTests: XCTestCase {
             source: .routeTracking,
             dedupeKey: "recorded"
         )
+        let visit = VisitPlace(
+            arrivalDate: epoch.addingTimeInterval(-60),
+            departureDate: epoch,
+            latitude: 52,
+            longitude: 13,
+            horizontalAccuracy: 10
+        )
 
-        timeline.moves = [importedMove, recordedMove]
-        timeline.samples = importedSamples + [recordedSample]
+        // Match the importer's write path: children own the day relationship and the inverse
+        // arrays are left for SwiftData to maintain.
+        visit.dayTimeline = timeline
         importedMove.dayTimeline = timeline
         importedMove.samples = importedSamples
         recordedMove.dayTimeline = timeline
@@ -207,6 +215,11 @@ final class ImportStressTests: XCTestCase {
         recordedSample.dayTimeline = timeline
         recordedSample.moveSegment = recordedMove
         context.insert(timeline)
+        context.insert(visit)
+        context.insert(importedMove)
+        context.insert(recordedMove)
+        importedSamples.forEach(context.insert)
+        context.insert(recordedSample)
         try context.save()
 
         let (summary, daySummaries) = try await Task.detached(priority: .utility) {
@@ -219,7 +232,7 @@ final class ImportStressTests: XCTestCase {
         XCTAssertEqual(summary, ImportedRouteDataSummary(sampleCount: 2, moveCount: 1))
         XCTAssertEqual(
             daySummaries[timeline.dayKey],
-            TimelineDaySummary(placeCount: 0, moveCount: 2, sampleCount: 3)
+            TimelineDaySummary(placeCount: 1, moveCount: 2, sampleCount: 3)
         )
     }
 }

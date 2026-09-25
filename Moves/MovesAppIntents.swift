@@ -328,7 +328,7 @@ final class MovesIntentRuntime {
     }
 }
 
-struct VisitedPlaceEntity: IndexedEntity, URLRepresentableEntity {
+struct VisitedPlaceEntity: IndexedEntity, URLRepresentableEntity, Sendable {
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Visited Place")
     static let defaultQuery = VisitedPlaceEntityQuery()
     static let urlRepresentation: EntityURLRepresentation<Self> = "moves://place/\(.id)"
@@ -360,6 +360,20 @@ struct VisitedPlaceEntity: IndexedEntity, URLRepresentableEntity {
         attributes.contentCreationDate = visitedAt
         attributes.keywords = ["Moves", "visited place", dayKey]
         return attributes
+    }
+}
+
+/// Builds the Spotlight payload away from the view's main-actor model context. This matters
+/// after a large route import, where walking every place just to refresh search would otherwise
+/// compete with the timeline and map for the main thread.
+@ModelActor
+actor VisitedPlaceSpotlightWorker {
+    func entities() throws -> [VisitedPlaceEntity] {
+        try modelContext.fetch(
+            FetchDescriptor<VisitPlace>(
+                sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .reverse)]
+            )
+        ).map(VisitedPlaceEntity.init)
     }
 }
 

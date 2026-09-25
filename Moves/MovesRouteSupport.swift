@@ -641,14 +641,30 @@ enum MoveRouteGeometry {
     private static let routeMatchingVersion = "route-v10-sparse-automotive-detours"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
-        let sampleCoordinates = move.samples.preferredRouteDisplaySamples
+        rawCoordinates(
+            for: move,
+            samples: move.samples,
+            usesHealthWorkoutRoute: move.usesHealthWorkoutRoute
+        )
+    }
+
+    /// Builds route geometry from an already loaded day sample index. Timeline maps use this
+    /// overload so browsing a day does not fault every move's `samples` relationship in turn.
+    static func rawCoordinates(
+        for move: MoveSegment,
+        samples: [LocationSample],
+        usesHealthWorkoutRoute: Bool
+    ) -> [CLLocationCoordinate2D] {
+        let sampleCoordinates = samples.preferredRouteDisplaySamples
             .sorted(by: { $0.timestamp < $1.timestamp })
             .map(\.coordinate)
 
-        if move.usesHealthWorkoutRoute, sampleCoordinates.count > 1 {
+        if usesHealthWorkoutRoute, sampleCoordinates.count > 1 {
             return RouteCoordinateOps.dedupeSequentialCoordinates(
                 sampleCoordinates,
-                minimumDistanceMeters: rawCoordinateDedupeDistance(for: move)
+                minimumDistanceMeters: rawCoordinateDedupeDistance(
+                    usesHealthWorkoutRoute: usesHealthWorkoutRoute
+                )
             )
         }
 
@@ -663,12 +679,20 @@ enum MoveRouteGeometry {
 
         return RouteCoordinateOps.dedupeSequentialCoordinates(
             coordinates,
-            minimumDistanceMeters: rawCoordinateDedupeDistance(for: move)
+            minimumDistanceMeters: rawCoordinateDedupeDistance(
+                usesHealthWorkoutRoute: usesHealthWorkoutRoute
+            )
         )
     }
 
     static func rawCoordinateDedupeDistance(for move: MoveSegment) -> CLLocationDistance {
-        move.usesHealthWorkoutRoute ? 0 : 6
+        rawCoordinateDedupeDistance(usesHealthWorkoutRoute: move.usesHealthWorkoutRoute)
+    }
+
+    private static func rawCoordinateDedupeDistance(
+        usesHealthWorkoutRoute: Bool
+    ) -> CLLocationDistance {
+        usesHealthWorkoutRoute ? 0 : 6
     }
 
     static func highAccuracyDisplayDedupeDistance(for move: MoveSegment) -> CLLocationDistance {

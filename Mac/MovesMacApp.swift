@@ -1166,7 +1166,6 @@ private struct MovesMacBrowser: View {
             }
         }
         .task {
-            guard importedRouteDataSummary.daySummaries.isEmpty else { return }
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             importedRouteDataSummary.refresh()
@@ -1255,7 +1254,13 @@ private struct MovesMacBrowser: View {
             Text(deletionErrorMessage ?? "The selected timeline data could not be deleted.")
         }
         .popover(isPresented: $isShowingImportQueue) {
-            ImportQueueView(coordinator: importCoordinator)
+            ImportQueueView(coordinator: importCoordinator) { _ in
+                importCoordinator.resumeRouteImport()
+            } onPause: { _ in
+                importCoordinator.pauseRouteImport()
+            } onCancel: { _ in
+                importCoordinator.cancelRouteImport()
+            }
                 .frame(minWidth: 420, minHeight: 420)
         }
         .sheet(isPresented: $isShowingOnboarding) {
@@ -1730,8 +1735,15 @@ private struct MacDayWorkspace: View {
     let exportActivity: (MacSelection, MacTimelineExportFormat) -> Void
     @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
+    @State private var activitySelection: Set<MacSelection> = []
+    @State private var sortOrder = [KeyPathComparator(\MacActivityRow.sortDate)]
+    @State private var transportModeSaveError: String?
     private var coordinates: [CLLocationCoordinate2D] {
-        day.places.map(\.coordinate) + day.samples.map(\.coordinate) + day.moves.flatMap { RouteCoordinateStorage.decode($0.manualRouteCoordinatesData ?? $0.routeCacheCoordinatesData) }
+        RouteCoordinateOps.validCoordinates(
+            day.places.map(\.coordinate)
+                + day.samples.map(\.coordinate)
+                + day.moves.flatMap { RouteCoordinateStorage.decode($0.manualRouteCoordinatesData ?? $0.routeCacheCoordinatesData) }
+        )
     }
 
     private var initialMapRect: MKMapRect? {
@@ -1752,72 +1764,146 @@ private struct MacDayWorkspace: View {
             Divider()
             activityList
         }
+        .onChange(of: day.dayKey) {
+            activitySelection.removeAll()
+        }
+        .alert("Could Not Change Transport Mode", isPresented: Binding(
+            get: { transportModeSaveError != nil },
+            set: { if !$0 { transportModeSaveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { transportModeSaveError = nil }
+        } message: {
+            Text(transportModeSaveError ?? "")
+        }
     }
 
     private var activityList: some View {
-        Table(of: MacActivityRow.self, selection: $selection) {
-            TableColumn("Time") { row in Text(row.time).monospacedDigit() }.width(min: 68, ideal: 92)
-            TableColumn("Activity") { row in Label(row.title, systemImage: row.icon) }
-            TableColumn("Details") { row in Text(row.details).foregroundStyle(.secondary) }
-            TableColumn("Metadata") { row in Text(row.metadata).foregroundStyle(.secondary) }
-        } rows: { ForEach(rows) { row in TableRow(row) } }
+        Table(of: MacActivityRow.self, selection: $activitySelection, sortOrder: $sortOrder) {
+            TableColumn("Start Time", value: \.sortDate) { row in
+                Text(row.startTime).monospacedDigit()
+            }
+            .width(min: 80, ideal: 104)
+            TableColumn("Activity", value: \.title) { row in
+                Label(row.title, systemImage: row.icon)
+            }
+            TableColumn("Details", value: \.details) { row in
+                Text(row.details).foregroundStyle(.secondary)
+            }
+            TableColumn("Metadata", value: \.metadata) { row in
+                Text(row.metadata).foregroundStyle(.secondary)
+            }
+        } rows: { ForEach(sortedRows) { row in TableRow(row) } }
             .frame(minHeight: 185, idealHeight: 235)
             .padding(.top, 8)
             .overlay { if rows.isEmpty { ContentUnavailableView("No activity", systemImage: "location.slash") } }
             .contextMenu(forSelectionType: MacSelection.self) { selectedItems in
-                if let selection = selectedItems.first {
-                    activityContextMenu(for: selection)
+                activityContextMenu(for: selectedItems)
+            }
+            .onChange(of: activitySelection) { previousSelection, currentSelection in
+                if currentSelection.isEmpty {
+                    selection = .day(day.dayKey)
+                } else if let newlySelected = currentSelection.subtracting(previousSelection).first {
+                    selection = newlySelected
+                } else if let currentPrimary = selection, currentSelection.contains(currentPrimary) {
+                    selection = currentPrimary
+                } else {
+                    selection = sortedRows.lazy.map(\.selection).first(where: currentSelection.contains)
                 }
             }
     }
 
     @ViewBuilder
-    private func activityContextMenu(for selection: MacSelection) -> some View {
-        switch selection {
-        case .place(let id):
-            ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
-                Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
-                    exportActivity(selection, format)
-                }
-            }
-            if let place = day.places.first(where: { $0.id == id }) {
-                Divider()
-                Button("Delete Place", systemImage: "trash", role: .destructive) {
-                    try? TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoManager)
-                }
-            }
-        case .move(let id):
-            ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
-                Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
-                    exportActivity(selection, format)
-                }
-            }
-            if let move = day.moves.first(where: { $0.id == id }) {
-                Divider()
-                Button("Duplicate Activity", systemImage: "plus.square.on.square") { duplicate(move) }
-                Button("Simplify Route", systemImage: "point.3.connected.trianglepath.dotted") { simplifyRoute(for: move) }
-                    .disabled(routeCoordinates(for: move).count < 3)
-                Button("Reset Route Edits", systemImage: "arrow.uturn.backward") {
-                    move.clearManualRouteCoordinates()
-                    try? modelContext.save()
-                }
-                .disabled(!move.hasManualRouteCoordinates)
-                Menu("Change Transport", systemImage: "arrow.triangle.branch") {
-                    ForEach(TransportMode.allCases) { mode in
-                        Button(mode.title) {
-                            move.transportMode = mode
-                            move.clearCachedRouteCoordinates()
-                            try? modelContext.save()
-                        }
+    private func activityContextMenu(for selectedItems: Set<MacSelection>) -> some View {
+        if selectedItems.count == 1, let selectedItem = selectedItems.first {
+            switch selectedItem {
+            case .place(let id):
+                ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
+                    Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
+                        exportActivity(selectedItem, format)
                     }
                 }
+                if let place = day.places.first(where: { $0.id == id }) {
+                    Divider()
+                    Button("Delete Place", systemImage: "trash", role: .destructive) {
+                        try? TimelineDeletion.delete(place: place, in: modelContext, undoManager: undoManager)
+                    }
+                }
+            case .move(let id):
+                ForEach(MacTimelineExportFormat.allCases, id: \.self) { format in
+                    Button("Export \(format.title)", systemImage: "doc.badge.arrow.up") {
+                        exportActivity(selectedItem, format)
+                    }
+                }
+                if let move = day.moves.first(where: { $0.id == id }) {
+                    Divider()
+                    Button("Duplicate Activity", systemImage: "plus.square.on.square") { duplicate(move) }
+                    Button("Simplify Route", systemImage: "point.3.connected.trianglepath.dotted") { simplifyRoute(for: move) }
+                        .disabled(routeCoordinates(for: move).count < 3)
+                    Button("Reset Route Edits", systemImage: "arrow.uturn.backward") {
+                        move.clearManualRouteCoordinates()
+                        try? modelContext.save()
+                    }
+                    .disabled(!move.hasManualRouteCoordinates)
+                }
+            default:
+                EmptyView()
+            }
+        }
+
+        let selectedMoves = moves(in: selectedItems)
+        if !selectedMoves.isEmpty {
+            if selectedItems.count == 1 {
+                Divider()
+            }
+            Menu(
+                selectedMoves.count == 1 ? "Change Transport" : "Change Transport for \(selectedMoves.count) Activities",
+                systemImage: "arrow.triangle.branch"
+            ) {
+                ForEach(TransportMode.allCases) { mode in
+                    Button(mode.title) {
+                        setTransportMode(mode, for: selectedMoves)
+                    }
+                }
+            }
+
+            if selectedItems.count == 1, let move = selectedMoves.first {
                 Divider()
                 Button("Delete Activity", systemImage: "trash", role: .destructive) {
                     try? TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoManager)
                 }
             }
-        default:
-            EmptyView()
+        }
+    }
+
+    private func moves(in selections: Set<MacSelection>) -> [MoveSegment] {
+        let selectedIDs = Set(selections.compactMap { selection -> UUID? in
+            guard case let .move(id) = selection else { return nil }
+            return id
+        })
+        return day.moves.filter { selectedIDs.contains($0.id) }
+    }
+
+    private func setTransportMode(_ mode: TransportMode, for moves: [MoveSegment]) {
+        let changedMoves = moves.filter { $0.transportMode != mode }
+        guard !changedMoves.isEmpty else { return }
+
+        let previousValues = changedMoves.map {
+            ($0, $0.transportMode, $0.routeCacheSignature, $0.routeCacheCoordinatesData)
+        }
+        changedMoves.forEach {
+            $0.transportMode = mode
+            $0.clearCachedRouteCoordinates()
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            previousValues.forEach { move, transportMode, cacheSignature, cacheCoordinates in
+                move.transportMode = transportMode
+                move.routeCacheSignature = cacheSignature
+                move.routeCacheCoordinatesData = cacheCoordinates
+            }
+            transportModeSaveError = error.localizedDescription
         }
     }
 
@@ -1860,18 +1946,22 @@ private struct MacDayWorkspace: View {
 
     private var rows: [MacActivityRow] {
         let places = day.places.map { place in
-            MacActivityRow(time: place.arrivalDate.formatted(date: .omitted, time: .shortened), title: place.displayTitle, icon: "mappin.and.ellipse", details: place.departureDate.map { "Until \($0.formatted(date: .omitted, time: .shortened))" } ?? "Still here", metadata: place.comment ?? "Visit", selection: .place(place.id), sortDate: place.arrivalDate)
+            MacActivityRow(startTime: place.arrivalDate.formatted(date: .omitted, time: .shortened), title: place.displayTitle, icon: "mappin.and.ellipse", details: place.departureDate.map { "Until \($0.formatted(date: .omitted, time: .shortened))" } ?? "Still here", metadata: place.comment ?? "Visit", selection: .place(place.id), sortDate: place.arrivalDate)
         }
         let moves = day.moves.map { move in
-            MacActivityRow(time: move.timelineStartDate.formatted(date: .omitted, time: .shortened), title: move.transportMode.title, icon: move.transportMode.symbolName, details: "\(formatDistance(move.distanceMeters)) · \(formatDuration(move.timelineDuration))", metadata: move.comment ?? "\(move.samples.count) samples", selection: .move(move.id), sortDate: move.timelineStartDate)
+            MacActivityRow(startTime: move.timelineStartDate.formatted(date: .omitted, time: .shortened), title: move.transportMode.title, icon: move.transportMode.symbolName, details: "\(formatDistance(move.distanceMeters)) · \(formatDuration(move.timelineDuration))", metadata: move.comment ?? "\(move.samples.count) samples", selection: .move(move.id), sortDate: move.timelineStartDate)
         }
-        return (places + moves).sorted { $0.sortDate < $1.sortDate }
+        return places + moves
+    }
+
+    private var sortedRows: [MacActivityRow] {
+        rows.sorted(using: sortOrder)
     }
 }
 
 private struct MacActivityRow: Identifiable, Hashable {
     var id: MacSelection { selection }
-    let time: String, title: String, icon: String, details: String, metadata: String
+    let startTime: String, title: String, icon: String, details: String, metadata: String
     let selection: MacSelection
     let sortDate: Date
 }
@@ -1884,7 +1974,6 @@ private struct MacDayMap: View {
 
     let day: DayTimeline
     let initialVisibleRect: MKMapRect?
-    @Environment(\.modelContext) private var modelContext
     @State private var showsLargeMapMarkers: Bool
     @State private var showsMapElevation: Bool
     @State private var routeLineWidth: Double
@@ -1914,8 +2003,9 @@ private struct MacDayMap: View {
     }
 
     private var renderedPlaces: [MacNativeMap.Place] {
-        day.places.map {
-            MacNativeMap.Place(
+        day.places.compactMap {
+            guard CLLocationCoordinate2DIsValid($0.coordinate) else { return nil }
+            return MacNativeMap.Place(
                 id: $0.id,
                 title: $0.displayTitle,
                 coordinate: $0.coordinate,
@@ -1926,7 +2016,7 @@ private struct MacDayMap: View {
 
     private var renderedRoutes: [MacNativeMap.Route] {
         day.moves.compactMap { move in
-            let route = displayedRoute(for: move)
+            let route = RouteCoordinateOps.validCoordinates(displayedRoute(for: move))
             if route.count > 1 {
                 return MacNativeMap.Route(
                     id: move.id,
@@ -1936,7 +2026,10 @@ private struct MacDayMap: View {
                     isDashed: false
                 )
             }
-            if let start = move.startPlace?.coordinate, let end = move.endPlace?.coordinate {
+            if let start = move.startPlace?.coordinate,
+               let end = move.endPlace?.coordinate,
+               CLLocationCoordinate2DIsValid(start),
+               CLLocationCoordinate2DIsValid(end) {
                 return MacNativeMap.Route(
                     id: move.id,
                     coordinates: [start, end],
@@ -2008,16 +2101,12 @@ private struct MacDayMap: View {
             guard !Task.isCancelled else { return }
             let fallback = MoveRouteGeometry.rawCoordinates(for: move)
             let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
-            let coordinates = await RoadRouteMatcher.matchedCoordinates(for: move)
+            let coordinates = await RoadRouteMatcher.matchedCoordinates(for: move, persistResult: false)
             resolved[move.id] = MatchedRoute(signature: signature, coordinates: coordinates)
         }
 
         guard !Task.isCancelled else { return }
         matchedRoutes = resolved
-
-        if modelContext.hasChanges {
-            try? modelContext.save()
-        }
     }
 }
 
@@ -2060,6 +2149,25 @@ private struct MacNativeMap: NSViewRepresentable {
 
         var appliedContentID: String?
         var routeStyles: [ObjectIdentifier: RouteStyle] = [:]
+        private var pendingLayoutUpdate: (() -> Void)?
+        private var retryScheduled = false
+
+        func scheduleLayoutRetry(_ update: @escaping () -> Void) {
+            pendingLayoutUpdate = update
+            guard !retryScheduled else { return }
+            retryScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.retryScheduled = false
+                let pendingLayoutUpdate = self.pendingLayoutUpdate
+                self.pendingLayoutUpdate = nil
+                pendingLayoutUpdate?()
+            }
+        }
+
+        func cancelLayoutRetry() {
+            pendingLayoutUpdate = nil
+        }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
             guard let annotation = annotation as? PlaceAnnotation else { return nil }
@@ -2105,6 +2213,16 @@ private struct MacNativeMap: NSViewRepresentable {
     }
 
     func updateNSView(_ mapView: MKMapView, context: Context) {
+        guard mapView.bounds.width > 1, mapView.bounds.height > 1 else {
+            // SwiftUI can call the representable before the hosting view has a size.
+            // Retry on the next run-loop turn so the first real layout is not lost.
+            context.coordinator.scheduleLayoutRetry { [weak mapView] in
+                guard let mapView, mapView.bounds.width > 1, mapView.bounds.height > 1 else { return }
+                self.updateNSView(mapView, context: context)
+            }
+            return
+        }
+        context.coordinator.cancelLayoutRetry()
         guard context.coordinator.appliedContentID != contentID else { return }
         context.coordinator.appliedContentID = contentID
 
@@ -2115,9 +2233,13 @@ private struct MacNativeMap: NSViewRepresentable {
         mapView.removeOverlays(mapView.overlays)
         context.coordinator.routeStyles.removeAll(keepingCapacity: true)
 
-        mapView.addAnnotations(places.map(PlaceAnnotation.init))
-        for route in routes where route.coordinates.count > 1 {
-            let polyline = MKPolyline(coordinates: route.coordinates, count: route.coordinates.count)
+        mapView.addAnnotations(
+            places.filter { CLLocationCoordinate2DIsValid($0.coordinate) }.map(PlaceAnnotation.init)
+        )
+        for route in routes {
+            let coordinates = RouteCoordinateOps.validCoordinates(route.coordinates)
+            guard coordinates.count > 1 else { continue }
+            let polyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
             context.coordinator.routeStyles[ObjectIdentifier(polyline)] = .init(
                 color: route.color,
                 lineWidth: route.lineWidth,
@@ -2126,7 +2248,7 @@ private struct MacNativeMap: NSViewRepresentable {
             mapView.addOverlay(polyline)
         }
 
-        if let initialVisibleRect {
+        if let initialVisibleRect, !initialVisibleRect.isNull, !initialVisibleRect.isEmpty {
             mapView.setVisibleMapRect(initialVisibleRect, animated: false)
         }
     }

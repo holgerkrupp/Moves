@@ -93,9 +93,13 @@ protocol TimelineAssembler {
 
 enum VisitGapFillingSettings {
     static let isEnabledKey = "Moves.visitGapFilling.isEnabled"
+    static let defaultIsEnabled = true
 
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
-        userDefaults.bool(forKey: isEnabledKey)
+        guard userDefaults.object(forKey: isEnabledKey) != nil else {
+            return defaultIsEnabled
+        }
+        return userDefaults.bool(forKey: isEnabledKey)
     }
 }
 
@@ -614,6 +618,14 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         #else
         true
         #endif
+    }
+
+    /// Kept internal so the integration test can guard the app's primary low-energy capture
+    /// configuration without exposing the CLLocationManager itself.
+    var isUsingLowEnergyLocationConfiguration: Bool {
+        !isTemporaryRouteTrackingActive
+            && manager.desiredAccuracy == Self.lowPowerDesiredAccuracy
+            && manager.distanceFilter == Self.lowPowerDistanceFilter
     }
 
     private enum TemporaryRouteTrackingStorageKey {

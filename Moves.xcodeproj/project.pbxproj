@@ -103,6 +103,8 @@
 		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; platformFilter = ios; };
 		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; platformFilter = ios; };
 		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
+		B41000012FC0000100000001 /* ImportedTransportModeInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41000012FC0000100000000 /* ImportedTransportModeInference.swift */; };
+		B41000012FC0000100000003 /* ImportedTransportModeInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41000012FC0000100000002 /* ImportedTransportModeInferenceTests.swift */; platformFilter = ios; };
 		B50000013050000100000002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B50000013050000100000001 /* LaunchScreen.storyboard */; platformFilter = ios; };
 		C10000013000000100000001 /* RouteTrackingLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000000 /* RouteTrackingLiveActivity.swift */; platformFilter = ios; };
 		C10000013000000100000003 /* MovesRouteTrackingLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000002 /* MovesRouteTrackingLiveActivityWidget.swift */; };
@@ -275,6 +277,8 @@
 		A30000012FB0000100000022 /* Moves Watch Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Watch Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A40000012FC0000100000000 /* RouteFileImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileImport.swift; sourceTree = "<group>"; };
 		A40000012FC0000100000002 /* RouteFileImportWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileImportWorker.swift; sourceTree = "<group>"; };
+		B41000012FC0000100000000 /* ImportedTransportModeInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedTransportModeInference.swift; sourceTree = "<group>"; };
+		B41000012FC0000100000002 /* ImportedTransportModeInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedTransportModeInferenceTests.swift; sourceTree = "<group>"; };
 		A41000012FC0000100000000 /* ImportQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueue.swift; sourceTree = "<group>"; };
 		A42000012FC0000100000000 /* RouteImportAcquisition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteImportAcquisition.swift; sourceTree = "<group>"; };
 		A44000012FC0000100000000 /* ImportQueueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueViews.swift; sourceTree = "<group>"; };
@@ -399,6 +403,7 @@
 				A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */,
 				A40000012FC0000100000000 /* RouteFileImport.swift */,
 				A40000012FC0000100000002 /* RouteFileImportWorker.swift */,
+				B41000012FC0000100000000 /* ImportedTransportModeInference.swift */,
 				A41000012FC0000100000000 /* ImportQueue.swift */,
 				A42000012FC0000100000000 /* RouteImportAcquisition.swift */,
 				A44000012FC0000100000000 /* ImportQueueViews.swift */,
@@ -494,6 +499,7 @@
 				E21000013020000100000000 /* ImportQueueTests.swift */,
 				E22000013020000100000000 /* ImportStressTests.swift */,
 				9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */,
+				B41000012FC0000100000002 /* ImportedTransportModeInferenceTests.swift */,
 			);
 			path = MovesTests;
 			sourceTree = "<group>";
@@ -795,6 +801,7 @@
 				A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */,
 				A40000012FC0000100000001 /* RouteFileImport.swift in Sources */,
 				B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */,
+				B41000012FC0000100000001 /* ImportedTransportModeInference.swift in Sources */,
 				A41000012FC0000100000001 /* ImportQueue.swift in Sources */,
 				A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */,
 				A44000012FC0000100000001 /* ImportQueueViews.swift in Sources */,
@@ -835,6 +842,7 @@
 				E21000013020000100000001 /* ImportQueueTests.swift in Sources */,
 				E22000013020000100000001 /* ImportStressTests.swift in Sources */,
 				9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */,
+				B41000012FC0000100000003 /* ImportedTransportModeInferenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

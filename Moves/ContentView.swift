@@ -337,6 +337,13 @@ private struct RouteImportRequest: Identifiable {
     let urls: [URL]
 }
 
+private struct VisibleTimelinePage: Identifiable {
+    let index: Int
+    let day: DayTimeline
+
+    var id: String { "\(day.dayKey)|\(index)" }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @EnvironmentObject private var routeFileImporter: RouteFileImporter
@@ -354,6 +361,8 @@ struct ContentView: View {
 
     @State private var selectedDayKey = ""
     @State private var selectedPageIndex = 0
+    @State private var pagerWindowCenterIndex: Int?
+    @State private var pagerWindowRecenterTask: Task<Void, Never>?
     @State private var isShowingSettings = false
     @State private var isShowingRouteTrackingSettings = false
     @State private var isShowingDatePicker = false
@@ -372,47 +381,47 @@ struct ContentView: View {
     @State private var dayDeletionErrorMessage = ""
     @State private var isShowingDayDeletionError = false
 
-    /// Empty `DayTimeline` records are an implementation detail used while recording. They
-    /// should not become browsable days in the timeline UI.
+    /// Keep this projection relationship-free. Checking `hasRecordedActivity` here would
+    /// materialize every imported place/move/sample collection before the first map frame.
     private var recordedDayTimelines: [DayTimeline] {
-        dayTimelines.filter(\.hasRecordedActivity)
+        dayTimelines
     }
 
     private var recordedDaySignature: [String] {
-        dayTimelines.map { "\($0.dayKey):\($0.hasRecordedActivity)" }
+        dayTimelines.map(\.dayKey)
     }
 
     private var selectedDay: DayTimeline? {
-        guard recordedDayTimelines.indices.contains(selectedPageIndex) else { return nil }
-        return recordedDayTimelines[selectedPageIndex]
+        guard recordedDayTimelines.indices.contains(displayedPageIndex) else { return nil }
+        return recordedDayTimelines[displayedPageIndex]
+    }
+
+    /// Before `onAppear` runs, select the newest record so launch never renders an old page.
+    /// `MovesApp` creates today's record before the first frame, making this today's index.
+    private var displayedPageIndex: Int {
+        guard !recordedDayTimelines.isEmpty else { return 0 }
+        if let keyedIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == selectedDayKey }) {
+            return keyedIndex
+        }
+        if selectedDayKey.isEmpty {
+            return recordedDayTimelines.count - 1
+        }
+        return min(max(selectedPageIndex, 0), recordedDayTimelines.count - 1)
+    }
+
+    private var pagerSelection: Binding<Int> {
+        Binding(
+            get: { displayedPageIndex },
+            set: { selectedPageIndex = $0 }
+        )
     }
 
     private var canGoOlder: Bool {
-        recordedDayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex > 0
+        recordedDayTimelines.indices.contains(displayedPageIndex) && displayedPageIndex > 0
     }
 
     private var canGoNewer: Bool {
-        recordedDayTimelines.indices.contains(selectedPageIndex) && selectedPageIndex < recordedDayTimelines.count - 1
-    }
-
-    private var cloudDataPresenceCountSignature: String {
-        let placeCount = dayTimelines.reduce(0) { $0 + $1.places.count }
-        let moveCount = dayTimelines.reduce(0) { $0 + $1.moves.count }
-        return "\(placeCount)|\(moveCount)"
-    }
-
-    private var spotlightPlaceSignature: [String] {
-        dayTimelines
-            .flatMap(\.places)
-            .map { place in
-                [
-                    place.id.uuidString,
-                    place.userLabel ?? "",
-                    place.autoLabel ?? "",
-                    String(place.arrivalDate.timeIntervalSinceReferenceDate),
-                ].joined(separator: "|")
-            }
-            .sorted()
+        recordedDayTimelines.indices.contains(displayedPageIndex) && displayedPageIndex < recordedDayTimelines.count - 1
     }
 
     var body: some View {
@@ -519,32 +528,44 @@ struct ContentView: View {
             if captureManager.isLocationTrackingAvailable {
                 multiDevicePresenceManager.refreshPresence()
                 await captureManager.start()
+                await repairRecentMoveGapsIfNeeded()
+            }
+        }
+        .task {
+            // Do not derive these maintenance triggers from the complete timeline. A bulk
+            // import can contain tens of thousands of related records, and evaluating a
+            // body-level signature would materialize and sort all of them on the main actor.
+            for await _ in NotificationCenter.default.notifications(
+                named: .movesLocationSamplesDidChange
+            ) {
+                guard !Task.isCancelled else { return }
+                TimelinePresentationCacheInvalidator.invalidateAll()
+                cloudDataPresencePublisher.publishSoon()
+            }
+        }
+        .task {
+            // Imported data is committed in batches. The importer emits this notification
+            // once the batch has reached its durable completion point, so the index is rebuilt
+            // once per import instead of once per SwiftData refresh.
+            for await _ in NotificationCenter.default.notifications(
+                named: .movesImportedRouteDataDidChange
+            ) {
+                guard !Task.isCancelled else { return }
+                TimelinePresentationCacheInvalidator.invalidateAll()
+                cloudDataPresencePublisher.publishSoon()
+                refreshSpotlightIndex()
             }
         }
         .onAppear {
             openCurrentDay()
             repairDuplicateDayTimelinesIfNeeded()
             modelContext.undoManager = undoController.manager
-            publishWidgetSnapshot()
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
         .onChange(of: recordedDaySignature) { _, _ in
             repairDuplicateDayTimelinesIfNeeded()
             syncSelectedDayIfNeeded()
-            publishWidgetSnapshot()
-        }
-        .onChange(of: selectedDay?.moves.count ?? 0) { _, _ in
-            publishWidgetSnapshot()
-        }
-        .onChange(of: selectedDay?.places.count ?? 0) { _, _ in
-            publishWidgetSnapshot()
-        }
-        .onChange(of: cloudDataPresenceCountSignature) { _, _ in
-            cloudDataPresencePublisher.publishSoon()
-        }
-        .onChange(of: spotlightPlaceSignature) { _, _ in
-            refreshSpotlightIndex()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
@@ -552,7 +573,6 @@ struct ContentView: View {
                 multiDevicePresenceManager.refreshPresence()
             }
             openCurrentDay()
-            publishWidgetSnapshot()
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
@@ -563,6 +583,7 @@ struct ContentView: View {
         .onChange(of: selectedPageIndex) { _, newIndex in
             guard recordedDayTimelines.indices.contains(newIndex) else { return }
             selectedDayKey = recordedDayTimelines[newIndex].dayKey
+            recenterPagerWindow(afterTransitionAround: newIndex)
         }
         .onChange(of: selectedDayKey) { _, newKey in
             timelineMapSelection = nil
@@ -675,14 +696,14 @@ struct ContentView: View {
                         .safeAreaPadding(.horizontal, 14)
                         .padding(.top, 10)
 
-                    TabView(selection: $selectedPageIndex) {
-                        ForEach(Array(recordedDayTimelines.enumerated()), id: \.element.dayKey) { index, day in
+                    TabView(selection: pagerSelection) {
+                        ForEach(visibleTimelinePages) { page in
                             DayTimelinePage(
-                                dayKey: day.dayKey,
-                                isActive: index == selectedPageIndex,
+                                dayTimeline: page.day,
+                                isActive: page.day.dayKey == selectedDay?.dayKey,
                                 mapSelection: $timelineMapSelection
                             )
-                            .tag(index)
+                            .tag(page.index)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
@@ -734,6 +755,40 @@ struct ContentView: View {
         }
     }
 
+    /// A page-style `TabView` eagerly builds its children. Keeping the complete history in
+    /// the pager created hundreds (or thousands after imports) of page tasks whenever the
+    /// selected day changed. Two neighbours on either side preserve fluid swiping without
+    /// making navigation cost grow with the size of the database.
+    private var visibleTimelinePages: [VisibleTimelinePage] {
+        let timelines = recordedDayTimelines
+        guard !timelines.isEmpty else { return [] }
+        let lastIndex = timelines.index(before: timelines.endIndex)
+        let selectedIndex = min(max(displayedPageIndex, timelines.startIndex), lastIndex)
+        var centerIndex = min(
+            max(pagerWindowCenterIndex ?? selectedIndex, timelines.startIndex),
+            lastIndex
+        )
+        let proposedLowerBound = max(timelines.startIndex, centerIndex - 2)
+        let proposedUpperBound = min(lastIndex, centerIndex + 2)
+        if !(proposedLowerBound...proposedUpperBound).contains(selectedIndex) {
+            centerIndex = selectedIndex
+        }
+        let lowerBound = max(timelines.startIndex, centerIndex - 2)
+        let upperBound = min(lastIndex, centerIndex + 2)
+        return (lowerBound...upperBound).map { index in
+            VisibleTimelinePage(index: index, day: timelines[index])
+        }
+    }
+
+    private func recenterPagerWindow(afterTransitionAround index: Int) {
+        pagerWindowRecenterTask?.cancel()
+        pagerWindowRecenterTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(320))
+            guard !Task.isCancelled else { return }
+            pagerWindowCenterIndex = index
+        }
+    }
+
     private var usesPhoneToolbar: Bool {
         #if canImport(UIKit)
         UIDevice.current.userInterfaceIdiom == .phone
@@ -775,7 +830,7 @@ struct ContentView: View {
                 Label("Fill Missing Moves", systemImage: "wand.and.stars")
             }
         }
-        .disabled(isFillingSelectedDayGaps || (selectedDay?.places.count ?? 0) < 2)
+        .disabled(isFillingSelectedDayGaps || selectedDay == nil)
         .help("Fill missing moves on the selected day")
     }
 
@@ -879,22 +934,13 @@ struct ContentView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Text(selectedDay.dayStart, format: .dateTime.weekday(.wide).day().month(.wide))
-                            if selectedDay.hasImportedRouteData {
-                                Image(systemName: "tray.and.arrow.down.fill")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(MovesPalette.routeTracking)
-                                    .accessibilityLabel("Contains imported data")
-                            }
-                        }
+                }
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.primary.opacity(0.92))
                     }
                     .buttonStyle(.plain)
                     .hoverEffect(.highlight)
 
-                    Text("\(selectedDay.uniqueLocationCount) places   \(selectedDay.moves.count) moves")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -1021,6 +1067,9 @@ struct ContentView: View {
             } catch {
                 print("Failed to create day timelines: \(error.localizedDescription)")
             }
+            // The @Query projection can update on the next render. Keep today's identity now
+            // so that update selects the newly inserted day instead of yesterday's last index.
+            selectedDayKey = todayKey
         }
 
         if let todayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
@@ -1066,12 +1115,34 @@ struct ContentView: View {
         }
     }
 
-    private func refreshSpotlightIndex() {
-        let entities = dayTimelines.flatMap { day in
-            day.places.map(VisitedPlaceEntity.init)
+    @MainActor
+    private func repairRecentMoveGapsIfNeeded() async {
+        guard VisitGapFillingSettings.isEnabled() else { return }
+
+        // Repair the window visible in the reported regression without turning launch into
+        // a full-history migration. Each repair is idempotent and future visits are handled
+        // immediately by DefaultTimelineAssembler.
+        let recentDayKeys = recordedDayTimelines.suffix(2).map(\.dayKey)
+        for dayKey in recentDayKeys {
+            guard !Task.isCancelled else { return }
+            _ = await captureManager.fillVisitGaps(onDayWithKey: dayKey)
         }
+    }
+
+    private func refreshSpotlightIndex() {
+        let container = modelContext.container
         Task(priority: .utility) {
-            try? await VisitedPlaceSpotlightIndexer.replaceIndex(with: entities)
+            // Search indexing is auxiliary and can contend with SwiftData while the first
+            // day's map is being assembled. Give the launch UI a short head start.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            do {
+                let worker = VisitedPlaceSpotlightWorker(modelContainer: container)
+                let entities = try await worker.entities()
+                try await VisitedPlaceSpotlightIndexer.replaceIndex(with: entities)
+            } catch {
+                // Spotlight is auxiliary; timeline rendering must not depend on it.
+            }
         }
     }
 
@@ -1150,15 +1221,19 @@ struct ContentView: View {
     }
 
     private func selectOlderDay() {
-        let nextIndex = selectedPageIndex - 1
+        let nextIndex = displayedPageIndex - 1
         guard recordedDayTimelines.indices.contains(nextIndex) else { return }
-        selectedPageIndex = nextIndex
+        withAnimation(.easeOut(duration: 0.22)) {
+            selectedPageIndex = nextIndex
+        }
     }
 
     private func selectNewerDay() {
-        let nextIndex = selectedPageIndex + 1
+        let nextIndex = displayedPageIndex + 1
         guard recordedDayTimelines.indices.contains(nextIndex) else { return }
-        selectedPageIndex = nextIndex
+        withAnimation(.easeOut(duration: 0.22)) {
+            selectedPageIndex = nextIndex
+        }
     }
 
     private func jumpToDate(_ date: Date) {
@@ -1223,28 +1298,6 @@ struct ContentView: View {
 private struct DaySidebarRow: View {
     let day: DayTimeline
 
-    private var totalDistance: CLLocationDistance {
-        day.moves.reduce(0) { $0 + max($1.distanceMeters, 0) }
-    }
-
-    private var summary: String {
-        guard day.hasRecordedActivity else { return "No recorded activity" }
-
-        var parts = [
-            "\(day.uniqueLocationCount) place\(day.uniqueLocationCount == 1 ? "" : "s")",
-            "\(day.moves.count) move\(day.moves.count == 1 ? "" : "s")",
-        ]
-
-        if totalDistance > 0 {
-            parts.append(
-                Measurement(value: totalDistance, unit: UnitLength.meters)
-                    .formatted(.measurement(width: .abbreviated, usage: .road))
-            )
-        }
-
-        return parts.joined(separator: " · ")
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -1254,15 +1307,9 @@ private struct DaySidebarRow: View {
 
                 Spacer(minLength: 4)
 
-                if day.hasImportedRouteData {
-                    Image(systemName: "tray.and.arrow.down.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(MovesPalette.routeTracking)
-                        .accessibilityLabel("Contains imported data")
-                }
             }
 
-            Text(summary)
+            Text("Select to view places and moves")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

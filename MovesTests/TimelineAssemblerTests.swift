@@ -80,6 +80,107 @@ final class MovesTimelinePeriodTests: XCTestCase {
 
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
+    func testAppStartupCreatesCurrentDaySynchronouslyAndOnlyOnce() throws {
+        let container = try makeInMemoryContainer()
+        let todayKey = DayTimeline.makeDayKey(for: Calendar.current.startOfDay(for: .now))
+        let descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayKey == todayKey
+            }
+        )
+
+        XCTAssertEqual(try ModelContext(container).fetchCount(descriptor), 0)
+
+        try MovesApp.ensureCurrentDayExists(in: container)
+        try MovesApp.ensureCurrentDayExists(in: container)
+
+        XCTAssertEqual(try ModelContext(container).fetchCount(descriptor), 1)
+    }
+
+    func testVisitGapFillingDefaultsToEnabledButRespectsAnExplicitOptOut() throws {
+        let suiteName = "TimelineAssemblerTests.VisitGapFilling.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(VisitGapFillingSettings.isEnabled(userDefaults: defaults))
+
+        defaults.set(false, forKey: VisitGapFillingSettings.isEnabledKey)
+        XCTAssertFalse(VisitGapFillingSettings.isEnabled(userDefaults: defaults))
+    }
+
+    func testMainLowEnergyTrackingPipelineIsEnabledAndPersistsSamplesAndMoves() async throws {
+        let suiteName = "TimelineAssemblerTests.LowEnergyTracking.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let container = try makeInMemoryContainer()
+        let activatingManager = MovesLocationCaptureManager(
+            modelContainer: container,
+            userDefaults: defaults
+        )
+        activatingManager.setBackgroundLocationListeningEnabled(true)
+
+        // Recreate the service to prove the production opt-in survives an app relaunch.
+        let captureManager = MovesLocationCaptureManager(
+            modelContainer: container,
+            userDefaults: defaults
+        )
+        let locationManager = CLLocationManager()
+        let start = Date(timeIntervalSince1970: 1_790_280_000)
+        let firstDeparture = start.addingTimeInterval(10 * 60)
+        let secondArrival = start.addingTimeInterval(20 * 60)
+
+        XCTAssertTrue(captureManager.isBackgroundLocationListeningEnabled)
+        XCTAssertTrue(captureManager.isTrackingRoleDecided)
+        XCTAssertTrue(captureManager.isUsingLowEnergyLocationConfiguration)
+        XCTAssertTrue(VisitGapFillingSettings.isEnabled(userDefaults: defaults))
+
+        captureManager.locationManager(locationManager, didVisit: MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.4685, longitude: 9.7020),
+            horizontalAccuracy: 20,
+            arrivalDate: start,
+            departureDate: firstDeparture
+        ))
+        try await waitUntil("the first low-energy visit is saved") {
+            try ModelContext(container).fetchCount(FetchDescriptor<VisitPlace>()) == 1
+        }
+
+        captureManager.locationManager(locationManager, didUpdateLocations: [
+            makeLocation(
+                latitude: 53.4705,
+                longitude: 9.6980,
+                speed: 9,
+                timestamp: start.addingTimeInterval(15 * 60)
+            )
+        ])
+        try await waitUntil("the significant-change sample is saved") {
+            let samples = try ModelContext(container).fetch(FetchDescriptor<LocationSample>())
+            return samples.contains { $0.source == .significantChange }
+        }
+
+        captureManager.locationManager(locationManager, didVisit: MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.4755, longitude: 9.6900),
+            horizontalAccuracy: 20,
+            arrivalDate: secondArrival,
+            departureDate: .distantFuture
+        ))
+        try await waitUntil("the automatically recognized move is saved") {
+            try ModelContext(container).fetchCount(FetchDescriptor<MoveSegment>()) == 1
+        }
+
+        let context = ModelContext(container)
+        let samples = try context.fetch(FetchDescriptor<LocationSample>())
+        let move = try XCTUnwrap(context.fetch(FetchDescriptor<MoveSegment>()).first)
+        let startPlace = try XCTUnwrap(move.startPlace)
+        let endPlace = try XCTUnwrap(move.endPlace)
+        XCTAssertGreaterThanOrEqual(samples.count, 3)
+        XCTAssertEqual(startPlace.latitude, 53.4685, accuracy: 0.000_001)
+        XCTAssertEqual(startPlace.longitude, 9.7020, accuracy: 0.000_001)
+        XCTAssertEqual(endPlace.latitude, 53.4755, accuracy: 0.000_001)
+        XCTAssertEqual(endPlace.longitude, 9.6900, accuracy: 0.000_001)
+        XCTAssertEqual(move.dayTimeline?.dayKey, DayTimeline.makeDayKey(for: firstDeparture))
+    }
+
     func testMapRegionAndPolylineIgnoreMalformedCoordinates() {
         let coordinates = [
             CLLocationCoordinate2D(latitude: 52.5200, longitude: 13.4050),
@@ -135,6 +236,76 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(move.distanceMeters, 999)
         XCTAssertNil(move.routeCacheSignature)
         XCTAssertNil(move.routeCacheCoordinatesData)
+    }
+
+    func testPreloadedRouteGeometryDoesNotRequireMoveSampleRelationship() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let move = MoveSegment(
+            dedupeKey: "preloaded-route",
+            startDate: start,
+            endDate: start.addingTimeInterval(60),
+            transportMode: .walking,
+            distanceMeters: 100,
+            stepCount: nil
+        )
+        let samples = [
+            LocationSample(
+                location: CLLocation(
+                    latitude: 52.5200,
+                    longitude: 13.4050
+                ),
+                source: .fileRouteImport,
+                dedupeKey: "preloaded-1"
+            ),
+            LocationSample(
+                location: CLLocation(
+                    latitude: 52.5210,
+                    longitude: 13.4060
+                ),
+                source: .fileRouteImport,
+                dedupeKey: "preloaded-2"
+            ),
+        ]
+
+        let coordinates = MoveRouteGeometry.rawCoordinates(
+            for: move,
+            samples: samples,
+            usesHealthWorkoutRoute: false
+        )
+
+        XCTAssertTrue(move.samples.isEmpty)
+        XCTAssertEqual(coordinates.count, 2)
+        XCTAssertEqual(coordinates.first?.latitude ?? .nan, 52.5200, accuracy: 0.000_001)
+        XCTAssertEqual(coordinates.last?.longitude ?? .nan, 13.4060, accuracy: 0.000_001)
+    }
+
+    func testTimelineMoveLimitUsesPrecomputedImportIndex() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let moves = (0..<20).map { index in
+            MoveSegment(
+                dedupeKey: "move-\(index)",
+                startDate: start.addingTimeInterval(Double(index)),
+                endDate: start.addingTimeInterval(Double(index + 1)),
+                transportMode: .walking,
+                distanceMeters: 1,
+                stepCount: nil
+            )
+        }
+        let importedIDs = Set(moves.prefix(15).map(\.id))
+
+        let selection = TimelinePresentationLimits.selection(
+            from: moves,
+            maxImportedMoves: 5,
+            maxTotalMoves: 20,
+            importedMoveIDs: importedIDs
+        )
+
+        XCTAssertEqual(selection.moves.count, 10)
+        XCTAssertEqual(selection.omittedCount, 10)
+        XCTAssertEqual(
+            Set(selection.moves.filter { importedIDs.contains($0.id) }.map(\.id)),
+            Set(moves[10..<15].map(\.id))
+        )
     }
 
     func testTrackSplitInterpolatesTimeBetweenSurroundingSamples() throws {
@@ -332,6 +503,57 @@ final class TimelineAssemblerTests: XCTestCase {
         let secondFilledCount = await assembler.fillVisitGaps(onDayWithKey: dayKey)
         XCTAssertEqual(secondFilledCount, 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MoveSegment>()), 1)
+    }
+
+    func testManualDayGapFillingConnectsTheCarriedOverPlaceToTheFirstVisit() async throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let assembler = DefaultTimelineAssembler(
+            repository: repository,
+            motionClassifier: StubMotionClassifier(),
+            placeNameResolver: StubPlaceNameResolver(),
+            automaticallyFillsVisitGaps: { false }
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let currentDay = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 25
+        )))
+        let previousDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: currentDay))
+        let homeArrival = previousDay.addingTimeInterval(21 * 60 * 60)
+        let destinationArrival = currentDay.addingTimeInterval(11 * 60 * 60)
+
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.4685, longitude: 9.7020),
+            horizontalAccuracy: 20,
+            arrivalDate: homeArrival,
+            departureDate: .distantFuture
+        ))
+        await assembler.ingestLocations([
+            makeLocation(
+                latitude: 53.4705,
+                longitude: 9.6980,
+                speed: 9,
+                timestamp: currentDay.addingTimeInterval(10 * 60 * 60 + 58 * 60)
+            )
+        ], source: .significantChange)
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.4755, longitude: 9.6900),
+            horizontalAccuracy: 20,
+            arrivalDate: destinationArrival,
+            departureDate: .distantFuture
+        ))
+
+        let dayKey = DayTimeline.makeDayKey(for: currentDay)
+        let filledGapCount = await assembler.fillVisitGaps(onDayWithKey: dayKey)
+        XCTAssertEqual(filledGapCount, 1)
+
+        let context = ModelContext(container)
+        let move = try XCTUnwrap(context.fetch(FetchDescriptor<MoveSegment>()).first)
+        XCTAssertEqual(move.dayTimeline?.dayKey, dayKey)
+        XCTAssertEqual(move.endPlace?.dayTimeline?.dayKey, dayKey)
     }
 
     func testQuietDayUsesMostRecentPriorPlaceForDisplay() throws {
@@ -2419,6 +2641,20 @@ final class TimelineAssemblerTests: XCTestCase {
             speed: speed,
             timestamp: timestamp
         )
+    }
+
+    private func waitUntil(
+        _ description: String,
+        condition: () throws -> Bool
+    ) async throws {
+        for _ in 0..<200 {
+            if try condition() {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTFail("Timed out waiting for \(description).")
     }
 }
 

@@ -348,8 +348,21 @@ enum ShareMapAggregateBackgroundTask {
         let request = BGProcessingTaskRequest(identifier: taskIdentifier)
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower = false
-        request.earliestBeginDate = Calendar.current.date(byAdding: .hour, value: 6, to: now)
+        request.earliestBeginDate = nextRunDate(now: now)
         try? BGTaskScheduler.shared.submit(request)
+    }
+
+    static func nextRunDate(
+        now: Date = .now,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Date {
+        let startOfToday = calendar.startOfDay(for: now)
+        let tonight = calendar.date(bySettingHour: 2, minute: 0, second: 0, of: startOfToday)
+        if let tonight, tonight > now {
+            return tonight
+        }
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? now
+        return calendar.date(bySettingHour: 2, minute: 0, second: 0, of: tomorrow) ?? tomorrow
     }
 
     private static func handle(_ task: BGProcessingTask) {
