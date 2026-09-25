@@ -254,8 +254,8 @@ enum ShareMapAggregateBuilder {
         let work = Task.detached(priority: .utility) {
             do {
                 try Task.checkCancellation()
-                let context = ModelContext(modelContainer)
-                try refresh(periodKeys: periodKeys, in: context)
+                let worker = ShareMapAggregateWorker(modelContainer: modelContainer)
+                try await worker.refresh(periodKeys: periodKeys)
                 ShareMapAggregateDirtyPeriods.clear(periodKeys)
             } catch is CancellationError {
                 ShareMapAggregateDirtyPeriods.restore(periodKeys)
@@ -279,18 +279,10 @@ enum ShareMapAggregateBuilder {
             do {
                 try Task.checkCancellation()
                 progress(0.05)
-                let context = ModelContext(modelContainer)
-                guard let interval = period.dateInterval(containing: periodStart) else { return }
-                let predicate = #Predicate<DayTimeline> { day in
-                    day.dayStart >= interval.start && day.dayStart < interval.end
-                }
-                let timelines = try context.fetch(FetchDescriptor(predicate: predicate))
-                progress(0.12)
-                try rebuildIfNeeded(
-                    timelines: timelines.filter(\.hasRecordedActivity),
+                let worker = ShareMapAggregateWorker(modelContainer: modelContainer)
+                try await worker.refresh(
                     period: period,
-                    periodStart: period.start(for: periodStart),
-                    in: context,
+                    periodStart: periodStart,
                     progress: progress
                 )
                 ShareMapAggregateDirtyPeriods.clear(Set([
@@ -308,7 +300,7 @@ enum ShareMapAggregateBuilder {
         await withTaskCancellationHandler(operation: { await work.value }, onCancel: { work.cancel() })
     }
 
-    private static func refresh(periodKeys: Set<String>, in context: ModelContext) throws {
+    fileprivate static func refresh(periodKeys: Set<String>, in context: ModelContext) throws {
         for key in periodKeys.sorted() {
             try Task.checkCancellation()
             guard let interval = ShareMapAggregateStore.dateInterval(for: key) else { continue }
@@ -326,7 +318,7 @@ enum ShareMapAggregateBuilder {
         }
     }
 
-    private static func rebuildIfNeeded(
+    fileprivate static func rebuildIfNeeded(
         timelines: [DayTimeline],
         period: MovesSharePeriod,
         periodStart: Date,
@@ -420,6 +412,36 @@ enum ShareMapAggregateBuilder {
         return (0..<maximumCount).map { index in
             coordinates[min(Int((Double(index) * step).rounded()), coordinates.count - 1)]
         }
+    }
+}
+
+/// Owns every background aggregate read/write on the model actor's serial executor.
+/// SwiftData uses `ModelContext` rather than Core Data's `NSManagedObjectContext`, so
+/// actor isolation is the equivalent confinement boundary for these background jobs.
+@ModelActor
+private actor ShareMapAggregateWorker {
+    func refresh(periodKeys: Set<String>) throws {
+        try ShareMapAggregateBuilder.refresh(periodKeys: periodKeys, in: modelContext)
+    }
+
+    func refresh(
+        period: MovesSharePeriod,
+        periodStart: Date,
+        progress: @escaping @Sendable (Double) -> Void
+    ) throws {
+        guard let interval = period.dateInterval(containing: periodStart) else { return }
+        let predicate = #Predicate<DayTimeline> { day in
+            day.dayStart >= interval.start && day.dayStart < interval.end
+        }
+        let timelines = try modelContext.fetch(FetchDescriptor(predicate: predicate))
+        progress(0.12)
+        try ShareMapAggregateBuilder.rebuildIfNeeded(
+            timelines: timelines.filter(\.hasRecordedActivity),
+            period: period,
+            periodStart: period.start(for: periodStart),
+            in: modelContext,
+            progress: progress
+        )
     }
 }
 

@@ -1079,22 +1079,9 @@ struct MovesShareGalleryView: View {
         let period = selectedPeriod
         let periodStart = selectedPeriodStart
         let container = modelContext.container
-        let work = Task<TimelineExportPayload?, Never>.detached(priority: .userInitiated) {
-            let context = ModelContext(container)
-            let descriptor = FetchDescriptor<DayTimeline>(
-                sortBy: [SortDescriptor(\.dayStart, order: .forward)]
-            )
-            guard let timelines = try? context.fetch(descriptor) else { return nil }
-            let days = timelines.filter { day in
-                (period == .forever || period.contains(day.dayStart, periodStart: periodStart))
-                    && (!day.places.isEmpty || !day.moves.isEmpty)
-            }
-            guard !days.isEmpty else { return nil }
-            return TimelineExporter.makePayload(
-                days: days,
-                format: .gpx,
-                fileStem: period.gpxFileStem(for: periodStart)
-            )
+        let work = Task<GPXSharePayload?, Never>.detached(priority: .userInitiated) {
+            let worker = MovesShareExportWorker(modelContainer: container)
+            return try? await worker.makeGPXPayload(for: period, periodStart: periodStart)
         }
         let payload = await withTaskCancellationHandler(
             operation: { await work.value },
@@ -1230,6 +1217,38 @@ struct MovesShareGalleryView: View {
         )
         if Task.isCancelled { return nil }
         return load()
+    }
+}
+
+private struct GPXSharePayload: Sendable {
+    let data: Data
+    let filename: String
+}
+
+/// Confines the background export's SwiftData fetch to a model actor.
+@ModelActor
+private actor MovesShareExportWorker {
+    func makeGPXPayload(
+        for period: MovesSharePeriod,
+        periodStart: Date
+    ) throws -> GPXSharePayload? {
+        let descriptor = FetchDescriptor<DayTimeline>(
+            sortBy: [SortDescriptor(\.dayStart, order: .forward)]
+        )
+        let timelines = try modelContext.fetch(descriptor)
+        let days = timelines.filter { day in
+            (period == .forever || period.contains(day.dayStart, periodStart: periodStart))
+                && (!day.places.isEmpty || !day.moves.isEmpty)
+        }
+        guard !days.isEmpty,
+              let payload = TimelineExporter.makePayload(
+                  days: days,
+                  format: .gpx,
+                  fileStem: period.gpxFileStem(for: periodStart)
+              ) else {
+            return nil
+        }
+        return GPXSharePayload(data: payload.data, filename: payload.filename)
     }
 }
 

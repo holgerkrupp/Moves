@@ -77,7 +77,7 @@ enum DailyTimelineBackup {
         now: Date = .now
     ) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
-            try writeYesterday(in: modelContainer, userDefaults: userDefaults, now: now)
+            try await writeYesterday(in: modelContainer, userDefaults: userDefaults, now: now)
         }.value
     }
 
@@ -85,7 +85,7 @@ enum DailyTimelineBackup {
         in modelContainer: ModelContainer,
         userDefaults: UserDefaults,
         now: Date
-    ) throws -> URL {
+    ) async throws -> URL {
         let calendar = Calendar.current
         let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
         let dayKey = DayTimeline.makeDayKey(for: yesterday)
@@ -95,25 +95,15 @@ enum DailyTimelineBackup {
             userDefaults: userDefaults
         )
         log.info("Destination directory: \(destinationDirectory.path, privacy: .public)")
-        let context = ModelContext(modelContainer)
-        let descriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { $0.dayKey == dayKey }
-        )
-        guard let day = try context.fetch(descriptor).first else {
-            log.error("No DayTimeline stored for \(dayKey, privacy: .public)")
-            throw DailyTimelineBackupError.noTimeline(for: yesterday)
-        }
-
         let format = DailyTimelineBackupFormat(
             rawValue: userDefaults.string(forKey: formatKey) ?? "gpx"
         ) ?? .gpx
-        guard let payload = TimelineExporter.makePayload(
-            days: [day],
-            format: format.timelineExportFormat,
-            fileStem: "Moves-\(dayKey)"
-        ) else {
-            throw DailyTimelineBackupError.couldNotCreateExport
-        }
+        let worker = DailyTimelineBackupWorker(modelContainer: modelContainer)
+        let payload = try await worker.export(
+            dayKey: dayKey,
+            date: yesterday,
+            format: format.timelineExportFormat
+        )
 
         let destination = destinationDirectory.appendingPathComponent(payload.filename)
         try writeCoordinated(payload.data, to: destination)
@@ -241,5 +231,38 @@ enum DailyTimelineBackup {
         let calendar = Calendar.current
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now
         return calendar.date(bySettingHour: 0, minute: 5, second: 0, of: tomorrow) ?? tomorrow
+    }
+}
+
+private struct DailyTimelineBackupPayload: Sendable {
+    let data: Data
+    let filename: String
+}
+
+/// Keeps the background backup's SwiftData context confined to one model actor.
+/// SwiftData has no `NSManagedObjectContext.perform`; actor isolation is its
+/// serial-confinement mechanism.
+@ModelActor
+private actor DailyTimelineBackupWorker {
+    func export(
+        dayKey: String,
+        date: Date,
+        format: TimelineExportFormat
+    ) throws -> DailyTimelineBackupPayload {
+        let descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { $0.dayKey == dayKey }
+        )
+        guard let day = try modelContext.fetch(descriptor).first else {
+            DailyTimelineBackup.log.error("No DayTimeline stored for \(dayKey, privacy: .public)")
+            throw DailyTimelineBackupError.noTimeline(for: date)
+        }
+        guard let payload = TimelineExporter.makePayload(
+            days: [day],
+            format: format,
+            fileStem: "Moves-\(dayKey)"
+        ) else {
+            throw DailyTimelineBackupError.couldNotCreateExport
+        }
+        return DailyTimelineBackupPayload(data: payload.data, filename: payload.filename)
     }
 }

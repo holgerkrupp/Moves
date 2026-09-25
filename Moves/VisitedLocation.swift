@@ -1537,7 +1537,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         source: LocationSampleSource,
         transportMode: TransportMode,
         resolvePlaceNames: Bool = true,
-        continuingFrom visit: VisitPlace? = nil
+        continuingFrom visit: VisitPlace? = nil,
+        saveImmediately: Bool = true
     ) throws -> MoveSegment? {
         let orderedLocations = locations
             .filter {
@@ -1586,7 +1587,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             transportMode: transportMode,
             distanceMeters: distance,
             stepCount: nil,
-            samples: samples
+            samples: samples,
+            saveImmediately: saveImmediately
         )
 
         if source == .fileRouteImport {
@@ -1599,8 +1601,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             signature: MoveRouteGeometry.cacheSignature(for: move, fallback: importedCoordinates)
         )
 
-        try saveIfNeeded()
-        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        if saveImmediately {
+            try saveIfNeeded()
+            NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        }
         return move
     }
 
@@ -1673,6 +1677,30 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         stepCount: Int?,
         samples: [LocationSample]
     ) throws -> MoveSegment {
+        try upsertMove(
+            startPlace: startPlace,
+            endPlace: endPlace,
+            startDate: startDate,
+            endDate: endDate,
+            transportMode: transportMode,
+            distanceMeters: distanceMeters,
+            stepCount: stepCount,
+            samples: samples,
+            saveImmediately: true
+        )
+    }
+
+    private func upsertMove(
+        startPlace: VisitPlace,
+        endPlace: VisitPlace,
+        startDate: Date,
+        endDate: Date,
+        transportMode: TransportMode,
+        distanceMeters: Double,
+        stepCount: Int?,
+        samples: [LocationSample],
+        saveImmediately: Bool
+    ) throws -> MoveSegment {
         let dedupeKey = Self.makeMoveDedupeKey(
             startPlaceID: startPlace.id,
             endPlaceID: endPlace.id,
@@ -1724,8 +1752,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         }
 
         let canonical = try collapseDuplicateMoves(around: move)
-        try saveIfNeeded()
-        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        if saveImmediately {
+            try saveIfNeeded()
+            NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        }
         return canonical
     }
 

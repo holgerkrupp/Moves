@@ -1875,6 +1875,12 @@ final class RouteFileImporter: ObservableObject {
         }
 
         let resolver = CLGeocoderPlaceNameResolver()
+        var labeledPlaceCount = 0
+        defer {
+            if labeledPlaceCount > 0 {
+                try? context.save()
+            }
+        }
         for (index, place) in places.enumerated() {
             if index > 0 {
                 try? await Task.sleep(for: .milliseconds(1_500))
@@ -1884,7 +1890,11 @@ final class RouteFileImporter: ObservableObject {
             importProgressText = "Naming place \(index + 1) of \(places.count) (rate-limited)"
             if let name = await resolver.resolveName(for: place.coordinate) {
                 place.autoLabel = name
-                try? context.save()
+                labeledPlaceCount += 1
+                if labeledPlaceCount.isMultiple(of: 100) {
+                    try? context.save()
+                    await Task.yield()
+                }
             }
         }
     }

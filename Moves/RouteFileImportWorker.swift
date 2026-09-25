@@ -16,6 +16,7 @@ actor RouteFileImportWorker {
     }
 
     private static let commitChunkSize = 256
+    private static let placeLabelCommitChunkSize = 100
     private static let summaryRefreshRouteInterval = 16
 
     func importTracks(
@@ -62,7 +63,8 @@ actor RouteFileImportWorker {
                     source: .fileRouteImport,
                     transportMode: resolvedMode,
                     resolvePlaceNames: false,
-                    continuingFrom: precedingVisit
+                    continuingFrom: precedingVisit,
+                    saveImmediately: false
                 )
                 if let move {
                     result.routeCount += 1
@@ -121,11 +123,21 @@ actor RouteFileImportWorker {
         }
 
         let resolver = CLGeocoderPlaceNameResolver()
+        var labeledPlaceCount = 0
+        defer {
+            if labeledPlaceCount > 0 {
+                try? modelContext.save()
+            }
+        }
         for place in places {
             guard !Task.isCancelled else { return }
             if let name = await resolver.resolveName(for: place.coordinate) {
                 place.autoLabel = name
-                try? modelContext.save()
+                labeledPlaceCount += 1
+                if labeledPlaceCount.isMultiple(of: Self.placeLabelCommitChunkSize) {
+                    try? modelContext.save()
+                    await Task.yield()
+                }
             }
         }
     }
