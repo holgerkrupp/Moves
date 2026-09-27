@@ -216,6 +216,31 @@ final class ImportQueueTests: XCTestCase {
         XCTAssertEqual(restored.first?.source.sourceIdentifiers, ["/missing/routes.gpx"])
     }
 
+    func testDuplicateRecoveryPersistsFingerprintForReview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ImportRecoveryStore(fileURL: root.appendingPathComponent("recovery.json"))
+        let fingerprint = ImportFingerprintRecord(
+            digest: String(repeating: "a", count: 64),
+            byteCount: 42,
+            originalFileName: "previous.gpx",
+            checkpointID: UUID(),
+            completedAt: .now
+        )
+        let item = ImportRecoveryItem(
+            displayName: "renamed.gpx",
+            originalFileName: "renamed.gpx",
+            kind: .duplicate,
+            reason: "Exact content was imported before",
+            fingerprint: fingerprint
+        )
+        try store.save([item])
+
+        let restored = try store.load()
+        XCTAssertEqual(restored.first?.kind, .duplicate)
+        XCTAssertEqual(restored.first?.fingerprint, fingerprint)
+    }
+
     func testAcquirerRetainsPartialStagingForRecovery() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let staging = root.appendingPathComponent("staged")

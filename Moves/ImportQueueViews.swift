@@ -145,7 +145,7 @@ struct ImportQueueView: View {
                                     Label(item.displayName, systemImage: item.kind == .needsInformation ? "questionmark.circle" : (item.kind == .duplicate ? "doc.on.doc" : "exclamationmark.triangle"))
                                     Spacer()
                                     Button("Discard", role: .destructive) {
-                                        try? coordinator.removeRecovery(id: item.id)
+                                        coordinator.discardRecovery(id: item.id)
                                     }
                                     .font(.caption)
                                 }

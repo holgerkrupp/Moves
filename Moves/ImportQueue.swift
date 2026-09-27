@@ -432,6 +432,14 @@ final class ImportCoordinator: ObservableObject {
         try recoveryStore.save(recoveryItems)
     }
 
+    func discardRecovery(id: UUID) {
+        if let routeFileImporter {
+            routeFileImporter.discardFailedImport(id)
+        } else {
+            try? removeRecovery(id: id)
+        }
+    }
+
     private func transition(id: UUID, to state: ImportJobState, clearError: Bool = false) throws {
         guard let index = snapshot.jobs.firstIndex(where: { $0.id == id }) else { return }
         snapshot.jobs[index].state = state
