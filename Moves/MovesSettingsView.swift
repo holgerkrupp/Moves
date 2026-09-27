@@ -190,6 +190,17 @@ struct MovesSettingsView: View {
                             tint: .indigo
                         )
                     }
+
+                    NavigationLink {
+                        PhotosIntegrationDebugView()
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Photos Integration",
+                            subtitle: "Import photo visits and preview location writes",
+                            systemImage: "photo.on.rectangle.angled",
+                            tint: .pink
+                        )
+                    }
                 } header: {
                     Text("Debug")
                 }

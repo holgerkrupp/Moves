@@ -166,6 +166,89 @@ final class ImportStressTests: XCTestCase {
         }
     }
 
+    func testStreamingAcquisitionKeepsStagingWindowBoundedForLargeFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = root.appendingPathComponent("routes", isDirectory: true)
+        let staging = root.appendingPathComponent("staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for index in 0..<1_000 {
+            try Data("route-\(index)".utf8).write(to: source.appendingPathComponent("route-\(index).gpx"))
+        }
+
+        var maximumStagedFiles = 0
+        let result = try await RouteImportAcquirer(stagingDirectory: staging).process(
+            urls: [source],
+            stageFiles: true
+        ) { item in
+            let stagedFiles = try FileManager.default.contentsOfDirectory(
+                at: staging,
+                includingPropertiesForKeys: nil
+            )
+            maximumStagedFiles = max(maximumStagedFiles, stagedFiles.count)
+            XCTAssertTrue(item.isStaged)
+            return .removeStagedFile
+        }
+
+        XCTAssertEqual(result.discoveredFileCount, 1_000)
+        XCTAssertLessThanOrEqual(maximumStagedFiles, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil), [])
+    }
+
+    func testFingerprintLedgerDetectsRenamedExactContentWithoutLoadingWholeFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("original.gpx")
+        let renamed = root.appendingPathComponent("renamed.gpx")
+        let different = root.appendingPathComponent("original-copy.gpx")
+        try Data(repeating: 7, count: 2 * 1024 * 1024 + 17).write(to: original)
+        try FileManager.default.copyItem(at: original, to: renamed)
+        try Data(repeating: 8, count: 2 * 1024 * 1024 + 17).write(to: different)
+
+        let fingerprint = try RouteImportFingerprinting.hash(file: original)
+        let ledger = ImportFingerprintLedger(fileURL: root.appendingPathComponent("ledger.json"))
+        let record = ImportFingerprintRecord(
+            digest: fingerprint.digest,
+            byteCount: fingerprint.byteCount,
+            originalFileName: original.lastPathComponent,
+            checkpointID: UUID(),
+            completedAt: .now
+        )
+        try ledger.record(record)
+
+        let renamedFingerprint = try RouteImportFingerprinting.hash(file: renamed)
+        let match = try ledger.matching(digest: renamedFingerprint.digest, byteCount: renamedFingerprint.byteCount)
+        XCTAssertEqual(match?.originalFileName, "original.gpx")
+        XCTAssertNotEqual(try RouteImportFingerprinting.hash(file: different).digest, fingerprint.digest)
+    }
+
+    func testStreamingZIPExtractionProcessesEntriesOneAtATime() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let staging = root.appendingPathComponent("staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = root.appendingPathComponent("routes.zip")
+        try makeStoredZIP(entries: [
+            ("a.gpx", Data("a".utf8)),
+            ("nested/b.gpx", Data("b".utf8)),
+            ("ignored.txt", Data("ignore".utf8))
+        ]).write(to: archive)
+
+        var names: [String] = []
+        let result = try await RouteImportAcquirer(stagingDirectory: staging).process(
+            urls: [archive],
+            stageFiles: true
+        ) { item in
+            names.append(item.displayName)
+            XCTAssertEqual(try Data(contentsOf: item.url), Data(item.displayName == "a.gpx" ? "a".utf8 : "b".utf8))
+            return .removeStagedFile
+        }
+
+        XCTAssertEqual(names, ["a.gpx", "b.gpx"])
+        XCTAssertEqual(result.discoveredFileCount, 2)
+    }
+
     // Issue #2 regression: importing a large GPX must parse in a detached utility task and finish
     // with all points represented, instead of blocking the main actor or crashing on the payload.
     func testIssue2LargeGPXRegression() async throws {

@@ -338,6 +338,15 @@ struct LocationExportSample {
     }
 }
 
+private struct MappedMoveExportSnapshot {
+    let startDate: Date
+    let endDate: Date
+    let transportMode: TransportMode
+    let fallbackCoordinates: [CLLocationCoordinate2D]
+    let preferredCoordinates: [CLLocationCoordinate2D]?
+    let samples: [LocationExportSample]
+}
+
 enum MappedRouteExport {
     /// Converts the route drawn by Moves into timestamped points understood by
     /// location-history services. MapKit geometry has no timestamps, so time is
@@ -990,29 +999,69 @@ final class LocationServiceSyncManager: ObservableObject {
 
         guard !candidateMoveIDs.isEmpty else { return 0 }
 
-        let modelContext = ModelContext(modelContainer)
-        let moves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
-            .filter { candidateMoveIDs.contains($0.id) }
-            .sorted { lhs, rhs in
-                if lhs.timelineStartDate != rhs.timelineStartDate {
-                    return lhs.timelineStartDate < rhs.timelineStartDate
+        // Convert managed objects to value snapshots before any network await. The
+        // exporter can otherwise retain a read context and its SQLite snapshot for the
+        // entire duration of route matching and uploads.
+        let moveSnapshots: [MappedMoveExportSnapshot] = try {
+            let modelContext = ModelContext(modelContainer)
+            let moves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+                .filter { candidateMoveIDs.contains($0.id) }
+                .sorted { lhs, rhs in
+                    if lhs.timelineStartDate != rhs.timelineStartDate {
+                        return lhs.timelineStartDate < rhs.timelineStartDate
+                    }
+                    return lhs.id.uuidString < rhs.id.uuidString
                 }
-                return lhs.id.uuidString < rhs.id.uuidString
+
+            return moves.map { move in
+                let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+                let cacheSignature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+                let preferredCoordinates: [CLLocationCoordinate2D]?
+                if let manual = move.manualRouteCoordinates {
+                    preferredCoordinates = manual
+                } else if move.usesImportedRoute {
+                    preferredCoordinates = fallback
+                } else if move.usesHighAccuracyRouteTracking {
+                    preferredCoordinates = RouteCoordinateOps.dedupeSequentialCoordinates(
+                        fallback,
+                        minimumDistanceMeters: MoveRouteGeometry.highAccuracyDisplayDedupeDistance(for: move)
+                    )
+                } else {
+                    preferredCoordinates = move.cachedRouteCoordinates(for: cacheSignature)
+                }
+
+                return MappedMoveExportSnapshot(
+                    startDate: move.timelineStartDate,
+                    endDate: move.endDate,
+                    transportMode: move.transportMode,
+                    fallbackCoordinates: fallback,
+                    preferredCoordinates: preferredCoordinates,
+                    samples: move.samples
+                        .sorted(by: { $0.timestamp < $1.timestamp })
+                        .map(LocationExportSample.init)
+                )
             }
+        }()
         var uploadedCount = 0
 
-        for move in moves {
-            let coordinates = await RoadRouteMatcher.matchedCoordinates(for: move)
+        for move in moveSnapshots {
+            let coordinates: [CLLocationCoordinate2D]
+            if let preferredCoordinates = move.preferredCoordinates {
+                coordinates = preferredCoordinates
+            } else {
+                coordinates = await RoadRouteMatcher.matchedCoordinates(
+                    fallback: move.fallbackCoordinates,
+                    transportMode: move.transportMode
+                )
+            }
             let routeSamples = MappedRouteExport.samples(
                 coordinates: coordinates,
-                startDate: move.timelineStartDate,
+                startDate: move.startDate,
                 endDate: move.endDate
             )
             if routeSamples.isEmpty {
                 uploadedCount += try await uploadInBatches(
-                    move.samples
-                        .sorted(by: { $0.timestamp < $1.timestamp })
-                        .map(LocationExportSample.init),
+                    move.samples,
                     configuration: configuration,
                     credentials: credentials,
                     input: input
@@ -1025,10 +1074,6 @@ final class LocationServiceSyncManager: ObservableObject {
                     input: input
                 )
             }
-        }
-
-        if modelContext.hasChanges {
-            try modelContext.save()
         }
 
         return uploadedCount
@@ -1045,28 +1090,30 @@ final class LocationServiceSyncManager: ObservableObject {
         var uploadedCount = 0
 
         while true {
-            let modelContext = ModelContext(modelContainer)
-            var descriptor = FetchDescriptor<LocationSample>(
-                predicate: #Predicate { sample in
-                    sample.createdAt > cursor
-                        && sample.createdAt <= upperBound
-                        && sample.moveSegment == nil
-                },
-                sortBy: [SortDescriptor(\LocationSample.createdAt, order: .forward)]
-            )
-            descriptor.fetchLimit = Self.batchSize
-            descriptor.fetchOffset = fetchOffset
-            let samples = try modelContext.fetch(descriptor)
-            guard !samples.isEmpty else { break }
+            let batch: [LocationExportSample] = try {
+                let modelContext = ModelContext(modelContainer)
+                var descriptor = FetchDescriptor<LocationSample>(
+                    predicate: #Predicate { sample in
+                        sample.createdAt > cursor
+                            && sample.createdAt <= upperBound
+                            && sample.moveSegment == nil
+                    },
+                    sortBy: [SortDescriptor(\LocationSample.createdAt, order: .forward)]
+                )
+                descriptor.fetchLimit = Self.batchSize
+                descriptor.fetchOffset = fetchOffset
+                return try modelContext.fetch(descriptor).map(LocationExportSample.init)
+            }()
+            guard !batch.isEmpty else { break }
 
             uploadedCount += try await uploadInBatches(
-                samples.map(LocationExportSample.init),
+                batch,
                 configuration: configuration,
                 credentials: credentials,
                 input: input
             )
-            fetchOffset += samples.count
-            if samples.count < Self.batchSize { break }
+            fetchOffset += batch.count
+            if batch.count < Self.batchSize { break }
         }
 
         return uploadedCount

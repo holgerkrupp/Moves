@@ -1323,6 +1323,15 @@ enum RoadRouteMatcher {
         return coordinates
     }
 
+    /// Resolves a value-only route snapshot. Background exporters use this overload so
+    /// network matching never keeps a managed object/context alive across an await.
+    static func matchedCoordinates(
+        fallback: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) async -> [CLLocationCoordinate2D] {
+        await resolveCoordinates(fallback: fallback, transportMode: transportMode).coordinates
+    }
+
     private static func resolveDisplayedCoordinates(
         for move: MoveSegment,
         persistResult: Bool

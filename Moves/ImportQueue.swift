@@ -78,6 +78,7 @@ struct ImportJobError: Codable, Hashable, Sendable {
 enum ImportRecoveryKind: String, Codable, CaseIterable, Sendable {
     case needsInformation
     case failed
+    case duplicate
 }
 
 struct ImportRecoveryItem: Codable, Hashable, Identifiable, Sendable {
@@ -89,6 +90,7 @@ struct ImportRecoveryItem: Codable, Hashable, Identifiable, Sendable {
     var configuration: RouteFileImportConfiguration
     var kind: ImportRecoveryKind
     var reason: String
+    var fingerprint: ImportFingerprintRecord?
     var createdAt: Date
     var updatedAt: Date
 
@@ -96,7 +98,8 @@ struct ImportRecoveryItem: Codable, Hashable, Identifiable, Sendable {
         id: UUID = UUID(), displayName: String, originalFileName: String,
         source: ImportJobSourceMetadata = .init(), stagedPath: String? = nil,
         configuration: RouteFileImportConfiguration = .init(),
-        kind: ImportRecoveryKind, reason: String, createdAt: Date = .now, updatedAt: Date = .now
+        kind: ImportRecoveryKind, reason: String, fingerprint: ImportFingerprintRecord? = nil,
+        createdAt: Date = .now, updatedAt: Date = .now
     ) {
         self.id = id
         self.displayName = displayName
@@ -106,6 +109,7 @@ struct ImportRecoveryItem: Codable, Hashable, Identifiable, Sendable {
         self.configuration = configuration
         self.kind = kind
         self.reason = reason
+        self.fingerprint = fingerprint
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

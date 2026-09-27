@@ -6,6 +6,12 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
 private extension View {
     @ViewBuilder
     func platformInlineNavigationTitle() -> some View {
@@ -123,19 +129,22 @@ struct FailedRouteImport: Codable, Identifiable, Hashable {
     let reason: String
     let configuration: RouteFileImportConfiguration
     var kind: ImportRecoveryKind = .needsInformation
+    var fingerprint: ImportFingerprintRecord? = nil
     var source: ImportJobSourceMetadata = .init()
     var stagedPath: String? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case id, originalFileName, storedFileName, sourceImportIdentifier, createdAt, reason, configuration, kind, source, stagedPath
+        case id, originalFileName, storedFileName, sourceImportIdentifier, createdAt, reason, configuration, kind, fingerprint, source, stagedPath
     }
 
     init(id: UUID, originalFileName: String, storedFileName: String, sourceImportIdentifier: String,
          createdAt: Date, reason: String, configuration: RouteFileImportConfiguration,
-         kind: ImportRecoveryKind = .needsInformation, source: ImportJobSourceMetadata = .init(), stagedPath: String? = nil) {
+         kind: ImportRecoveryKind = .needsInformation, fingerprint: ImportFingerprintRecord? = nil,
+         source: ImportJobSourceMetadata = .init(), stagedPath: String? = nil) {
         self.id = id; self.originalFileName = originalFileName; self.storedFileName = storedFileName
         self.sourceImportIdentifier = sourceImportIdentifier; self.createdAt = createdAt; self.reason = reason
-        self.configuration = configuration; self.kind = kind; self.source = source; self.stagedPath = stagedPath
+        self.configuration = configuration; self.kind = kind; self.fingerprint = fingerprint
+        self.source = source; self.stagedPath = stagedPath
     }
 
     init(from decoder: Decoder) throws {
@@ -148,6 +157,7 @@ struct FailedRouteImport: Codable, Identifiable, Hashable {
         reason = try c.decode(String.self, forKey: .reason)
         configuration = try c.decode(RouteFileImportConfiguration.self, forKey: .configuration)
         kind = try c.decodeIfPresent(ImportRecoveryKind.self, forKey: .kind) ?? .needsInformation
+        fingerprint = try c.decodeIfPresent(ImportFingerprintRecord.self, forKey: .fingerprint)
         source = try c.decodeIfPresent(ImportJobSourceMetadata.self, forKey: .source) ?? .init()
         stagedPath = try c.decodeIfPresent(String.self, forKey: .stagedPath)
     }
@@ -989,9 +999,13 @@ private struct PersistedRouteFileImport: Codable {
     var mappingModeRawValue: String?
     var dedicatedTransportModeRawValue: String?
     var existingDataPolicyRawValue: String?
+    var fileHandlingModeRawValue: String?
     var filesAreStaged: Bool? = true
     var accessRoots: [RouteImportAccessRoot]? = nil
     var failureEntries: [RouteFileFailureEntry]? = nil
+    var fileSourceIdentifiers: [String]? = nil
+    var sourceRoots: [String]? = nil
+    var discoveryComplete: Bool? = true
     var state: RouteFileImportState
     var updatedAt: Date
 
@@ -999,7 +1013,8 @@ private struct PersistedRouteFileImport: Codable {
         RouteFileImportConfiguration(
             mappingMode: RouteFileImportMappingMode(rawValue: mappingModeRawValue ?? "automatic") ?? .automatic,
             dedicatedTransportMode: TransportMode(rawValue: dedicatedTransportModeRawValue ?? "unknown") ?? .unknown,
-            existingDataPolicy: RouteFileExistingDataPolicy(rawValue: existingDataPolicyRawValue ?? (skipExistingDates ? "skipDate" : "keepExistingData")) ?? .keepExistingData
+            existingDataPolicy: RouteFileExistingDataPolicy(rawValue: existingDataPolicyRawValue ?? (skipExistingDates ? "skipDate" : "keepExistingData")) ?? .keepExistingData,
+            fileHandlingMode: RouteFileImportFileHandlingMode(rawValue: fileHandlingModeRawValue ?? "oneAtATime") ?? .oneAtATime
         )
     }
 }
@@ -1077,6 +1092,20 @@ private enum RouteFileImportStore {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }
+
+    static var duplicateCandidatesDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Moves/RouteImportDuplicates", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    static var fingerprintLedger: ImportFingerprintLedger {
+        ImportFingerprintLedger(
+            fileURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Moves/ImportFingerprints.json")
+        )
+    }
 }
 
 private func makeRouteFileImportWorker(
@@ -1122,6 +1151,7 @@ final class RouteFileImporter: ObservableObject {
                 reason: item.reason,
                 configuration: item.configuration,
                 kind: item.kind,
+                fingerprint: item.fingerprint,
                 source: item.source,
                 stagedPath: item.stagedPath
             )
@@ -1220,44 +1250,30 @@ final class RouteFileImporter: ObservableObject {
                     $0.pathExtension.caseInsensitiveCompare("zip") == .orderedSame
                 }
                 let stageFiles = configuration.fileHandlingMode == .stageAll || mustStageArchive
-                let acquisition = try await self.prepareFiles(urls, stageFiles: stageFiles)
-                let files = acquisition.files
-                guard !files.isEmpty else { throw RouteFileImportError.noFiles }
-                if let activeJobID, var job = self.importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
-                    job.displayName = files.count == 1
-                        ? (acquisition.sourceNames.first ?? files[0].lastPathComponent)
-                        : "Route file import (\(files.count) files)"
-                    job.source.originalFileNames = acquisition.sourceNames
-                    job.source.sourceIdentifiers = acquisition.sourceIdentifiers
-                    job.source.bookmarkData = acquisition.bookmarkData
-                    job.counters.itemCount = files.count
-                    job.updatedAt = .now
-                    try? self.importCoordinator.update(job)
-                }
                 let persisted = PersistedRouteFileImport(
                     jobID: self.activeJobID,
-                    files: files.map(\.path), nextIndex: 0, importedFileCount: 0,
+                    files: [], nextIndex: 0, importedFileCount: 0,
                     routeCount: 0, sampleCount: 0, failedFileCount: 0,
                     skipExistingDates: configuration.existingDataPolicy == .skipDate,
                     mappingModeRawValue: configuration.mappingMode.rawValue,
                     dedicatedTransportModeRawValue: configuration.dedicatedTransportMode.rawValue,
                     existingDataPolicyRawValue: configuration.existingDataPolicy.rawValue,
-                    filesAreStaged: acquisition.filesAreStaged,
-                    accessRoots: acquisition.accessRoots,
+                    fileHandlingModeRawValue: configuration.fileHandlingMode.rawValue,
+                    filesAreStaged: stageFiles,
+                    accessRoots: nil,
                     failureEntries: [],
+                    fileSourceIdentifiers: [],
+                    sourceRoots: urls.map(\.path),
+                    discoveryComplete: false,
                     state: .running, updatedAt: .now
                 )
                 RouteFileImportStore.state = persisted
                 RouteFileImportBackgroundTask.schedule()
-                #if os(iOS) && !targetEnvironment(macCatalyst)
-                if #available(iOS 26.0, *), RouteFileImportBackgroundTask.startUserInitiated() {
-                    await self.waitForSystemImport()
-                } else {
-                    await self.runPersistedImport()
-                }
-                #else
-                await self.runPersistedImport()
-                #endif
+                try await self.streamSources(
+                    urls: urls,
+                    stageFiles: stageFiles,
+                    resetStaging: true
+                )
             } catch is CancellationError {
             } catch {
                 self.state = .failed
@@ -1305,11 +1321,21 @@ final class RouteFileImporter: ObservableObject {
     }
 
     func resume() {
-        guard !isImporting, let persisted = RouteFileImportStore.state,
-              persisted.nextIndex < persisted.files.count else { return }
+        guard !isImporting, let persisted = RouteFileImportStore.state else { return }
         activeJobID = persisted.jobID
         importTask?.cancel()
-        importTask = Task { [weak self] in await self?.runPersistedImport() }
+        if persisted.discoveryComplete == false, let roots = persisted.sourceRoots, !roots.isEmpty {
+            importTask = Task { [weak self] in
+                try? await self?.streamSources(
+                    urls: roots.map { URL(fileURLWithPath: $0) },
+                    stageFiles: persisted.filesAreStaged ?? true,
+                    resetStaging: false
+                )
+            }
+        } else {
+            guard persisted.nextIndex < persisted.files.count else { return }
+            importTask = Task { [weak self] in await self?.runPersistedImport() }
+        }
     }
 
     func resumeAndWait() async {
@@ -1344,6 +1370,89 @@ final class RouteFileImporter: ObservableObject {
         }
         state = .completed
         importPhase = "Complete"
+    }
+
+    private func streamSources(
+        urls: [URL],
+        stageFiles: Bool,
+        resetStaging: Bool
+    ) async throws {
+        if resetStaging {
+            let staging = RouteFileImportStore.stagingDirectory
+            try await Task.detached(priority: .utility) {
+                try? FileManager.default.removeItem(at: staging)
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+            }.value
+        }
+
+        let staging = RouteFileImportStore.stagingDirectory
+        let configuration = RouteImportAcquisitionConfiguration()
+        let acquirer = RouteImportAcquirer(stagingDirectory: staging, configuration: configuration)
+        let summary = try await Task.detached(priority: .utility) { [weak self] in
+            try await acquirer.process(urls: urls, stageFiles: stageFiles) { item in
+                guard let self else { throw CancellationError() }
+                return try await self.acceptAcquiredFile(item)
+            }
+        }.value
+
+        guard summary.discoveredFileCount > 0 else { throw RouteFileImportError.noFiles }
+        guard var persisted = RouteFileImportStore.state else { return }
+        persisted.accessRoots = summary.accessRoots
+        persisted.discoveryComplete = true
+        persisted.updatedAt = .now
+        RouteFileImportStore.state = persisted
+        if let activeJobID, var job = importCoordinator.jobs.first(where: { $0.id == activeJobID }) {
+            job.source.bookmarkData = summary.bookmarkData
+            job.counters.itemCount = summary.discoveredFileCount
+            job.displayName = summary.discoveredFileCount == 1
+                ? (summary.sourceNames.first ?? job.displayName)
+                : "Route file import (\(summary.discoveredFileCount) files)"
+            job.updatedAt = .now
+            try? importCoordinator.update(job)
+        }
+        await runPersistedImport()
+    }
+
+    private func acceptAcquiredFile(
+        _ item: RouteImportAcquiredFile
+    ) async throws -> RouteImportAcquisitionDisposition {
+        guard var persisted = RouteFileImportStore.state else {
+            return .retainStagedFile
+        }
+        var sourceIdentifiers = persisted.fileSourceIdentifiers ?? []
+        if sourceIdentifiers.contains(item.sourceIdentifier) {
+            return .removeStagedFile
+        }
+
+        let itemIndex = persisted.files.count
+        persisted.files.append(item.url.path)
+        sourceIdentifiers.append(item.sourceIdentifier)
+        persisted.fileSourceIdentifiers = sourceIdentifiers
+        if let accessRoot = item.accessRoot {
+            var accessRoots = persisted.accessRoots ?? []
+            if !accessRoots.contains(where: { $0.path == accessRoot.path }) {
+                accessRoots.append(accessRoot)
+            }
+            persisted.accessRoots = accessRoots
+        }
+        persisted.discoveryComplete = false
+        persisted.updatedAt = .now
+        RouteFileImportStore.state = persisted
+        updateActiveJob { job in
+            job.source.originalFileNames.append(item.displayName)
+            job.source.sourceIdentifiers.append(item.sourceIdentifier)
+            if let bookmark = item.accessRoot?.bookmarkData, !job.source.bookmarkData.contains(bookmark) {
+                job.source.bookmarkData.append(bookmark)
+            }
+            job.counters.itemCount = persisted.files.count
+            job.updatedAt = .now
+        }
+
+        await runPersistedImport()
+        guard let latest = RouteFileImportStore.state else {
+            return .removeStagedFile
+        }
+        return latest.nextIndex > itemIndex ? .removeStagedFile : .retainStagedFile
     }
 
     func pause() {
@@ -1406,6 +1515,7 @@ final class RouteFileImporter: ObservableObject {
                 if shouldPause { throw RouteFileImportError.paused }
                 await Task.yield()
                 let sourceURL = URL(fileURLWithPath: persisted.files[persisted.nextIndex])
+                let sourceIdentifier = persisted.fileSourceIdentifiers?[safe: persisted.nextIndex] ?? sourceURL.path
                 let originalFileName = (persisted.filesAreStaged ?? true)
                     ? Self.originalFileName(fromStagedName: sourceURL.lastPathComponent)
                     : sourceURL.lastPathComponent
@@ -1419,7 +1529,7 @@ final class RouteFileImporter: ObservableObject {
                     persisted.failureEntries = (persisted.failureEntries ?? []) + [
                         RouteFileFailureEntry(
                             fileName: originalFileName,
-                            sourceIdentifier: sourceURL.path,
+                            sourceIdentifier: sourceIdentifier,
                             reason: error.localizedDescription
                         )
                     ]
@@ -1433,7 +1543,44 @@ final class RouteFileImporter: ObservableObject {
                     }
                 }
 
+                let fingerprint: ImportFingerprintRecord
+                do {
+                    let hashed = try await Task.detached(priority: .utility) {
+                        try RouteImportFingerprinting.hash(file: workingFile.url)
+                    }.value
+                    fingerprint = ImportFingerprintRecord(
+                        digest: hashed.digest,
+                        byteCount: hashed.byteCount,
+                        originalFileName: originalFileName,
+                        checkpointID: activeJobID ?? UUID(),
+                        completedAt: .now
+                    )
+                    if let previous = try RouteFileImportStore.fingerprintLedger.matching(
+                        digest: fingerprint.digest,
+                        byteCount: fingerprint.byteCount
+                    ) {
+                        let reason = "This file has already been imported as \(previous.originalFileName) on \(previous.completedAt.formatted(date: .abbreviated, time: .shortened))."
+                        try quarantineDuplicate(
+                            workingFile.url,
+                            originalFileName: originalFileName,
+                            sourceIdentifier: sourceURL.path,
+                            reason: reason,
+                            fingerprint: fingerprint,
+                            priorImport: previous,
+                            configuration: persisted.configuration
+                        )
+                        persisted.failureEntries = (persisted.failureEntries ?? [])
+                        completeCurrentFile(&persisted)
+                        continue
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    throw error
+                }
+
                 var parsedDTOs: [RouteTrackDTO]?
+                var didImportSuccessfully = false
                 do {
                     parsedDTOs = try await Task.detached(priority: .utility) {
                         try Task.checkCancellation()
@@ -1444,8 +1591,8 @@ final class RouteFileImporter: ObservableObject {
                 } catch {
                     let reason = error.localizedDescription
                     let entry = RouteFileFailureEntry(
-                        fileName: originalFileName,
-                        sourceIdentifier: sourceURL.path,
+                            fileName: originalFileName,
+                            sourceIdentifier: sourceIdentifier,
                         reason: reason
                     )
                     persisted.failureEntries = (persisted.failureEntries ?? []) + [entry]
@@ -1459,7 +1606,7 @@ final class RouteFileImporter: ObservableObject {
                         workingFile.url,
                         configuration: persisted.configuration,
                         originalFileName: originalFileName,
-                        sourceIdentifier: sourceURL.path,
+                            sourceIdentifier: sourceIdentifier,
                         reason: reason,
                         kind: .needsInformation
                     )
@@ -1477,9 +1624,24 @@ final class RouteFileImporter: ObservableObject {
                     persisted.routeCount += result.routeCount
                     persisted.sampleCount += result.sampleCount
                     dirtyAggregatePeriodKeys.formUnion(result.dirtyAggregatePeriodKeys)
+                    didImportSuccessfully = true
                 }
                 completeCurrentFile(&persisted)
+                if didImportSuccessfully {
+                    // The ledger follows the durable per-file checkpoint. A termination before
+                    // this write is safe because the repository import is idempotent and the
+                    // next resume will retry the item rather than classify it as a duplicate.
+                    try RouteFileImportStore.fingerprintLedger.record(fingerprint)
+                }
             }
+            guard persisted.discoveryComplete ?? true else {
+                // Discovery is still feeding the bounded staging window. The producer will
+                // call this method again after admitting the next item.
+                importProgress = nil
+                importProgressText = "Processed \(persisted.nextIndex) route file(s)"
+                return
+            }
+
             // Place naming is intentionally outside the import critical path. The durable
             // route data is complete before optional, rate-limited post-processing starts.
             Task { await worker.postProcessImportedPlaces() }
@@ -1563,7 +1725,9 @@ final class RouteFileImporter: ObservableObject {
         persisted.importedFileCount = persisted.nextIndex
         persisted.updatedAt = .now
         RouteFileImportStore.state = persisted
-        importProgress = Double(persisted.nextIndex) / Double(max(persisted.files.count, 1))
+        importProgress = (persisted.discoveryComplete ?? true)
+            ? Double(persisted.nextIndex) / Double(max(persisted.files.count, 1))
+            : nil
         updateActiveJob { job in
             job.state = .importing
             job.phase = .importing
@@ -1614,6 +1778,44 @@ final class RouteFileImporter: ObservableObject {
         ShareMapAggregateDirtyPeriods.mark(result.dirtyAggregatePeriodKeys)
         await ShareMapAggregateBuilder.refreshDirty(in: modelContainer)
         #endif
+    }
+
+    func skipDuplicate(_ id: UUID) {
+        guard recoveryItemsForDisplay.first(where: { $0.id == id })?.kind == .duplicate else { return }
+        removeFailedImport(id, deleteFile: true)
+    }
+
+    func importDuplicate(_ id: UUID) async throws {
+        guard let duplicate = recoveryItemsForDisplay.first(where: { $0.id == id }),
+              duplicate.kind == .duplicate else { return }
+        resolvingFailedImportID = id
+        defer { resolvingFailedImportID = nil }
+        let url = duplicate.stagedPath.map(URL.init(fileURLWithPath:))
+            ?? RouteFileImportStore.duplicateCandidatesDirectory.appendingPathComponent(duplicate.storedFileName)
+        let parsedDTOs = try await Task.detached(priority: .utility) {
+            try Task.checkCancellation()
+            return try RouteTrackParserWorker.parse(url: url)
+        }.value
+        guard !parsedDTOs.isEmpty else { throw RouteFileImportError.noRouteGeometry }
+        let worker = await makeRouteFileImportWorker(modelContainer: modelContainer)
+        let result = try await worker.importTracks(
+            parsedDTOs,
+            configuration: duplicate.configuration,
+            shouldPause: { false }
+        )
+        guard result.routeCount > 0 else { throw RouteFileImportError.noRoutesImportedForSelectedDate }
+        if let fingerprint = duplicate.fingerprint {
+            try RouteFileImportStore.fingerprintLedger.record(ImportFingerprintRecord(
+                digest: fingerprint.digest,
+                byteCount: fingerprint.byteCount,
+                originalFileName: duplicate.originalFileName,
+                checkpointID: UUID(),
+                completedAt: .now
+            ))
+        }
+        removeFailedImport(id, deleteFile: true)
+        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        NotificationCenter.default.post(name: .movesImportedRouteDataDidChange, object: nil)
     }
 
     func discardFailedImport(_ id: UUID) {
@@ -1823,6 +2025,58 @@ final class RouteFileImporter: ObservableObject {
             reason: failedImport.reason, createdAt: failedImport.createdAt
         ))
         return entry
+    }
+
+    private func quarantineDuplicate(
+        _ url: URL,
+        originalFileName: String,
+        sourceIdentifier: String,
+        reason: String,
+        fingerprint: ImportFingerprintRecord,
+        priorImport: ImportFingerprintRecord,
+        configuration: RouteFileImportConfiguration
+    ) throws {
+        let id = UUID()
+        let storedFileName = id.uuidString + "-" + originalFileName
+        let destination = RouteFileImportStore.duplicateCandidatesDirectory
+            .appendingPathComponent(storedFileName)
+        try FileManager.default.copyItem(at: url, to: destination)
+        let source = ImportJobSourceMetadata(
+            originalFileNames: [originalFileName],
+            sourceIdentifiers: [sourceIdentifier]
+        )
+        let recovery = ImportRecoveryItem(
+            id: id,
+            displayName: originalFileName,
+            originalFileName: originalFileName,
+            source: source,
+            stagedPath: destination.path,
+            configuration: configuration,
+            kind: .duplicate,
+            reason: reason,
+            fingerprint: ImportFingerprintRecord(
+                digest: fingerprint.digest,
+                byteCount: fingerprint.byteCount,
+                originalFileName: priorImport.originalFileName,
+                checkpointID: priorImport.checkpointID,
+                completedAt: priorImport.completedAt
+            )
+        )
+        try importCoordinator.addRecovery(recovery)
+        failedImports.append(FailedRouteImport(
+            id: id,
+            originalFileName: originalFileName,
+            storedFileName: storedFileName,
+            sourceImportIdentifier: sourceIdentifier,
+            createdAt: recovery.createdAt,
+            reason: reason,
+            configuration: configuration,
+            kind: .duplicate,
+            fingerprint: recovery.fingerprint,
+            source: source,
+            stagedPath: destination.path
+        ))
+        RouteFileImportStore.failedImports = failedImports
     }
 
     private func removeFailedImport(_ id: UUID, deleteFile: Bool) {
@@ -3486,9 +3740,9 @@ struct FailedRouteImportsView: View {
         List {
             if importer.recoveryItemsForDisplay.isEmpty && importer.failureReports.isEmpty {
                 ContentUnavailableView(
-                    "No Failed Imports",
+                    "No Import Recovery Items",
                     systemImage: "checkmark.circle",
-                    description: Text("Files with ambiguous or missing timestamps will appear here before any timeline data is written.")
+                    description: Text("Files with duplicate content, ambiguous timestamps, or failures will appear here before they block the rest of an import.")
                 )
             }
 
@@ -3500,7 +3754,21 @@ struct FailedRouteImportsView: View {
             if !importer.recoveryItemsForDisplay.isEmpty {
                 ForEach(importer.recoveryItemsForDisplay) { failedImport in
                     Section {
-                        if failedImport.kind == .needsInformation {
+                        if failedImport.kind == .duplicate {
+                            Button("Skip duplicate", systemImage: "forward.end") {
+                                importer.skipDuplicate(failedImport.id)
+                            }
+                            Button {
+                                importDuplicate(failedImport)
+                            } label: {
+                                if importer.resolvingFailedImportID == failedImport.id {
+                                    HStack { ProgressView(); Text("Importing…") }
+                                } else {
+                                    Label("Import anyway", systemImage: "arrow.down.doc")
+                                }
+                            }
+                            .disabled(importer.resolvingFailedImportID != nil)
+                        } else if failedImport.kind == .needsInformation {
                             DatePicker(
                                 "Target date",
                                 selection: targetDateBinding(for: failedImport.id),
@@ -3532,7 +3800,7 @@ struct FailedRouteImportsView: View {
                             .disabled(importer.isImporting)
                         }
 
-                        Button("Discard saved import", role: .destructive) {
+                        Button(failedImport.kind == .duplicate ? "Discard candidate" : "Discard saved import", role: .destructive) {
                             pendingDiscard = failedImport
                         }
                         .disabled(importer.resolvingFailedImportID != nil)
@@ -3567,7 +3835,7 @@ struct FailedRouteImportsView: View {
             }
             Button("Cancel", role: .cancel) { pendingDiscard = nil }
         } message: {
-            Text("The quarantined file will be deleted. No timeline data has been written from it.")
+            Text("The saved candidate will be deleted. Existing timeline data is not changed.")
         }
         .fileImporter(
             isPresented: Binding(get: { locatingImport != nil }, set: { if !$0 { locatingImport = nil } }),
@@ -3605,6 +3873,18 @@ struct FailedRouteImportsView: View {
             do {
                 try await importer.resolveFailedImport(failedImport.id, targetDate: targetDate)
                 message = "Imported \(failedImport.originalFileName) on \(targetDate.formatted(date: .long, time: .omitted))."
+            } catch {
+                message = error.localizedDescription
+            }
+            isShowingMessage = true
+        }
+    }
+
+    private func importDuplicate(_ duplicate: FailedRouteImport) {
+        Task { @MainActor in
+            do {
+                try await importer.importDuplicate(duplicate.id)
+                message = "Imported (duplicate.originalFileName) again by request."
             } catch {
                 message = error.localizedDescription
             }

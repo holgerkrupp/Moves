@@ -89,6 +89,7 @@ protocol TimelineAssembler {
     func ingestVisit(_ visit: CLVisit) async
     func ingestLocations(_ locations: [CLLocation], source: LocationSampleSource) async
     func fillVisitGaps(onDayWithKey dayKey: String) async -> Int
+    func flushPendingChanges()
 }
 
 enum VisitGapFillingSettings {
@@ -369,10 +370,16 @@ final class CoreMotionTransportClassifier: MotionClassifier {
 
 @MainActor
 final class DefaultTimelineAssembler: TimelineAssembler {
+    private static let liveSampleSaveBatchSize = 128
+    private static let liveSampleSaveDebounce: Duration = .seconds(2)
+
     private let repository: TimelineRepository
     private let motionClassifier: MotionClassifier
     private let placeNameResolver: PlaceNameResolver
     private let automaticallyFillsVisitGaps: () -> Bool
+    private var pendingLiveSampleCount = 0
+    private var pendingLiveDayKeys = Set<String>()
+    private var pendingLiveSampleSaveTask: Task<Void, Never>?
 
     init(
         repository: TimelineRepository,
@@ -392,9 +399,21 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         guard !locations.isEmpty else { return }
 
         do {
-            _ = try repository.appendSamples(from: locations, source: source)
-            try repository.saveIfNeeded()
-            ExplorationIncrementalHooks.enqueueLiveDay(DayTimeline.makeDayKey(for: locations[0].timestamp))
+            _ = try repository.appendSamples(
+                from: locations,
+                source: source,
+                saveImmediately: false
+            )
+            pendingLiveSampleCount += locations.count
+            pendingLiveDayKeys.formUnion(
+                locations.map { DayTimeline.makeDayKey(for: $0.timestamp) }
+            )
+
+            if pendingLiveSampleCount >= Self.liveSampleSaveBatchSize {
+                try flushPendingLiveSamples()
+            } else {
+                schedulePendingLiveSampleSave()
+            }
         } catch {
             print("Failed to persist location samples: \(error.localizedDescription)")
         }
@@ -402,6 +421,9 @@ final class DefaultTimelineAssembler: TimelineAssembler {
 
     func ingestVisit(_ visit: CLVisit) async {
         do {
+            // Visits can be delivered immediately after a location callback. Commit the
+            // pending sample batch first so relationship/fetch work sees a stable timeline.
+            try flushPendingLiveSamples()
             let visitPlace = try repository.addOrUpdateVisit(from: visit)
             await fillAutomaticPlaceLabelIfNeeded(for: visitPlace)
 
@@ -433,6 +455,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
 
     func fillVisitGaps(onDayWithKey dayKey: String) async -> Int {
         do {
+            try flushPendingLiveSamples()
             let places = try repository.placesForGapFilling(onDayWithKey: dayKey)
             guard places.count > 1 else { return 0 }
 
@@ -449,6 +472,14 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         } catch {
             print("Failed to fill visit gaps: \(error.localizedDescription)")
             return 0
+        }
+    }
+
+    func flushPendingChanges() {
+        do {
+            try flushPendingLiveSamples()
+        } catch {
+            print("Failed to flush pending location samples: \(error.localizedDescription)")
         }
     }
 
@@ -505,6 +536,38 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         )
 
         return true
+    }
+
+    private func schedulePendingLiveSampleSave() {
+        pendingLiveSampleSaveTask?.cancel()
+        pendingLiveSampleSaveTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: Self.liveSampleSaveDebounce)
+            } catch {
+                return
+            }
+
+            guard let self, !Task.isCancelled else { return }
+            do {
+                try self.flushPendingLiveSamples()
+            } catch {
+                print("Failed to persist debounced location samples: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func flushPendingLiveSamples() throws {
+        pendingLiveSampleSaveTask?.cancel()
+        pendingLiveSampleSaveTask = nil
+        guard pendingLiveSampleCount > 0 else { return }
+
+        try repository.saveIfNeeded()
+        for dayKey in pendingLiveDayKeys {
+            ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
+        }
+        pendingLiveSampleCount = 0
+        pendingLiveDayKeys.removeAll(keepingCapacity: true)
+        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
     }
 
     private func movementLocations(
@@ -804,6 +867,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     func stop() {
+        assembler.flushPendingChanges()
         guard !shouldSkipLiveTracking else { return }
 
         manager.stopMonitoringVisits()

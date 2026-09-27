@@ -25,6 +25,9 @@ actor RouteFileImportWorker {
         shouldPause: @Sendable @escaping () async -> Bool
     ) async throws -> Result {
         UserDefaults.standard.set(true, forKey: "Moves.routeImport.isActive")
+        // The actor is intentionally created per import operation. Its ModelContext is
+        // released with the worker after the durable commit; SwiftData exposes no public
+        // ModelContext.reset() equivalent.
         defer { UserDefaults.standard.set(false, forKey: "Moves.routeImport.isActive") }
         let repository = SwiftDataTimelineRepository(modelContext: modelContext)
         var result = Result()
@@ -103,8 +106,7 @@ actor RouteFileImportWorker {
     /// It uses the same actor/context, so background geocoding cannot race the UI context.
     func postProcessImportedPlaces() async {
         guard !Task.isCancelled else { return }
-        let importedMoveIDs: Set<UUID>
-        let places: [VisitPlace]
+        let places: [(id: UUID, coordinate: CLLocationCoordinate2D)]
         do {
             let importedSource = LocationSampleSource.fileRouteImport.rawValue
             let samplePredicate = #Predicate<LocationSample> { sample in
@@ -115,20 +117,23 @@ actor RouteFileImportWorker {
             let movePredicate = #Predicate<MoveSegment> { move in
                 importedSampleMoveIDs.contains(move.id)
             }
-            importedMoveIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: movePredicate)).map(\.id))
+            let importedMoveIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: movePredicate)).map(\.id))
             let placePredicate = #Predicate<VisitPlace> { place in
                 place.horizontalAccuracy <= 180
             }
-            places = try modelContext.fetch(FetchDescriptor(predicate: placePredicate)).filter { place in
+            places = try modelContext.fetch(FetchDescriptor(predicate: placePredicate)).compactMap { place in
                 let isImported = place.dayTimeline?.moves.contains { importedMoveIDs.contains($0.id) } == true
                 let hasLabel = !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
                     || !(place.autoLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-                return isImported && !hasLabel && place.horizontalAccuracy <= 180
+                guard isImported && !hasLabel else { return nil }
+                return (id: place.id, coordinate: place.coordinate)
             }
         } catch {
             return
         }
 
+        // Do not keep managed VisitPlace objects alive while CLGeocoder is suspended.
+        // This read context is no longer needed after the value-only work above.
         let resolver = CLGeocoderPlaceNameResolver()
         var labeledPlaceCount = 0
         defer {
@@ -139,7 +144,17 @@ actor RouteFileImportWorker {
         for place in places {
             guard !Task.isCancelled else { return }
             if let name = await resolver.resolveName(for: place.coordinate) {
-                place.autoLabel = name
+                let placeID = place.id
+                var descriptor = FetchDescriptor<VisitPlace>(
+                    predicate: #Predicate { candidate in
+                        candidate.id == placeID
+                    }
+                )
+                descriptor.fetchLimit = 1
+                guard let managedPlace = (try? modelContext.fetch(descriptor))?.first else {
+                    continue
+                }
+                managedPlace.autoLabel = name
                 labeledPlaceCount += 1
                 if labeledPlaceCount.isMultiple(of: Self.placeLabelCommitChunkSize) {
                     try? modelContext.save()

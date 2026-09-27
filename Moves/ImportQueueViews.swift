@@ -142,16 +142,16 @@ struct ImportQueueView: View {
                         ForEach(coordinator.recoveryItems) { item in
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    Label(item.displayName, systemImage: item.kind == .needsInformation ? "questionmark.circle" : "exclamationmark.triangle")
+                                    Label(item.displayName, systemImage: item.kind == .needsInformation ? "questionmark.circle" : (item.kind == .duplicate ? "doc.on.doc" : "exclamationmark.triangle"))
                                     Spacer()
                                     Button("Discard", role: .destructive) {
                                         try? coordinator.removeRecovery(id: item.id)
                                     }
                                     .font(.caption)
                                 }
-                                Text(item.kind == .needsInformation ? "Needs information" : "Import failed")
+                                Text(item.kind == .needsInformation ? "Needs information" : (item.kind == .duplicate ? "Duplicate awaiting review" : "Import failed"))
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(item.kind == .needsInformation ? .orange : .red)
+                                    .foregroundStyle(item.kind == .needsInformation ? .orange : (item.kind == .duplicate ? .blue : .red))
                                 Text(item.reason)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

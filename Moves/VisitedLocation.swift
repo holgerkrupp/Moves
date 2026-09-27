@@ -115,6 +115,11 @@ enum LocationSampleSource: String, Codable, CaseIterable {
     case authorizationGrant
 }
 
+enum VisitPlaceProvenance: String, Codable, CaseIterable, Sendable {
+    case moves
+    case applePhotos
+}
+
 extension LocationSampleSource {
     var priority: Int {
         switch self {
@@ -656,6 +661,8 @@ final class VisitPlace {
     var userLabel: String? = nil
     var autoLabel: String? = nil
     var comment: String? = nil
+    /// The source that created this place. Nil keeps older records unchanged.
+    var provenanceRawValue: String? = nil
     var createdAt: Date = Date.now
 
     var dayTimeline: DayTimeline?
@@ -674,6 +681,11 @@ final class VisitPlace {
     var incomingMoves: [MoveSegment] {
         get { incomingMovesStorage ?? [] }
         set { incomingMovesStorage = newValue }
+    }
+
+    var provenance: VisitPlaceProvenance {
+        get { VisitPlaceProvenance(rawValue: provenanceRawValue ?? "") ?? .moves }
+        set { provenanceRawValue = newValue.rawValue }
     }
 
     init(
@@ -986,6 +998,11 @@ final class LocationSample {
 protocol TimelineRepository {
     func addOrUpdateVisit(from visit: CLVisit) throws -> VisitPlace
     func appendSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample]
+    func appendSamples(
+        from locations: [CLLocation],
+        source: LocationSampleSource,
+        saveImmediately: Bool
+    ) throws -> [LocationSample]
     func latestPlace(before date: Date, excluding placeID: UUID?) throws -> VisitPlace?
     func placesForGapFilling(onDayWithKey dayKey: String) throws -> [VisitPlace]
     func samples(from startDate: Date, to endDate: Date) throws -> [LocationSample]
@@ -1038,6 +1055,7 @@ struct VisitPlaceSnapshot: Codable {
     let userLabel: String?
     let autoLabel: String?
     let comment: String?
+    let provenanceRawValue: String?
     let createdAt: Date
     let dayKey: String?
 }
@@ -1207,6 +1225,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     userLabel: place.userLabel,
                     autoLabel: place.autoLabel,
                     comment: place.comment,
+                    provenanceRawValue: place.provenanceRawValue,
                     createdAt: place.createdAt,
                     dayKey: place.dayTimeline?.dayKey
                 )
@@ -1286,6 +1305,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             place.id = placeSnapshot.id
             place.deviceIdentifier = placeSnapshot.deviceIdentifier ?? ""
             place.createdAt = placeSnapshot.createdAt
+            place.provenanceRawValue = placeSnapshot.provenanceRawValue
             if let dayKey = placeSnapshot.dayKey {
                 place.dayTimeline = timelinesByDayKey[dayKey]
             }
@@ -1483,9 +1503,19 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     }
 
     func appendSamples(from locations: [CLLocation], source: LocationSampleSource) throws -> [LocationSample] {
+        try appendSamples(from: locations, source: source, saveImmediately: true)
+    }
+
+    func appendSamples(
+        from locations: [CLLocation],
+        source: LocationSampleSource,
+        saveImmediately: Bool
+    ) throws -> [LocationSample] {
         let inserted = try insertSamples(from: locations, source: source)
-        try saveIfNeeded()
-        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        if saveImmediately {
+            try saveIfNeeded()
+            NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        }
         return inserted
     }
 
