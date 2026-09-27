@@ -41,4 +41,5 @@ enum RouteCoordinateStorage {
 extension Notification.Name {
     static let movesLocationSamplesDidChange = Notification.Name("Moves.locationSamplesDidChange")
     static let movesImportedRouteDataDidChange = Notification.Name("Moves.importedRouteDataDidChange")
+    static let movesMoveDataDidChange = Notification.Name("Moves.moveDataDidChange")
 }

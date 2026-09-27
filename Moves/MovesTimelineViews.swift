@@ -270,18 +270,11 @@ struct DayTimelinePageContent: View {
     }
 
     private static func transportSummaryMetrics(for moves: [MoveSegment]) -> [DayTransportSummaryMetric] {
-        var durationByBucket: [DayTransportBucket: TimeInterval] = [:]
-        var distanceByBucket: [DayTransportBucket: CLLocationDistance] = [:]
-
-        for move in moves {
-            guard let bucket = DayTransportBucket(move.transportMode) else { continue }
-
-            durationByBucket[bucket, default: 0] += move.timelineDuration
-            distanceByBucket[bucket, default: 0] += max(move.distanceMeters, 0)
-        }
+        let valuesByBucket = DayTransportSummaryCalculator.aggregate(moves)
 
         return DayTransportBucket.allCases.compactMap { bucket in
-            let distance = distanceByBucket[bucket, default: 0]
+            let value = valuesByBucket[bucket, default: .zero]
+            let distance = value.distanceMeters
             guard distance > 0 else { return nil }
 
             return DayTransportSummaryMetric(
@@ -289,7 +282,7 @@ struct DayTimelinePageContent: View {
                 title: bucket.title,
                 symbolName: bucket.symbolName,
                 tint: bucket.tint,
-                duration: durationByBucket[bucket, default: 0],
+                duration: value.duration,
                 distanceMeters: distance
             )
         }
@@ -347,6 +340,15 @@ struct DayTimelinePageContent: View {
                 named: .movesImportedRouteDataDidChange
             ) {
                 guard !Task.isCancelled else { return }
+                presentationGeneration &+= 1
+            }
+        }
+        .task {
+            for await _ in NotificationCenter.default.notifications(
+                named: .movesMoveDataDidChange
+            ) {
+                guard !Task.isCancelled else { return }
+                TimelinePresentationCacheInvalidator.invalidateAll()
                 presentationGeneration &+= 1
             }
         }
@@ -810,7 +812,15 @@ private struct TimelineEntryContextMenu: ViewModifier {
                             Button {
                                 move.transportMode = mode
                                 move.clearCachedRouteCoordinates()
-                                try? modelContext.save()
+                                do {
+                                    try modelContext.save()
+                                    NotificationCenter.default.post(
+                                        name: .movesMoveDataDidChange,
+                                        object: move.id
+                                    )
+                                } catch {
+                                    modelContext.rollback()
+                                }
                             } label: {
                                 Label(mode.title, systemImage: mode.symbolName)
                             }
@@ -1022,8 +1032,8 @@ private struct DayPresentationSource {
     let totalSampleCount: Int
     let carriedOverPlace: VisitPlace?
 
-    init(dayTimeline: DayTimeline) {
-        let loaded = Self.loadRecords(for: dayTimeline)
+    init(dayTimeline: DayTimeline, loadAll: Bool = false) {
+        let loaded = Self.loadRecords(for: dayTimeline, loadAll: loadAll)
         let samples = loaded.samples
         let resolution = MultiDeviceTimelineResolver.resolve(samples: samples)
         let visibleSamples = samples.filter { resolution.includes($0.deviceIdentifier) }
@@ -1085,23 +1095,20 @@ private struct DayPresentationSource {
         let carriedOverPlace: VisitPlace?
     }
 
-    private static func loadRecords(for dayTimeline: DayTimeline) -> LoadedRecords {
+    private static func loadRecords(for dayTimeline: DayTimeline, loadAll: Bool) -> LoadedRecords {
         guard let context = dayTimeline.modelContext else {
             let allMoves = dayTimeline.moves
             let allPlaces = dayTimeline.places
             let allSamples = dayTimeline.samples
-            let moves = Array(
-                allMoves.sorted { $0.endDate > $1.endDate }
-                    .prefix(TimelinePresentationLimits.maxLoadedMoves)
-            )
-            let places = Array(
-                allPlaces.sorted { $0.arrivalDate > $1.arrivalDate }
-                    .prefix(TimelinePresentationLimits.maxLoadedPlaces)
-            )
-            let samples = Array(
-                allSamples.sorted { $0.timestamp > $1.timestamp }
-                    .prefix(TimelinePresentationLimits.maxLoadedSamples)
-            )
+            let moves = loadAll
+                ? allMoves.sorted { $0.endDate > $1.endDate }
+                : Array(allMoves.sorted { $0.endDate > $1.endDate }.prefix(TimelinePresentationLimits.maxLoadedMoves))
+            let places = loadAll
+                ? allPlaces.sorted { $0.arrivalDate > $1.arrivalDate }
+                : Array(allPlaces.sorted { $0.arrivalDate > $1.arrivalDate }.prefix(TimelinePresentationLimits.maxLoadedPlaces))
+            let samples = loadAll
+                ? allSamples.sorted { $0.timestamp > $1.timestamp }
+                : Array(allSamples.sorted { $0.timestamp > $1.timestamp }.prefix(TimelinePresentationLimits.maxLoadedSamples))
             return LoadedRecords(
                 places: places,
                 moves: moves,
@@ -1137,19 +1144,25 @@ private struct DayPresentationSource {
                 predicate: movePredicate,
                 sortBy: [SortDescriptor(\MoveSegment.endDate, order: .reverse)]
             )
-            moveDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedMoves
+            if !loadAll {
+                moveDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedMoves
+            }
 
             var placeDescriptor = FetchDescriptor<VisitPlace>(
                 predicate: placePredicate,
                 sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .reverse)]
             )
-            placeDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedPlaces
+            if !loadAll {
+                placeDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedPlaces
+            }
 
             var sampleDescriptor = FetchDescriptor<LocationSample>(
                 predicate: samplePredicate,
                 sortBy: [SortDescriptor(\LocationSample.timestamp, order: .reverse)]
             )
-            sampleDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedSamples
+            if !loadAll {
+                sampleDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedSamples
+            }
 
             var importedDescriptor = FetchDescriptor<LocationSample>(predicate: importedSamplePredicate)
             importedDescriptor.fetchLimit = 1
@@ -1287,6 +1300,29 @@ struct DayTransportSummaryMetric: Identifiable {
     let tint: Color
     let duration: TimeInterval
     let distanceMeters: CLLocationDistance
+}
+
+struct DayTransportSummaryValue: Equatable {
+    var duration: TimeInterval = 0
+    var distanceMeters: CLLocationDistance = 0
+
+    static let zero = DayTransportSummaryValue()
+}
+
+enum DayTransportSummaryCalculator {
+    static func aggregate(_ moves: [MoveSegment]) -> [DayTransportBucket: DayTransportSummaryValue] {
+        var valuesByBucket: [DayTransportBucket: DayTransportSummaryValue] = [:]
+
+        for move in moves {
+            guard let bucket = DayTransportBucket(move.transportMode) else { continue }
+            var value = valuesByBucket[bucket, default: .zero]
+            value.duration += max(move.timelineDuration, 0)
+            value.distanceMeters += max(move.distanceMeters, 0)
+            valuesByBucket[bucket] = value
+        }
+
+        return valuesByBucket
+    }
 }
 
 enum DayTransportBucket: String, CaseIterable {
@@ -1749,6 +1785,16 @@ struct DayMapStrip: View {
                 ) {
                     guard !Task.isCancelled else { return }
                     presentationGeneration &+= 1
+                }
+            }
+            .task {
+                for await _ in NotificationCenter.default.notifications(
+                    named: .movesMoveDataDidChange
+                ) {
+                    guard !Task.isCancelled else { return }
+                    presentationGeneration &+= 1
+                    DayMapPresentationCacheStore.removeAll()
+                    DayPresentationSourceCache.removeAll()
                 }
             }
             .task(id: "presentation|\(presentationRefreshKey)") {
@@ -2713,3 +2759,262 @@ struct PlaceMarker: Identifiable {
     let title: String
     let coordinate: CLLocationCoordinate2D
 }
+
+#if canImport(UIKit)
+@MainActor
+final class TimelineScreenshotServiceCoordinator: NSObject, ObservableObject, UIScreenshotServiceDelegate {
+    private var currentDayTimeline: DayTimeline?
+    private weak var attachedScene: UIWindowScene?
+    private weak var attachedScreenshotService: UIScreenshotService?
+
+    func update(dayTimeline: DayTimeline?) {
+        currentDayTimeline = dayTimeline
+    }
+
+    func attach(to scene: UIWindowScene) {
+        guard let screenshotService = scene.screenshotService else { return }
+
+        if attachedScreenshotService !== screenshotService {
+            attachedScreenshotService?.delegate = nil
+            attachedScreenshotService = screenshotService
+        }
+
+        attachedScene = scene
+        screenshotService.delegate = self
+    }
+
+    func detach() {
+        attachedScreenshotService?.delegate = nil
+        attachedScreenshotService = nil
+        attachedScene = nil
+        currentDayTimeline = nil
+    }
+
+    func screenshotService(
+        _ screenshotService: UIScreenshotService,
+        generatePDFRepresentationWithCompletion completionHandler: @escaping (Data?, Int, CGRect) -> Void
+    ) {
+        guard let dayTimeline = currentDayTimeline else {
+            completionHandler(nil, 0, .zero)
+            return
+        }
+
+        let result = TimelineScreenshotPDFRenderer.render(
+            dayTimeline: dayTimeline,
+            windowScene: screenshotService.windowScene ?? attachedScene
+        )
+        completionHandler(result.data, result.currentPageIndex, result.visibleRect)
+    }
+}
+
+struct TimelineScreenshotServiceHost: UIViewRepresentable {
+    let coordinator: TimelineScreenshotServiceCoordinator
+    let dayTimeline: DayTimeline?
+
+    func makeUIView(context: Context) -> TimelineScreenshotServiceSceneView {
+        let view = TimelineScreenshotServiceSceneView()
+        view.coordinator = coordinator
+        view.update(dayTimeline: dayTimeline)
+        return view
+    }
+
+    func updateUIView(_ uiView: TimelineScreenshotServiceSceneView, context: Context) {
+        uiView.coordinator = coordinator
+        uiView.update(dayTimeline: dayTimeline)
+    }
+
+    static func dismantleUIView(_ uiView: TimelineScreenshotServiceSceneView, coordinator: ()) {
+        uiView.coordinator?.detach()
+    }
+}
+
+final class TimelineScreenshotServiceSceneView: UIView {
+    weak var coordinator: TimelineScreenshotServiceCoordinator?
+    private var currentDayTimeline: DayTimeline?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        attachIfPossible()
+    }
+
+    func update(dayTimeline: DayTimeline?) {
+        currentDayTimeline = dayTimeline
+        coordinator?.update(dayTimeline: dayTimeline)
+        attachIfPossible()
+    }
+
+    private func attachIfPossible() {
+        guard let scene = window?.windowScene else { return }
+        coordinator?.update(dayTimeline: currentDayTimeline)
+        coordinator?.attach(to: scene)
+    }
+}
+
+private struct TimelineScreenshotPDFSnapshot {
+    let dayStart: Date
+    let entries: [TimelineEntry]
+    let sampleCount: Int
+}
+
+private struct TimelineScreenshotPDFDocument: View {
+    let snapshot: TimelineScreenshotPDFSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Moves Timeline")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+
+                Text(snapshot.dayStart, format: .dateTime.weekday(.wide).day().month(.wide).year())
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            if snapshot.entries.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No segments for this day yet.")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    if snapshot.sampleCount > 0 {
+                        Text("\(snapshot.sampleCount) location sample\(snapshot.sampleCount == 1 ? "" : "s") captured.")
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(snapshot.entries.enumerated()), id: \.element.id) { index, entry in
+                        StorylineRow(
+                            entry: entry,
+                            isFirst: index == 0,
+                            isLast: index == snapshot.entries.count - 1
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        if index < snapshot.entries.count - 1 {
+                            Divider()
+                                .padding(.leading, 82)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .systemBackground))
+        .environment(\.colorScheme, .light)
+    }
+}
+
+@MainActor
+private enum TimelineScreenshotPDFRenderer {
+    struct Result {
+        let data: Data?
+        let currentPageIndex: Int
+        let visibleRect: CGRect
+    }
+
+    static func render(dayTimeline: DayTimeline, windowScene: UIWindowScene?) -> Result {
+        let snapshot = makeSnapshot(for: dayTimeline)
+        let windowSize = windowScene?.windows.first(where: { $0.isKeyWindow })?.bounds.size
+            ?? windowScene?.windows.first?.bounds.size
+            ?? CGSize(width: 390, height: 844)
+        let pageWidth = max(windowSize.width, 320)
+        let pageHeight = max(windowSize.height, 480)
+        let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
+
+        let hostingController = UIHostingController(
+            rootView: TimelineScreenshotPDFDocument(snapshot: snapshot)
+        )
+        hostingController.view.frame = CGRect(x: 0, y: 0, width: pageWidth, height: 1)
+        hostingController.view.backgroundColor = .systemBackground
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+
+        let fittingSize = hostingController.sizeThatFits(
+            in: CGSize(width: pageWidth, height: .greatestFiniteMagnitude)
+        )
+        let contentHeight = max(fittingSize.height, pageHeight)
+        hostingController.view.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: pageWidth,
+            height: contentHeight
+        )
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+
+        let pageCount = max(Int(ceil(contentHeight / pageHeight)), 1)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+        let data = try? renderer.pdfData { context in
+            for pageIndex in 0..<pageCount {
+                context.beginPage()
+                context.cgContext.saveGState()
+                context.cgContext.translateBy(x: 0, y: -CGFloat(pageIndex) * pageHeight)
+                hostingController.view.layer.render(in: context.cgContext)
+                context.cgContext.restoreGState()
+            }
+        }
+
+        return Result(
+            data: data,
+            currentPageIndex: 0,
+            visibleRect: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
+        )
+    }
+
+    private static func makeSnapshot(for dayTimeline: DayTimeline) -> TimelineScreenshotPDFSnapshot {
+        let source = DayPresentationSource(dayTimeline: dayTimeline, loadAll: true)
+        let incomingPlaceIDs = Set(source.visibleMoves.compactMap { $0.endPlace?.id })
+        let outgoingPlaceIDs = Set(source.visibleMoves.compactMap { $0.startPlace?.id })
+        let places = source.visiblePlaces
+            .filter { place in
+                hasExplicitUserLabel(place)
+                    || !(place.departureDate != nil
+                        && incomingPlaceIDs.contains(place.id)
+                        && outgoingPlaceIDs.contains(place.id)
+                        && place.departureDate!.timeIntervalSince(place.arrivalDate) < 5 * 60)
+            }
+            .map(TimelineEntry.place)
+        let moves = source.visibleMoves.map(TimelineEntry.move)
+        var entries = (places + moves).sorted { $0.startDate < $1.startDate }
+
+        if let firstMove = source.visibleMoves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
+           let startPlace = firstMove.startPlace,
+           !source.visiblePlaces.contains(where: { $0.id == startPlace.id }) {
+            let startEntry = TimelineEntry.start(
+                place: startPlace,
+                timestamp: firstMove.timelineStartDate.addingTimeInterval(-1)
+            )
+            let firstMoveIndex = entries.firstIndex { entry in
+                if case .move(let move) = entry { return move.id == firstMove.id }
+                return false
+            }
+            entries.insert(startEntry, at: firstMoveIndex ?? 0)
+        }
+
+        if entries.isEmpty, let latestSample = source.visibleSamples.max(by: { $0.timestamp < $1.timestamp }) {
+            entries.append(
+                .sample(
+                    location: latestSample,
+                    sampleCount: source.totalSampleCount,
+                    resolvedName: nil
+                )
+            )
+        } else if entries.isEmpty, let carriedOverPlace = source.carriedOverPlace {
+            entries.append(.start(place: carriedOverPlace, timestamp: dayTimeline.dayStart))
+        }
+
+        return TimelineScreenshotPDFSnapshot(
+            dayStart: dayTimeline.dayStart,
+            entries: entries,
+            sampleCount: source.totalSampleCount
+        )
+    }
+
+    private static func hasExplicitUserLabel(_ place: VisitPlace) -> Bool {
+        !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+}
+#endif

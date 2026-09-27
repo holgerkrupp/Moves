@@ -979,6 +979,10 @@ struct MoveMapDetailView: View {
 
         do {
             try modelContext.save()
+            NotificationCenter.default.post(
+                name: .movesMoveDataDidChange,
+                object: segment.id
+            )
             markMapAggregateDirty(for: segment)
             Task { @MainActor in
                 await refreshRouteCoordinates()
@@ -1007,6 +1011,10 @@ struct MoveMapDetailView: View {
         if modelContext.hasChanges {
             do {
                 try modelContext.save()
+                NotificationCenter.default.post(
+                    name: .movesMoveDataDidChange,
+                    object: segment.id
+                )
                 markMapAggregateDirty(for: segment)
             } catch {
                 print("Failed to persist matched route cache: \(error.localizedDescription)")

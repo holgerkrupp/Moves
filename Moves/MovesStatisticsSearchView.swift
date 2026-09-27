@@ -91,11 +91,65 @@ struct MovesStatisticsSnapshot {
             }
         }
 
+        self = Self.makeSnapshot(placesByID: placesByID, movesByID: movesByID, now: now)
+    }
+
+    /// Builds the same model-backed snapshot as the synchronous initializer while giving
+    /// SwiftUI a chance to process input and scene updates between history records. A route
+    /// import can leave thousands of records behind; doing the whole relationship walk in
+    /// one main-actor turn is enough to trigger iOS's 10-second scene watchdog.
+    static func buildAsync(dayTimelines: [DayTimeline], now: Date = .now) async -> Self {
+        var placesByID: [UUID: VisitPlace] = [:]
+        var movesByID: [UUID: MoveSegment] = [:]
+        var processedRecordCount = 0
+
+        for (index, day) in dayTimelines.enumerated() {
+            if index.isMultiple(of: 4) {
+                await Task.yield()
+                guard !Task.isCancelled else { return .empty }
+            }
+
+            for place in day.places {
+                placesByID[place.id] = place
+                processedRecordCount += 1
+                if processedRecordCount.isMultiple(of: 256) {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return .empty }
+                }
+            }
+            for move in day.moves {
+                movesByID[move.id] = move
+                processedRecordCount += 1
+                if processedRecordCount.isMultiple(of: 256) {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return .empty }
+                }
+                if let startPlace = move.startPlace {
+                    placesByID[startPlace.id] = startPlace
+                }
+                if let endPlace = move.endPlace {
+                    placesByID[endPlace.id] = endPlace
+                }
+            }
+        }
+
+        await Task.yield()
+        guard !Task.isCancelled else { return .empty }
+        return makeSnapshot(placesByID: placesByID, movesByID: movesByID, now: now)
+    }
+
+    private static func makeSnapshot(
+        placesByID: [UUID: VisitPlace],
+        movesByID: [UUID: MoveSegment],
+        now: Date
+    ) -> Self {
         let allVisits = placesByID.values.sorted { $0.arrivalDate > $1.arrivalDate }
         let groupedVisits = Dictionary(grouping: allVisits, by: Self.locationKey)
 
-        locations = groupedVisits.map { key, grouped in
-            let sortedVisits = grouped.sorted { $0.arrivalDate > $1.arrivalDate }
+        let locations = groupedVisits.map { key, grouped in
+            // `allVisits` is already sorted, and Dictionary(grouping:) preserves the
+            // source order in each value array. Avoid sorting every location again.
+            let sortedVisits = grouped
             let totalDuration = sortedVisits.reduce(0) { partial, visit in
                 let departure = min(visit.departureDate ?? now, now)
                 return partial + max(departure.timeIntervalSince(visit.arrivalDate), 0)
@@ -113,8 +167,16 @@ struct MovesStatisticsSnapshot {
             return $0.title.localizedStandardCompare($1.title) == .orderedAscending
         }
 
-        visits = allVisits
-        moves = movesByID.values.sorted { $0.timelineStartDate < $1.timelineStartDate }
+        let sortedMoves = movesByID.values
+            .map { move in (move: move, startDate: move.timelineStartDate) }
+            .sorted { $0.startDate < $1.startDate }
+            .map(\.move)
+
+        return Self(
+            locations: locations,
+            visits: allVisits,
+            moves: sortedMoves
+        )
     }
 
     func filteredLocations(matching query: String) -> [MovesLocationSummary] {
@@ -274,7 +336,7 @@ struct MovesStatisticsSearchView: View {
             // compatibility path with the Sendable statistics worker as more detail
             // screens move to ID-based lookups.
             await Task.yield()
-            snapshot = MovesStatisticsSnapshot(dayTimelines: dayTimelines)
+            snapshot = await MovesStatisticsSnapshot.buildAsync(dayTimelines: dayTimelines)
             isLoadingSnapshot = false
             selectCommuteDefaultsIfAvailable()
         }
@@ -398,7 +460,7 @@ struct MovesStatisticsSearchView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(dayTimelines.allSatisfy { !$0.hasRecordedActivity })
+                    .disabled(isLoadingSnapshot || (snapshot.visits.isEmpty && snapshot.moves.isEmpty))
 
                     Divider()
 
@@ -417,7 +479,7 @@ struct MovesStatisticsSearchView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(dayTimelines.allSatisfy { !$0.hasRecordedActivity })
+                    .disabled(isLoadingSnapshot || (snapshot.visits.isEmpty && snapshot.moves.isEmpty))
                 }
 
                 SettingsCard(title: "Share") {

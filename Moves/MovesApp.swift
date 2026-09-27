@@ -111,72 +111,13 @@ struct MovesApp: App {
     @Environment(\.scenePhase) private var scenePhase
     private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
 
-    private let sharedModelContainer: ModelContainer
-    @StateObject private var undoController = AppUndoController()
-    @StateObject private var captureManager: MovesLocationCaptureManager
-    @StateObject private var watchRouteInbox: WatchRouteInbox
-    @StateObject private var healthWorkoutRouteAutoImporter: HealthWorkoutRouteAutoImportManager
-    @StateObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
-    @StateObject private var locationServiceSyncManager: LocationServiceSyncManager
-    @StateObject private var multiDevicePresenceManager: MultiDevicePresenceManager
-    @StateObject private var importCoordinator: ImportCoordinator
-    @StateObject private var routeFileImporter: RouteFileImporter
-    @StateObject private var routeWatchFolderManager: RouteWatchFolderManager
-    @StateObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
+    @StateObject private var runtime = MovesAppRuntime()
 
     init() {
         SyncMonitor.default.startMonitoring()
-
-        do {
-            let container = try Self.makeModelContainer()
-            #if !targetEnvironment(macCatalyst)
-            try Self.ensureCurrentDayExists(in: container)
-            #endif
-            let captureManager = MovesLocationCaptureManager(modelContainer: container)
-            self.sharedModelContainer = container
-            _captureManager = StateObject(
-                wrappedValue: captureManager
-            )
-            _watchRouteInbox = StateObject(
-                wrappedValue: WatchRouteInbox(modelContainer: container)
-            )
-            _healthWorkoutRouteAutoImporter = StateObject(
-                wrappedValue: HealthWorkoutRouteAutoImportManager(modelContainer: container)
-            )
-            _cloudDataPresencePublisher = StateObject(
-                wrappedValue: MovesCloudDataPresencePublisher(modelContainer: container)
-            )
-            _locationServiceSyncManager = StateObject(
-                wrappedValue: LocationServiceSyncManager(modelContainer: container)
-            )
-            _multiDevicePresenceManager = StateObject(
-                wrappedValue: MultiDevicePresenceManager(modelContainer: container)
-            )
-            let importCoordinator = ImportCoordinator()
-            let routeFileImporter = RouteFileImporter(
-                modelContext: ModelContext(container),
-                importCoordinator: importCoordinator
-            )
-            importCoordinator.attach(routeFileImporter: routeFileImporter)
-            _importCoordinator = StateObject(wrappedValue: importCoordinator)
-            _routeFileImporter = StateObject(wrappedValue: routeFileImporter)
-            _routeWatchFolderManager = StateObject(
-                wrappedValue: RouteWatchFolderManager(importer: routeFileImporter)
-            )
-            _importedRouteDataSummary = StateObject(
-                wrappedValue: ImportedRouteDataSummaryStore(modelContainer: container)
-            )
-            MovesIntentRuntime.shared.configure(
-                modelContainer: container,
-                captureManager: captureManager
-            )
-            MovesAppShortcuts.updateAppShortcutParameters()
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
     }
 
-    static func makeModelContainer() throws -> ModelContainer {
+    nonisolated static func makeModelContainer() throws -> ModelContainer {
         let timelineSchema = Schema([
             DayTimeline.self,
             VisitPlace.self,
@@ -227,14 +168,10 @@ struct MovesApp: App {
             configurations: [modelConfiguration, cacheConfiguration]
         )
 
-        #if targetEnvironment(simulator) && DEBUG
-        DemoDataSeeder.seedIfNeeded(in: container)
-        #endif
-
         return container
     }
 
-    static func ensureCurrentDayExists(in container: ModelContainer) throws {
+    nonisolated static func ensureCurrentDayExists(in container: ModelContainer) throws {
         let context = ModelContext(container)
         let todayStart = Calendar.current.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
@@ -253,30 +190,17 @@ struct MovesApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                #if targetEnvironment(macCatalyst)
-                ContentView()
-                    .frame(
-                        minWidth: 720,
-                        maxWidth: .infinity,
-                        minHeight: 520,
-                        maxHeight: .infinity
-                    )
-                #else
-                ContentView()
-                #endif
+                if let container = runtime.container {
+                    readyContent(container: container)
+                } else {
+                    ProgressView("Loading Moves…")
+                        .task {
+                            await runtime.prepare()
+                        }
+                }
             }
-                .environmentObject(captureManager)
-                .environmentObject(undoController)
-                .environmentObject(healthWorkoutRouteAutoImporter)
-                .environmentObject(cloudDataPresencePublisher)
-                .environmentObject(locationServiceSyncManager)
-                .environmentObject(multiDevicePresenceManager)
-                .environmentObject(importCoordinator)
-                .environmentObject(routeFileImporter)
-                .environmentObject(routeWatchFolderManager)
-                .environmentObject(importedRouteDataSummary)
+            .animation(.default, value: runtime.isReady)
         }
-        .modelContainer(sharedModelContainer)
         #if targetEnvironment(macCatalyst)
         .windowResizability(.contentSize)
         #endif
@@ -285,28 +209,160 @@ struct MovesApp: App {
             MovesCommands()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                DailyTimelineBackup.scheduleNextRun()
-                ShareMapAggregateBackgroundTask.scheduleNextRun()
-                RouteFileImportBackgroundTask.schedule()
-                RouteWatchFolderBackgroundTask.schedule()
-                routeWatchFolderManager.scanIfNeeded()
-                Task {
-                    if captureManager.isLocationTrackingAvailable {
-                        multiDevicePresenceManager.refreshPresence()
-                        await captureManager.start()
-                        await captureManager.refreshHistoricalBackfill()
-                    }
-                    healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()
-                    await healthWorkoutRouteAutoImporter.startIfNeeded()
-                    await cloudDataPresencePublisher.publishNow()
-                    await locationServiceSyncManager.syncNewSamplesIfEnabled()
-                }
-                Task(priority: .utility) {
-                    await ImportedTransportModeRefinement.run(in: sharedModelContainer)
-                }
+            guard newPhase == .active else { return }
+            startActiveServices()
+        }
+    }
+
+    private func readyContent(container: ModelContainer) -> some View {
+        Group {
+            #if targetEnvironment(macCatalyst)
+            ContentView()
+                .frame(
+                    minWidth: 720,
+                    maxWidth: .infinity,
+                    minHeight: 520,
+                    maxHeight: .infinity
+                )
+            #else
+            ContentView()
+            #endif
+        }
+        .modelContainer(container)
+        .environmentObject(runtime.captureManager!)
+        .environmentObject(runtime.undoController)
+        .environmentObject(runtime.healthWorkoutRouteAutoImporter!)
+        .environmentObject(runtime.cloudDataPresencePublisher!)
+        .environmentObject(runtime.locationServiceSyncManager!)
+        .environmentObject(runtime.multiDevicePresenceManager!)
+        .environmentObject(runtime.importCoordinator!)
+        .environmentObject(runtime.routeFileImporter!)
+        .environmentObject(runtime.routeWatchFolderManager!)
+        .environmentObject(runtime.importedRouteDataSummary!)
+        .task {
+            startActiveServices()
+        }
+    }
+
+    private func startActiveServices() {
+        guard scenePhase == .active, runtime.isReady, !runtime.didStartActiveServices else { return }
+        runtime.didStartActiveServices = true
+
+        DailyTimelineBackup.scheduleNextRun()
+        ShareMapAggregateBackgroundTask.scheduleNextRun()
+        RouteFileImportBackgroundTask.schedule()
+        RouteWatchFolderBackgroundTask.schedule()
+        runtime.routeWatchFolderManager?.scanIfNeeded()
+
+        guard let captureManager = runtime.captureManager,
+              let multiDevicePresenceManager = runtime.multiDevicePresenceManager,
+              let healthWorkoutRouteAutoImporter = runtime.healthWorkoutRouteAutoImporter,
+              let cloudDataPresencePublisher = runtime.cloudDataPresencePublisher,
+              let locationServiceSyncManager = runtime.locationServiceSyncManager,
+              let container = runtime.container else { return }
+
+        Task {
+            if captureManager.isLocationTrackingAvailable {
+                multiDevicePresenceManager.refreshPresence()
+                await captureManager.start()
+                await captureManager.refreshHistoricalBackfill()
+            }
+            healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()
+            await healthWorkoutRouteAutoImporter.startIfNeeded()
+            await cloudDataPresencePublisher.publishNow()
+            await locationServiceSyncManager.syncNewSamplesIfEnabled()
+        }
+        Task(priority: .utility) {
+            await ImportedTransportModeRefinement.run(in: container)
+        }
+    }
+}
+
+@MainActor
+final class MovesAppRuntime: ObservableObject {
+    let undoController = AppUndoController()
+
+    @Published private(set) var container: ModelContainer?
+    @Published private(set) var isReady = false
+    var didStartActiveServices = false
+
+    private(set) var captureManager: MovesLocationCaptureManager?
+    private(set) var watchRouteInbox: WatchRouteInbox?
+    private(set) var healthWorkoutRouteAutoImporter: HealthWorkoutRouteAutoImportManager?
+    private(set) var cloudDataPresencePublisher: MovesCloudDataPresencePublisher?
+    private(set) var locationServiceSyncManager: LocationServiceSyncManager?
+    private(set) var multiDevicePresenceManager: MultiDevicePresenceManager?
+    private(set) var importCoordinator: ImportCoordinator?
+    private(set) var routeFileImporter: RouteFileImporter?
+    private(set) var routeWatchFolderManager: RouteWatchFolderManager?
+    private(set) var importedRouteDataSummary: ImportedRouteDataSummaryStore?
+
+    private var prepareTask: Task<Void, Never>?
+
+    func prepare() async {
+        guard !isReady else { return }
+        if let prepareTask {
+            await prepareTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let container = try await Task.detached(priority: .userInitiated) {
+                    try MovesApp.makeModelContainer()
+                }.value
+
+                #if !targetEnvironment(macCatalyst)
+                try await Task.detached(priority: .utility) {
+                    try MovesApp.ensureCurrentDayExists(in: container)
+                }.value
+                #endif
+
+                #if targetEnvironment(simulator) && DEBUG
+                DemoDataSeeder.seedIfNeeded(in: container)
+                #endif
+
+                let captureManager = MovesLocationCaptureManager(modelContainer: container)
+                let watchRouteInbox = WatchRouteInbox(modelContainer: container)
+                let healthWorkoutRouteAutoImporter = HealthWorkoutRouteAutoImportManager(modelContainer: container)
+                let cloudDataPresencePublisher = MovesCloudDataPresencePublisher(modelContainer: container)
+                let locationServiceSyncManager = LocationServiceSyncManager(modelContainer: container)
+                let multiDevicePresenceManager = MultiDevicePresenceManager(modelContainer: container)
+                let importCoordinator = ImportCoordinator()
+                let routeFileImporter = RouteFileImporter(
+                    modelContext: ModelContext(container),
+                    importCoordinator: importCoordinator
+                )
+                importCoordinator.attach(routeFileImporter: routeFileImporter)
+
+                self.container = container
+                self.captureManager = captureManager
+                self.watchRouteInbox = watchRouteInbox
+                self.healthWorkoutRouteAutoImporter = healthWorkoutRouteAutoImporter
+                self.cloudDataPresencePublisher = cloudDataPresencePublisher
+                self.locationServiceSyncManager = locationServiceSyncManager
+                self.multiDevicePresenceManager = multiDevicePresenceManager
+                self.importCoordinator = importCoordinator
+                self.routeFileImporter = routeFileImporter
+                self.routeWatchFolderManager = RouteWatchFolderManager(importer: routeFileImporter)
+                self.importedRouteDataSummary = ImportedRouteDataSummaryStore(modelContainer: container)
+
+                MovesIntentRuntime.shared.configure(
+                    modelContainer: container,
+                    captureManager: captureManager
+                )
+                MovesAppShortcuts.updateAppShortcutParameters()
+                isReady = true
+            } catch {
+                // Keep the loading UI alive. A transient iCloud/SQLite open failure should
+                // not turn into a launch crash; a future scene activation can retry.
+                prepareTask = nil
             }
         }
+        prepareTask = task
+        await task.value
+        prepareTask = nil
     }
 }
 

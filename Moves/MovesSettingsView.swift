@@ -21,7 +21,6 @@ import UIKit
 struct MovesSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject private var locationServiceSyncManager: LocationServiceSyncManager
     @EnvironmentObject private var routeWatchFolderManager: RouteWatchFolderManager
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     @AppStorage(LandscapeLayoutSettings.controlsOnLeftKey) private var landscapeControlsOnLeft = false
@@ -77,308 +76,125 @@ struct MovesSettingsView: View {
         dayTimelines.first(where: { $0.dayKey == selectedDayKey })
     }
 
-    private var dailyICloudBackupSettings: some View {
-        SettingsCard(title: "Daily iCloud Drive Backup") {
-            Toggle("Back up yesterday every night", isOn: $dailyBackupIsEnabled)
-
-            if dailyBackupIsEnabled {
-                Picker("Format", selection: $dailyBackupFormat) {
-                    Text("GPX (.gpx)").tag("gpx")
-                    Text("GeoJSON (.geojson)").tag("geoJSON")
-                    Text("CSV (.csv)").tag("csv")
-                }
-
-                Toggle("Organize in year/month folders", isOn: $dailyBackupUsesMonthlyFolders)
-
-                SettingsActionRow(
-                    title: isRunningDailyBackup ? "Backing up\u{2026}" : "Back up yesterday now",
-                    systemImage: "icloud.and.arrow.up",
-                    isDisabled: isRunningDailyBackup
-                ) {
-                    backUpYesterday()
-                }
-            }
-
-            // Shown inline as well as in the alert, so a result is never lost if
-            // the alert cannot present.
-            if !dailyBackupMessage.isEmpty {
-                Text(dailyBackupMessage)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(dailyBackupDidFail ? Color.red : Color.green)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text(dailyBackupDescription)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var dailyBackupDescription: String {
-        let fileExtension = DailyTimelineBackupFormat(rawValue: dailyBackupFormat)?
-            .timelineExportFormat.fileExtension ?? "gpx"
-        if dailyBackupUsesMonthlyFolders {
-            return "Files are saved to iCloud Drive/Moves/YYYY/MM/Moves-YYYY-MM-DD.\(fileExtension)"
-        }
-        return "Files are saved to iCloud Drive/Moves/Moves-YYYY-MM-DD.\(fileExtension). iOS runs the backup after midnight when it can."
-    }
-
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 14) {
-                    SettingsCard(title: "Map Appearance") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Show big map markers", isOn: $showsBigMarkers)
-
-                            Text("When this is off, maps use small dots so more of the map stays visible.")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-
-                            Divider()
-
-                            Toggle("Controls on left in landscape", isOn: $landscapeControlsOnLeft)
-
-                            Text("Places, moves, and edit controls can be swapped to the left for comfortable one-handed use.")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        }
+            List {
+                Section {
+                    NavigationLink {
+                        SettingsAppearanceDetailView(
+                            showsBigMarkers: $showsBigMarkers,
+                            controlsOnLeft: $landscapeControlsOnLeft
+                        )
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Appearance",
+                            subtitle: "Map markers, landscape controls, and app icon",
+                            systemImage: "paintpalette.fill",
+                            tint: .blue
+                        )
                     }
 
+                    NavigationLink {
+                        SettingsTrackingDetailView(
+                            captureManager: captureManager,
+                            automaticallyFillsVisitGaps: $automaticallyFillsVisitGaps
+                        )
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Tracking",
+                            subtitle: captureManager.isLocationTrackingAvailable
+                                ? "Background listening and real route tracking"
+                                : "Location tracking is unavailable",
+                            systemImage: "location.fill",
+                            tint: MovesPalette.routeTracking,
+                            status: captureManager.isTemporaryRouteTrackingActive ? "Active" : nil
+                        )
+                    }
+                    .disabled(!captureManager.isLocationTrackingAvailable)
+
+                    NavigationLink {
+                        SettingsIntegrationDetailView()
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Integrations",
+                            subtitle: "Location servers and automatic uploads",
+                            systemImage: "arrow.triangle.2.circlepath",
+                            tint: .purple
+                        )
+                    }
+
+                    NavigationLink {
+                        SettingsExportDetailView(
+                            dayTimelines: dayTimelines,
+                            dailyBackupIsEnabled: $dailyBackupIsEnabled,
+                            dailyBackupFormat: $dailyBackupFormat,
+                            dailyBackupUsesMonthlyFolders: $dailyBackupUsesMonthlyFolders,
+                            dailyBackupMessage: $dailyBackupMessage,
+                            dailyBackupDidFail: $dailyBackupDidFail,
+                            isRunningDailyBackup: $isRunningDailyBackup,
+                            export: export,
+                            backUpYesterday: backUpYesterday
+                        )
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Export & Backup",
+                            subtitle: "Save timeline data or back up to iCloud Drive",
+                            systemImage: "square.and.arrow.up.fill",
+                            tint: .orange
+                        )
+                    }
+
+                    NavigationLink {
+                        SettingsImportDetailView(
+                            modelContext: modelContext,
+                            routeFileImporter: routeFileImporter,
+                            importCoordinator: importCoordinator,
+                            isShowingRouteImportOptions: $isShowingRouteImportOptions,
+                            routeWatchFolderIsEnabled: routeWatchFolderManager.isEnabled
+                        )
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Import",
+                            subtitle: routeFileImporter.isImporting
+                                ? routeFileImporter.importProgressText
+                                : "Routes, workouts, and watch folders",
+                            systemImage: "square.and.arrow.down.fill",
+                            tint: MovesPalette.routeTracking,
+                            status: routeFileImporter.isImporting ? "In progress" : nil
+                        )
+                    }
+
+                    NavigationLink {
+                        maintenanceSettingsDestination
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Data Maintenance",
+                            subtitle: "Deduplicate and restore timeline data",
+                            systemImage: "wrench.and.screwdriver.fill",
+                            tint: .gray
+                        )
+                    }
+                } header: {
+                    Text("Moves")
+                }
+
+                Section {
                     CloudKitSyncStatusCard()
+                } header: {
+                    Text("Status")
+                }
 
-                    if captureManager.isLocationTrackingAvailable {
-                        MultiDeviceSettingsCard()
-
-                        SettingsCard(title: "Tracking") {
-                            Toggle(
-                                "Automatically fill missing moves",
-                                isOn: $automaticallyFillsVisitGaps
-                            )
-
-                            Text("When iOS reports two consecutive visits without movement between them, Moves creates an estimated move from the available location and motion data.")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-
-                            Divider()
-
-                            NavigationLink {
-                                RouteTrackingSettingsSheet(captureManager: captureManager)
-                            } label: {
-                                SettingsNavigationRow(
-                                    title: "Real Route Tracking",
-                                    systemImage: "location.viewfinder",
-                                    status: captureManager.isTemporaryRouteTrackingActive ? "Active" : nil
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    AppIconPickerSection()
-
-                    SettingsCard(title: "Integrations") {
-                        ForEach(LocationService.allCases) { service in
-                            NavigationLink {
-                                LocationServiceSettingsView(service: service)
-                            } label: {
-                                SettingsNavigationRow(
-                                    title: service.title,
-                                    systemImage: service.systemImage,
-                                    status: locationServiceSyncManager.connectionSummary(for: service)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        Text("Optionally upload recorded points to one or more supported cloud or self-hosted location servers.")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    SettingsCard(title: "GPX Export") {
-                        SettingsActionRow(
-                            title: "Selected Day (.gpx)",
-                            systemImage: "calendar",
-                            isDisabled: dayTimelines.isEmpty
-                        ) {
-                            export(.gpx, scope: .selectedDay)
-                        }
-
-                        SettingsActionRow(
-                            title: "All Days (.gpx)",
-                            systemImage: "calendar.badge.clock",
-                            isDisabled: dayTimelines.isEmpty
-                        ) {
-                            export(.gpx, scope: .allDays)
-                        }
-                    }
-                    
-                    SettingsCard(title: "Other Export Formats") {
-                        SettingsActionRow(
-                            title: "Selected Day (.geojson)",
-                            systemImage: "map",
-                            isDisabled: dayTimelines.isEmpty
-                        ) {
-                            export(.geoJSON, scope: .selectedDay)
-                        }
-
-                        SettingsActionRow(
-                            title: "All Days (.geojson)",
-                            systemImage: "map.fill",
-                            isDisabled: dayTimelines.isEmpty
-                        ) {
-                            export(.geoJSON, scope: .allDays)
-                        }
-
-                        SettingsActionRow(
-                            title: "All Days Places+Moves (.csv)",
-                            systemImage: "tablecells",
-                            isDisabled: dayTimelines.isEmpty
-                        ) {
-                            export(.csv, scope: .allDays)
-                        }
-                    }
-
-                    dailyICloudBackupSettings
-
-                    SettingsCard(title: "Import") {
-                        NavigationLink {
-                            RouteWatchFolderSettingsView()
-                        } label: {
-                            SettingsNavigationRow(
-                                title: "Automatic route import",
-                                systemImage: "folder.badge.gearshape",
-                                status: routeWatchFolderManager.isEnabled ? "On" : nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        NavigationLink {
-                            HealthWorkoutRouteImportSettingsView()
-                        } label: {
-                            SettingsNavigationRow(
-                                title: "Apple Health workout routes",
-                                systemImage: "figure.run",
-                                status: HKHealthStore.isHealthDataAvailable() ? nil : "Unavailable"
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        SettingsActionRow(
-                            title: routeFileImporter.isImporting
-                                ? "Importing route files..."
-                                : "Import route files",
-                            systemImage: "square.and.arrow.down",
-                            isDisabled: routeFileImporter.isImporting
-                        ) {
-                            isShowingRouteImportOptions = true
-                        }
-
-                        NavigationLink {
-                            ImportedRouteDataView(modelContext: modelContext)
-                        } label: {
-                            SettingsNavigationRow(
-                                title: "Manage imported route data",
-                                systemImage: "line.3.horizontal.decrease.circle",
-                                status: nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        NavigationLink {
-                            FailedRouteImportsView(importer: routeFileImporter)
-                        } label: {
-                            SettingsNavigationRow(
-                                title: "Failed Imports",
-                                systemImage: "calendar.badge.exclamationmark",
-                                status: routeFileImporter.failedImports.isEmpty
-                                    ? nil
-                                    : routeFileImporter.failedImports.count.formatted()
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if routeFileImporter.state != .idle {
-                            if !routeFileImporter.importPhase.isEmpty {
-                                Label(routeFileImporter.importPhase, systemImage: routeFileImporter.importPhase.contains("Naming") ? "mappin.and.ellipse" : "arrow.triangle.2.circlepath")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(MovesPalette.routeTracking)
-                            }
-                            if let progress = routeFileImporter.importProgress {
-                                ProgressView(value: progress)
-                                    .tint(MovesPalette.routeTracking)
-                            } else {
-                                ProgressView().tint(MovesPalette.routeTracking)
-                            }
-                            Text(routeFileImporter.importProgressText)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-                            if routeFileImporter.importPhase.contains("Naming") {
-                                Text("Place names are looked up after route data is imported and deliberately rate-limited to stay below Apple Maps request limits. You can leave Settings while this continues in the background.")
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            } else if routeFileImporter.importPhase.contains("Importing") {
-                                Text("Routes are being saved and map-matched in the background. Large batches may take time because each file is parsed and checkpointed separately.")
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            HStack {
-                                Button(routeFileImporter.isImporting ? "Pause" : "Resume") {
-                                    routeFileImporter.isImporting ? importCoordinator.pauseRouteImport() : importCoordinator.resumeRouteImport()
-                                }
-                                Button("Restart") { routeFileImporter.restart() }
-                                Button("Cancel", role: .destructive) { importCoordinator.cancelRouteImport() }
-                            }
-                        }
-
-                        Text("Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing location points are deduplicated automatically.")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
-
-
-
-                    SettingsCard(title: "Data Maintenance") {
-                        SettingsActionRow(
-                            title: isRunningHistoricalDeduplication
-                                ? "Deduplicating existing data..."
-                                : "Deduplicate existing data",
-                            systemImage: "wand.and.stars",
-                            isDisabled: isRunningHistoricalDeduplication || isUndoingHistoricalDeduplication
-                        ) {
-                            isConfirmingHistoricalDeduplication = true
-                        }
-
-                        SettingsActionRow(
-                            title: isUndoingHistoricalDeduplication
-                                ? "Restoring previous data..."
-                                : "Undo last deduplication",
-                            systemImage: "arrow.uturn.backward.circle",
-                            isDisabled: !hasDedupeUndoSnapshot
-                                || isRunningHistoricalDeduplication
-                                || isUndoingHistoricalDeduplication
-                        ) {
-                            undoHistoricalDeduplication()
-                        }
-
-                        Text("Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap.")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-
-                    }
-
+                Section {
                     CreatedByView(
                         gitURL: URL(string: "https://github.com/holgerkrupp/Moves")
                     )
-                        .panelSurface()
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("About")
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 18)
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background {
                 LinearGradient(
                     colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
@@ -387,7 +203,6 @@ struct MovesSettingsView: View {
                 )
                 .ignoresSafeArea()
             }
-
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -537,6 +352,16 @@ struct MovesSettingsView: View {
         isExporting = true
     }
 
+    private var maintenanceSettingsDestination: some View {
+        SettingsMaintenanceDetailView(
+            isRunningDeduplication: $isRunningHistoricalDeduplication,
+            isUndoingDeduplication: $isUndoingHistoricalDeduplication,
+            hasUndoSnapshot: $hasDedupeUndoSnapshot,
+            deduplicate: { isConfirmingHistoricalDeduplication = true },
+            undo: undoHistoricalDeduplication
+        )
+    }
+
     private func backUpYesterday() {
         guard !isRunningDailyBackup else { return }
         isRunningDailyBackup = true
@@ -613,6 +438,374 @@ struct MovesSettingsView: View {
         }
     }
 
+}
+
+private struct SettingsMenuRow: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    var status: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(tint.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if let status {
+                Text(status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct SettingsAppearanceDetailView: View {
+    @Binding var showsBigMarkers: Bool
+    @Binding var controlsOnLeft: Bool
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "Map") {
+                    Toggle("Show big map markers", isOn: $showsBigMarkers)
+                    Text("When this is off, maps use small dots so more of the map stays visible.")
+                        .settingsHelpText()
+
+                    Divider()
+
+                    Toggle("Controls on left in landscape", isOn: $controlsOnLeft)
+                    Text("Places, moves, and edit controls can be swapped to the left for comfortable one-handed use.")
+                        .settingsHelpText()
+                }
+
+                AppIconPickerSection()
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .settingsDetailBackground()
+        .navigationTitle("Appearance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsTrackingDetailView: View {
+    let captureManager: MovesLocationCaptureManager
+    @Binding var automaticallyFillsVisitGaps: Bool
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                CloudKitSyncStatusCard()
+                MultiDeviceSettingsCard()
+
+                SettingsCard(title: "Background Tracking") {
+                    Toggle("Automatically fill missing moves", isOn: $automaticallyFillsVisitGaps)
+                    Text("When iOS reports two consecutive visits without movement between them, Moves creates an estimated move from the available location and motion data.")
+                        .settingsHelpText()
+                }
+
+                SettingsCard(title: "Route Tracking") {
+                    NavigationLink {
+                        RouteTrackingSettingsSheet(captureManager: captureManager)
+                    } label: {
+                        SettingsNavigationRow(
+                            title: "Real Route Tracking",
+                            systemImage: "location.viewfinder",
+                            status: captureManager.isTemporaryRouteTrackingActive ? "Active" : nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Use frequent GPS updates when you need a detailed route. Battery use is higher while it is enabled.")
+                        .settingsHelpText()
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .settingsDetailBackground()
+        .navigationTitle("Tracking")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsIntegrationDetailView: View {
+    @EnvironmentObject private var locationServiceSyncManager: LocationServiceSyncManager
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(LocationService.allCases) { service in
+                    NavigationLink {
+                        LocationServiceSettingsView(service: service)
+                    } label: {
+                        SettingsMenuRow(
+                            title: service.title,
+                            subtitle: "Upload recorded points",
+                            systemImage: service.systemImage,
+                            tint: .purple,
+                            status: locationServiceSyncManager.connectionSummary(for: service)
+                        )
+                    }
+                }
+            } footer: {
+                Text("Optionally upload recorded points to one or more supported cloud or self-hosted location servers.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .settingsDetailBackground()
+        .navigationTitle("Integrations")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsExportDetailView: View {
+    let dayTimelines: [DayTimeline]
+    @Binding var dailyBackupIsEnabled: Bool
+    @Binding var dailyBackupFormat: String
+    @Binding var dailyBackupUsesMonthlyFolders: Bool
+    @Binding var dailyBackupMessage: String
+    @Binding var dailyBackupDidFail: Bool
+    @Binding var isRunningDailyBackup: Bool
+    let export: (TimelineExportFormat, TimelineExportScope) -> Void
+    let backUpYesterday: () -> Void
+
+    private var dailyBackupDescription: String {
+        let fileExtension = DailyTimelineBackupFormat(rawValue: dailyBackupFormat)?
+            .timelineExportFormat.fileExtension ?? "gpx"
+        if dailyBackupUsesMonthlyFolders {
+            return "Files are saved to iCloud Drive/Moves/YYYY/MM/Moves-YYYY-MM-DD.\(fileExtension)"
+        }
+        return "Files are saved to iCloud Drive/Moves/Moves-YYYY-MM-DD.\(fileExtension). iOS runs the backup after midnight when it can."
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "GPX Export") {
+                    SettingsActionRow(title: "Selected Day (.gpx)", systemImage: "calendar", isDisabled: dayTimelines.isEmpty) {
+                        export(.gpx, .selectedDay)
+                    }
+                    SettingsActionRow(title: "All Days (.gpx)", systemImage: "calendar.badge.clock", isDisabled: dayTimelines.isEmpty) {
+                        export(.gpx, .allDays)
+                    }
+                }
+
+                SettingsCard(title: "Other Export Formats") {
+                    SettingsActionRow(title: "Selected Day (.geojson)", systemImage: "map", isDisabled: dayTimelines.isEmpty) {
+                        export(.geoJSON, .selectedDay)
+                    }
+                    SettingsActionRow(title: "All Days (.geojson)", systemImage: "map.fill", isDisabled: dayTimelines.isEmpty) {
+                        export(.geoJSON, .allDays)
+                    }
+                    SettingsActionRow(title: "All Days Places+Moves (.csv)", systemImage: "tablecells", isDisabled: dayTimelines.isEmpty) {
+                        export(.csv, .allDays)
+                    }
+                }
+
+                SettingsCard(title: "Daily iCloud Drive Backup") {
+                    Toggle("Back up yesterday every night", isOn: $dailyBackupIsEnabled)
+                    if dailyBackupIsEnabled {
+                        Picker("Format", selection: $dailyBackupFormat) {
+                            Text("GPX (.gpx)").tag("gpx")
+                            Text("GeoJSON (.geojson)").tag("geoJSON")
+                            Text("CSV (.csv)").tag("csv")
+                        }
+                        Toggle("Organize in year/month folders", isOn: $dailyBackupUsesMonthlyFolders)
+                        SettingsActionRow(
+                            title: isRunningDailyBackup ? "Backing up…" : "Back up yesterday now",
+                            systemImage: "icloud.and.arrow.up",
+                            isDisabled: isRunningDailyBackup,
+                            action: backUpYesterday
+                        )
+                    }
+                    if !dailyBackupMessage.isEmpty {
+                        Text(dailyBackupMessage)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(dailyBackupDidFail ? Color.red : Color.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(dailyBackupDescription)
+                        .settingsHelpText()
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .settingsDetailBackground()
+        .navigationTitle("Export & Backup")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsImportDetailView: View {
+    let modelContext: ModelContext
+    @ObservedObject var routeFileImporter: RouteFileImporter
+    let importCoordinator: ImportCoordinator
+    @Binding var isShowingRouteImportOptions: Bool
+    let routeWatchFolderIsEnabled: Bool
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "Route Sources") {
+                    NavigationLink {
+                        RouteWatchFolderSettingsView()
+                    } label: {
+                        SettingsNavigationRow(title: "Automatic route import", systemImage: "folder.badge.gearshape", status: routeWatchFolderIsEnabled ? "On" : nil)
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        HealthWorkoutRouteImportSettingsView()
+                    } label: {
+                        SettingsNavigationRow(title: "Apple Health workout routes", systemImage: "figure.run", status: HKHealthStore.isHealthDataAvailable() ? nil : "Unavailable")
+                    }
+                    .buttonStyle(.plain)
+
+                    SettingsActionRow(
+                        title: routeFileImporter.isImporting ? "Importing route files…" : "Import route files",
+                        systemImage: "square.and.arrow.down",
+                        isDisabled: routeFileImporter.isImporting
+                    ) {
+                        isShowingRouteImportOptions = true
+                    }
+
+                    NavigationLink {
+                        ImportedRouteDataView(modelContext: modelContext)
+                    } label: {
+                        SettingsNavigationRow(title: "Manage imported route data", systemImage: "line.3.horizontal.decrease.circle", status: nil)
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        FailedRouteImportsView(importer: routeFileImporter)
+                    } label: {
+                        SettingsNavigationRow(
+                            title: "Failed Imports",
+                            systemImage: "calendar.badge.exclamationmark",
+                            status: routeFileImporter.failedImports.isEmpty ? nil : routeFileImporter.failedImports.count.formatted()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if routeFileImporter.state != .idle {
+                    SettingsCard(title: "Import Progress") {
+                        if !routeFileImporter.importPhase.isEmpty {
+                            Label(
+                                routeFileImporter.importPhase,
+                                systemImage: routeFileImporter.importPhase.contains("Naming") ? "mappin.and.ellipse" : "arrow.triangle.2.circlepath"
+                            )
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MovesPalette.routeTracking)
+                        }
+                        if let progress = routeFileImporter.importProgress {
+                            ProgressView(value: progress).tint(MovesPalette.routeTracking)
+                        } else {
+                            ProgressView().tint(MovesPalette.routeTracking)
+                        }
+                        Text(routeFileImporter.importProgressText).settingsHelpText()
+                        HStack {
+                            Button(routeFileImporter.isImporting ? "Pause" : "Resume") {
+                                routeFileImporter.isImporting ? importCoordinator.pauseRouteImport() : importCoordinator.resumeRouteImport()
+                            }
+                            Button("Restart") { routeFileImporter.restart() }
+                            Button("Cancel", role: .destructive) { importCoordinator.cancelRouteImport() }
+                        }
+                    }
+                }
+
+                Text("Imports GPS tracks from running, cycling, walking, and hiking workouts. Existing location points are deduplicated automatically.")
+                    .settingsHelpText()
+                    .padding(.horizontal, 4)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .settingsDetailBackground()
+        .navigationTitle("Import")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsMaintenanceDetailView: View {
+    @Binding var isRunningDeduplication: Bool
+    @Binding var isUndoingDeduplication: Bool
+    @Binding var hasUndoSnapshot: Bool
+    let deduplicate: () -> Void
+    let undo: () -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "Timeline Data") {
+                    SettingsActionRow(
+                        title: isRunningDeduplication ? "Deduplicating existing data…" : "Deduplicate existing data",
+                        systemImage: "wand.and.stars",
+                        isDisabled: isRunningDeduplication || isUndoingDeduplication,
+                        action: deduplicate
+                    )
+                    SettingsActionRow(
+                        title: isUndoingDeduplication ? "Restoring previous data…" : "Undo last deduplication",
+                        systemImage: "arrow.uturn.backward.circle",
+                        isDisabled: !hasUndoSnapshot || isRunningDeduplication || isUndoingDeduplication,
+                        action: undo
+                    )
+                    Text("Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap.")
+                        .settingsHelpText()
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .settingsDetailBackground()
+        .navigationTitle("Data Maintenance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private extension View {
+    func settingsHelpText() -> some View {
+        font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    func settingsDetailBackground() -> some View {
+        background {
+            LinearGradient(
+                colors: [MovesPalette.backgroundTop, MovesPalette.backgroundBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
 }
 
 private struct CloudKitSyncStatusCard: View {

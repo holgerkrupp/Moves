@@ -78,6 +78,27 @@ final class MovesTimelinePeriodTests: XCTestCase {
     }
 }
 
+final class DayTransportSummaryTests: XCTestCase {
+    func testChangingTrainToCarMovesTotalsIntoTheCarBucket() {
+        let start = Date(timeIntervalSince1970: 1_790_280_000)
+        let move = MoveSegment(
+            dedupeKey: "transport-summary-test",
+            startDate: start,
+            endDate: start.addingTimeInterval(3 * 60 * 60 + 30 * 60),
+            transportMode: .train,
+            distanceMeters: 292_000,
+            stepCount: nil
+        )
+
+        move.transportMode = .automotive
+        let values = DayTransportSummaryCalculator.aggregate([move])
+
+        XCTAssertNil(values[.train])
+        XCTAssertEqual(values[.automotive]?.duration, 3.5 * 60 * 60)
+        XCTAssertEqual(values[.automotive]?.distanceMeters, 292_000)
+    }
+}
+
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
     func testAppStartupCreatesCurrentDaySynchronouslyAndOnlyOnce() throws {

@@ -373,6 +373,7 @@ struct ContentView: View {
     @State private var pagerWindowCenterIndex: Int?
     @State private var pagerWindowRecenterTask: Task<Void, Never>?
     @State private var isShowingSettings = false
+    @State private var isShowingStatistics = false
     @State private var isShowingRouteTrackingSettings = false
     @State private var isShowingDatePicker = false
     @State private var timelineColumnVisibility = NavigationSplitViewVisibility.all
@@ -389,6 +390,7 @@ struct ContentView: View {
     @State private var isConfirmingDayDeletion = false
     @State private var dayDeletionErrorMessage = ""
     @State private var isShowingDayDeletionError = false
+    @StateObject private var timelineScreenshotService = TimelineScreenshotServiceCoordinator()
 
     /// Keep this projection relationship-free. Checking `hasRecordedActivity` here would
     /// materialize every imported place/move/sample collection before the first map frame.
@@ -458,6 +460,12 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .background {
+            TimelineScreenshotServiceHost(
+                coordinator: timelineScreenshotService,
+                dayTimeline: selectedDay
+            )
+        }
         .task {
             importedRouteDataSummary.refresh()
         }
@@ -582,6 +590,15 @@ struct ContentView: View {
                 TimelinePresentationCacheInvalidator.invalidateAll()
                 cloudDataPresencePublisher.publishSoon()
                 refreshSpotlightIndex()
+            }
+        }
+        .task {
+            for await _ in NotificationCenter.default.notifications(
+                named: .movesMoveDataDidChange
+            ) {
+                guard !Task.isCancelled else { return }
+                TimelinePresentationCacheInvalidator.invalidateAll()
+                cloudDataPresencePublisher.publishSoon()
             }
         }
         .onAppear {
@@ -781,6 +798,12 @@ struct ContentView: View {
                 }
             }
         }
+        .navigationDestination(isPresented: $isShowingStatistics) {
+            MovesStatisticsSearchView(
+                dayTimelines: recordedDayTimelines,
+                initialDate: selectedDay?.dayStart ?? .now
+            )
+        }
     }
 
     /// A page-style `TabView` eagerly builds its children. Keeping the complete history in
@@ -836,11 +859,8 @@ struct ContentView: View {
     }
 
     private var statisticsToolbarLink: some View {
-        NavigationLink {
-            MovesStatisticsSearchView(
-                dayTimelines: recordedDayTimelines,
-                initialDate: selectedDay?.dayStart ?? .now
-            )
+        Button {
+            isShowingStatistics = true
         } label: {
             Label("Statistics & Share", systemImage: "chart.bar.xaxis")
         }
