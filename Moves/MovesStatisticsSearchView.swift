@@ -6,6 +6,8 @@
 //
 
 import Foundation
+import CoreLocation
+import MapKit
 import SwiftData
 import SwiftUI
 
@@ -281,6 +283,60 @@ struct MovesStatisticsSnapshot {
     }
 }
 
+/// Record candidates built entirely from the compact per-day cache. The Statistics landing
+/// page can therefore render these cards without walking SwiftData sample, move, or place
+/// relationships. Detailed model resolution is deliberately left to the destination views.
+struct MovesStatisticsRecordIndex: Equatable, Sendable {
+    let recordedVisitCount: Int
+    let recordedPlaceCount: Int
+    let recordedMoveCount: Int
+    let maximumElevation: TimelineDaySummary?
+    let longestTravelDay: TimelineDaySummary?
+    let longestSingleStay: TimelineDaySummary?
+    let activityStreakDays: Int
+
+    init(daySummaries: [String: TimelineDaySummary], calendar: Calendar = .autoupdatingCurrent) {
+        let ordered = daySummaries.values
+            .filter { $0.dayStart != .distantPast }
+            .sorted { $0.dayStart < $1.dayStart }
+
+        recordedVisitCount = ordered.reduce(0) { $0 + $1.placeCount }
+        recordedPlaceCount = ordered.reduce(0) { $0 + $1.uniquePlaceCount }
+        recordedMoveCount = ordered.reduce(0) { $0 + $1.moveCount }
+
+        maximumElevation = ordered
+            .filter {
+                guard let elevation = $0.maximumElevationMeters else { return false }
+                return TimelineElevationRules.isRecordable(elevation)
+            }
+            .max { lhs, rhs in
+                (lhs.maximumElevationMeters ?? -.greatestFiniteMagnitude)
+                    < (rhs.maximumElevationMeters ?? -.greatestFiniteMagnitude)
+            }
+        longestTravelDay = ordered
+            .filter { $0.totalDistanceMeters > 0 }
+            .max { $0.totalDistanceMeters < $1.totalDistanceMeters }
+        longestSingleStay = ordered
+            .filter { ($0.longestStayDuration ?? 0) > 0 }
+            .max { ($0.longestStayDuration ?? 0) < ($1.longestStayDuration ?? 0) }
+
+        var currentStreak = 0
+        var bestStreak = 0
+        var previousActiveDay: Date?
+        for summary in ordered where summary.hasRecordedActivity {
+            if let previousActiveDay,
+               calendar.dateComponents([.day], from: previousActiveDay, to: summary.dayStart).day == 1 {
+                currentStreak += 1
+            } else {
+                currentStreak = 1
+            }
+            bestStreak = max(bestStreak, currentStreak)
+            previousActiveDay = summary.dayStart
+        }
+        activityStreakDays = bestStreak
+    }
+}
+
 struct MovesStatisticsSearchView: View {
     private enum Section: String, CaseIterable, Identifiable, Hashable {
         case overview = "Statistics"
@@ -300,9 +356,13 @@ struct MovesStatisticsSearchView: View {
 
     @Query(sort: \KnownLocation.name, order: .forward)
     private var knownLocations: [KnownLocation]
+    @Query(sort: \DayTimeline.dayStart, order: .forward)
+    private var queriedDayTimelines: [DayTimeline]
+    @EnvironmentObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
 
-    private let dayTimelines: [DayTimeline]
+    private let initialDayTimelines: [DayTimeline]
     private let initialDate: Date
+    private let onSelectDay: ((Date) -> Void)?
     @State private var snapshot: MovesStatisticsSnapshot
     @State private var isLoadingSnapshot = true
 
@@ -313,10 +373,23 @@ struct MovesStatisticsSearchView: View {
     @State private var includesReturnTrips = false
     @State private var endpointBeingSelected: ConnectionEndpoint?
 
-    init(dayTimelines: [DayTimeline], initialDate: Date = .now) {
-        self.dayTimelines = dayTimelines
+    init(
+        dayTimelines: [DayTimeline],
+        initialDate: Date = .now,
+        onSelectDay: ((Date) -> Void)? = nil
+    ) {
+        self.initialDayTimelines = dayTimelines
         self.initialDate = initialDate
+        self.onSelectDay = onSelectDay
         _snapshot = State(initialValue: .empty)
+    }
+
+    private var dayTimelines: [DayTimeline] {
+        queriedDayTimelines.isEmpty ? initialDayTimelines : queriedDayTimelines
+    }
+
+    private var dayTimelineSignature: String {
+        dayTimelines.map(\.dayKey).joined(separator: "|")
     }
 
     var body: some View {
@@ -329,14 +402,20 @@ struct MovesStatisticsSearchView: View {
             )
         }
         .onAppear(perform: selectCommuteDefaultsIfAvailable)
-        .task {
-            guard isLoadingSnapshot else { return }
+        .task(id: dayTimelineSignature) {
+            guard !dayTimelines.isEmpty else {
+                isLoadingSnapshot = false
+                return
+            }
+            isLoadingSnapshot = true
             // Keep the navigation transition cheap. The full-history graph is assembled
             // after the destination is on screen; the next step is to replace this
             // compatibility path with the Sendable statistics worker as more detail
             // screens move to ID-based lookups.
             await Task.yield()
-            snapshot = await MovesStatisticsSnapshot.buildAsync(dayTimelines: dayTimelines)
+            let rebuiltSnapshot = await MovesStatisticsSnapshot.buildAsync(dayTimelines: dayTimelines)
+            guard !Task.isCancelled else { return }
+            snapshot = rebuiltSnapshot
             isLoadingSnapshot = false
             selectCommuteDefaultsIfAvailable()
         }
@@ -400,18 +479,83 @@ struct MovesStatisticsSearchView: View {
     }
 
     private var statisticsView: some View {
-        ScrollView {
+        let records = MovesStatisticsRecordIndex(daySummaries: importedRouteDataSummary.daySummaries)
+
+        return ScrollView {
             LazyVStack(spacing: 14) {
                 SettingsCard(title: "Recorded History") {
                     HStack(spacing: 10) {
-                        StatisticsMetric(title: "Visits", value: snapshot.visits.count.formatted())
-                        StatisticsMetric(title: "Places", value: snapshot.locations.count.formatted())
-                        StatisticsMetric(title: "Moves", value: snapshot.moves.count.formatted())
+                        StatisticsMetricWithIcon(
+                            title: "Visits",
+                            value: records.recordedVisitCount > 0 ? records.recordedVisitCount.formatted() : snapshot.visits.count.formatted(),
+                            systemImage: "mappin.and.ellipse",
+                            tint: MovesPalette.place
+                        )
+                        StatisticsMetricWithIcon(
+                            title: "Places",
+                            value: records.recordedPlaceCount > 0 ? records.recordedPlaceCount.formatted() : snapshot.locations.count.formatted(),
+                            systemImage: "globe.europe.africa.fill",
+                            tint: MovesPalette.place
+                        )
+                        StatisticsMetricWithIcon(
+                            title: "Moves",
+                            value: records.recordedMoveCount > 0 ? records.recordedMoveCount.formatted() : snapshot.moves.count.formatted(),
+                            systemImage: "point.topleft.down.to.point.bottomright.curvepath",
+                            tint: MovesPalette.move
+                        )
+                    }
+                }
+
+                SettingsCard(title: "Notable Records") {
+                    LazyVGrid(
+                        columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                        spacing: 10
+                    ) {
+                        recordCard(
+                            summary: records.maximumElevation,
+                            kind: .maximumElevation,
+                            title: "Maximum Elevation",
+                            value: records.maximumElevation.flatMap { $0.maximumElevationMeters }.map(MovesStatisticsFormatting.elevation) ?? "—",
+                            detail: records.maximumElevation?.maximumElevationTimestamp?.formatted(date: .abbreviated, time: .shortened) ?? "No cached elevation yet",
+                            systemImage: "mountain.2.fill",
+                            tint: MovesPalette.routeTracking
+                        )
+
+                        recordCard(
+                            summary: records.longestTravelDay,
+                            kind: .longestTravelDay,
+                            title: "Longest Travel Day",
+                            value: records.longestTravelDay.map { MovesStatisticsFormatting.distance($0.totalDistanceMeters) } ?? "—",
+                            detail: records.longestTravelDay.map { $0.dayStart.formatted(date: .abbreviated, time: .omitted) } ?? "No travel day yet",
+                            systemImage: "figure.walk.motion",
+                            tint: MovesPalette.move
+                        )
+
+                        recordCard(
+                            summary: records.longestSingleStay,
+                            kind: .longestSingleStay,
+                            title: "Longest Single Stay",
+                            value: records.longestSingleStay.flatMap { $0.longestStayDuration }.map(MovesStatisticsFormatting.duration) ?? "—",
+                            detail: records.longestSingleStay.flatMap { $0.longestStayStart }.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "No completed stay yet",
+                            systemImage: "house.fill",
+                            tint: MovesPalette.place
+                        )
+
+                        StatisticsRecordCard(
+                            title: "Activity Streak",
+                            value: records.activityStreakDays > 0 ? "\(records.activityStreakDays) days" : "—",
+                            detail: "Consecutive days with recorded activity",
+                            systemImage: "flame.fill",
+                            tint: .orange
+                        )
                     }
                 }
 
                 SettingsCard(title: "Most Visited Locations") {
-                    if snapshot.locations.isEmpty {
+                    if isLoadingSnapshot {
+                        ProgressView("Loading visit history…")
+                            .frame(maxWidth: .infinity, minHeight: 150)
+                    } else if snapshot.locations.isEmpty {
                         ContentUnavailableView(
                             "No Visits Yet",
                             systemImage: "mappin.slash",
@@ -502,6 +646,50 @@ struct MovesStatisticsSearchView: View {
             .padding(.top, 14)
             .padding(.bottom, 18)
         }
+    }
+
+    @ViewBuilder
+    private func recordCard(
+        summary: TimelineDaySummary?,
+        kind: StatisticsRecordKind,
+        title: String,
+        value: String,
+        detail: String,
+        systemImage: String,
+        tint: Color
+    ) -> some View {
+        if let summary {
+            NavigationLink {
+                StatisticsRecordDetailView(
+                    kind: kind,
+                    summary: summary,
+                    dayTimeline: dayTimeline(for: summary),
+                    onSelectDay: onSelectDay
+                )
+            } label: {
+                StatisticsRecordCard(
+                    title: title,
+                    value: value,
+                    detail: detail,
+                    systemImage: systemImage,
+                    tint: tint
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            StatisticsRecordCard(
+                title: title,
+                value: value,
+                detail: detail,
+                systemImage: systemImage,
+                tint: tint
+            )
+        }
+    }
+
+    private func dayTimeline(for summary: TimelineDaySummary) -> DayTimeline? {
+        let key = DayTimeline.makeDayKey(for: summary.dayStart)
+        return dayTimelines.first { $0.dayKey == key }
     }
 
     private func createShareRow(
@@ -788,6 +976,178 @@ private struct StatisticsMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct StatisticsMetricWithIcon: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct StatisticsRecordCard: View {
+    let title: String
+    let value: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(detail)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private enum StatisticsRecordKind {
+    case maximumElevation
+    case longestTravelDay
+    case longestSingleStay
+}
+
+private struct StatisticsRecordDetailView: View {
+    let kind: StatisticsRecordKind
+    let summary: TimelineDaySummary
+    let dayTimeline: DayTimeline?
+    let onSelectDay: ((Date) -> Void)?
+
+    var body: some View {
+        Group {
+            switch kind {
+            case .maximumElevation:
+                StatisticsElevationMapView(summary: summary)
+            case .longestTravelDay:
+                if let dayTimeline {
+                    DayMapStrip(dayTimeline: dayTimeline, isActive: true)
+                        .padding(14)
+                } else {
+                    recordUnavailable
+                }
+            case .longestSingleStay:
+                if let place = dayTimeline?.places.first(where: { $0.id == summary.longestStayPlaceID }) {
+                    PlaceMapDetailView(place: place)
+                } else {
+                    recordUnavailable
+                }
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 10) {
+            if let onSelectDay {
+                Button {
+                    onSelectDay(summary.dayStart)
+                } label: {
+                    Label("Open Timeline Day", systemImage: "calendar.badge.clock")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private var title: String {
+        switch kind {
+        case .maximumElevation: return "Maximum Elevation"
+        case .longestTravelDay: return "Longest Travel Day"
+        case .longestSingleStay: return "Longest Single Stay"
+        }
+    }
+
+    private var recordUnavailable: some View {
+        ContentUnavailableView(
+            "Record Details Unavailable",
+            systemImage: "questionmark.circle",
+            description: Text("The compact record is available, but its detailed day data is no longer present.")
+        )
+    }
+}
+
+private struct StatisticsElevationMapView: View {
+    let summary: TimelineDaySummary
+
+    private var coordinate: CLLocationCoordinate2D? {
+        guard let latitude = summary.maximumElevationLatitude,
+              let longitude = summary.maximumElevationLongitude,
+              CLLocationCoordinate2DIsValid(CLLocationCoordinate2D(latitude: latitude, longitude: longitude)) else {
+            return nil
+        }
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var body: some View {
+        Group {
+            if let coordinate {
+                Map(
+                    initialPosition: .region(
+                        MKCoordinateRegion(
+                            center: coordinate,
+                            span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+                        )
+                    )
+                ) {
+                    Annotation("Maximum elevation", coordinate: coordinate) {
+                        MapLocationDot(tint: MovesPalette.routeTracking, isSelected: true)
+                    }
+                }
+                .mapStyle(.standard(elevation: .flat, emphasis: .muted))
+                .overlay(alignment: .bottomLeading) {
+                    if let elevation = summary.maximumElevationMeters {
+                        Text(MovesStatisticsFormatting.elevation(elevation))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .padding(10)
+                            .background(.thinMaterial, in: Capsule())
+                            .padding(14)
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "Elevation Location Unavailable",
+                    systemImage: "mountain.2",
+                    description: Text("This cached elevation record does not include a map coordinate.")
+                )
+            }
+        }
+        .frame(minHeight: 280)
     }
 }
 
@@ -1129,6 +1489,11 @@ enum MovesStatisticsFormatting {
 
     static func distance(_ meters: Double) -> String {
         MovesMeasurementFormatter.distance(meters: meters)
+    }
+
+    static func elevation(_ meters: Double) -> String {
+        Measurement(value: meters, unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road))
     }
 
     static func visitInterval(_ place: VisitPlace) -> String {

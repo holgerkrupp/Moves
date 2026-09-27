@@ -427,6 +427,17 @@ struct MoveMapDetailView: View {
 
                     moveShareButton
 
+#if DEBUG
+                    if segment.transportMode == .plane {
+                        NavigationLink {
+                            ExplorationFlightTicketDebugView(segment: segment, routeCoordinates: routeCoordinates)
+                        } label: {
+                            Image(systemName: "ticket.fill")
+                        }
+                        .help("Open DEBUG flight ticket")
+                    }
+#endif
+
                     Button {
                         setManualRouteEditing(!isEditingManualRoute)
                     } label: {
@@ -979,6 +990,9 @@ struct MoveMapDetailView: View {
 
         do {
             try modelContext.save()
+            if let dayKey = segment.dayTimeline?.dayKey {
+                ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
+            }
             NotificationCenter.default.post(
                 name: .movesMoveDataDidChange,
                 object: segment.id
@@ -1193,6 +1207,9 @@ struct MoveMapDetailView: View {
         do {
             try modelContext.save()
             markMapAggregateDirty(for: segment)
+            if let dayKey = segment.dayTimeline?.dayKey {
+                ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
+            }
             Task { @MainActor in
                 await refreshRouteCoordinates()
                 if isEditingManualRoute {
@@ -1225,11 +1242,15 @@ struct MoveMapDetailView: View {
         defer { isDeleting = false }
 
         let undoPayload = DeletedMoveUndoPayload(segment: segment)
+        let affectedDayKey = segment.dayTimeline?.dayKey
         let undoManager = undoController.manager
 
         modelContext.delete(segment)
         do {
             try modelContext.save()
+            if let affectedDayKey {
+                ExplorationIncrementalHooks.enqueueLiveDay(affectedDayKey)
+            }
             undoManager.registerUndo(withTarget: modelContext) { context in
                 undoPayload.restore(in: context)
             }

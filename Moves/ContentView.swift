@@ -617,7 +617,7 @@ struct ContentView: View {
             if captureManager.isLocationTrackingAvailable {
                 multiDevicePresenceManager.refreshPresence()
             }
-            openCurrentDay()
+            ensureCurrentDayExists()
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
@@ -801,7 +801,11 @@ struct ContentView: View {
         .navigationDestination(isPresented: $isShowingStatistics) {
             MovesStatisticsSearchView(
                 dayTimelines: recordedDayTimelines,
-                initialDate: selectedDay?.dayStart ?? .now
+                initialDate: selectedDay?.dayStart ?? .now,
+                onSelectDay: { date in
+                    jumpToDate(date)
+                    isShowingStatistics = false
+                }
             )
         }
     }
@@ -1095,6 +1099,8 @@ struct ContentView: View {
         let todayStart = calendar.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
 
+        ensureCurrentDayExists()
+
         #if targetEnvironment(macCatalyst)
         // Catalyst is a review/import client. Never manufacture placeholder records while
         // CloudKit is still populating a fresh local store.
@@ -1108,18 +1114,6 @@ struct ContentView: View {
         return
         #endif
 
-        if !dayTimelines.contains(where: { $0.dayKey == todayKey }) {
-            modelContext.insert(DayTimeline(dayStart: todayStart))
-            do {
-                try modelContext.save()
-            } catch {
-                print("Failed to create day timelines: \(error.localizedDescription)")
-            }
-            // The @Query projection can update on the next render. Keep today's identity now
-            // so that update selects the newly inserted day instead of yesterday's last index.
-            selectedDayKey = todayKey
-        }
-
         if let todayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
             selectedDayKey = todayKey
             selectedPageIndex = todayIndex
@@ -1127,6 +1121,28 @@ struct ContentView: View {
             selectedDayKey = recordedDayTimelines[latestIndex].dayKey
             selectedPageIndex = latestIndex
         }
+    }
+
+    /// Creates today's record when lifecycle services need it without changing the user's
+    /// current timeline selection. Initial launch and explicit “Today” actions still call
+    /// `openCurrentDay()` to select it intentionally.
+    private func ensureCurrentDayExists() {
+        guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
+
+        #if targetEnvironment(macCatalyst)
+        return
+        #else
+        let todayStart = Calendar.current.startOfDay(for: .now)
+        let todayKey = DayTimeline.makeDayKey(for: todayStart)
+        guard !dayTimelines.contains(where: { $0.dayKey == todayKey }) else { return }
+
+        modelContext.insert(DayTimeline(dayStart: todayStart))
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to create day timelines: \(error.localizedDescription)")
+        }
+        #endif
     }
 
     private func repairDuplicateDayTimelinesIfNeeded() {

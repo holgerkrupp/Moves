@@ -9,6 +9,7 @@
 		<string>de.holgerkrupp.Moves.routeFileImport</string>
 		<string>de.holgerkrupp.Moves.routeFileImport.continued</string>
 		<string>de.holgerkrupp.Moves.routeWatchFolder</string>
+		<string>de.holgerkrupp.Moves.explorationPreparation</string>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>

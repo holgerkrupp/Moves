@@ -25,6 +25,7 @@ final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
         ShareMapAggregateBackgroundTask.register()
         RouteFileImportBackgroundTask.register()
         RouteWatchFolderBackgroundTask.register()
+        ExplorationPreparationBackgroundTask.register()
         return true
     }
 
@@ -139,29 +140,47 @@ struct MovesApp: App {
 
         let modelConfiguration: ModelConfiguration
         let cacheConfiguration: ModelConfiguration
-        #if targetEnvironment(simulator)
-        modelConfiguration = ModelConfiguration(
-            schema: timelineSchema,
-            isStoredInMemoryOnly: true,
-            cloudKitDatabase: .none
-        )
-        cacheConfiguration = ModelConfiguration(
-            "ShareMapCache",
-            schema: cacheSchema,
-            isStoredInMemoryOnly: true,
-            cloudKitDatabase: .none
-        )
-        #else
-        modelConfiguration = ModelConfiguration(
-            schema: timelineSchema,
-            cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
-        )
-        cacheConfiguration = ModelConfiguration(
-            "ShareMapCache",
-            schema: cacheSchema,
-            cloudKitDatabase: .none
-        )
-        #endif
+        if ProcessInfo.processInfo.environment["MOVES_TEST_IN_MEMORY"] == "1" {
+            // The macOS test host otherwise opens the user's real SwiftData
+            // store before the test process connects. Keeping this switch
+            // environment-driven leaves production storage unchanged while
+            // making background/indexing tests isolated and repeatable.
+            modelConfiguration = ModelConfiguration(
+                schema: timelineSchema,
+                isStoredInMemoryOnly: true,
+                cloudKitDatabase: .none
+            )
+            cacheConfiguration = ModelConfiguration(
+                "ShareMapCache",
+                schema: cacheSchema,
+                isStoredInMemoryOnly: true,
+                cloudKitDatabase: .none
+            )
+        } else {
+            #if targetEnvironment(simulator)
+            modelConfiguration = ModelConfiguration(
+                schema: timelineSchema,
+                isStoredInMemoryOnly: true,
+                cloudKitDatabase: .none
+            )
+            cacheConfiguration = ModelConfiguration(
+                "ShareMapCache",
+                schema: cacheSchema,
+                isStoredInMemoryOnly: true,
+                cloudKitDatabase: .none
+            )
+            #else
+            modelConfiguration = ModelConfiguration(
+                schema: timelineSchema,
+                cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
+            )
+            cacheConfiguration = ModelConfiguration(
+                "ShareMapCache",
+                schema: cacheSchema,
+                cloudKitDatabase: .none
+            )
+            #endif
+        }
 
         let container = try ModelContainer(
             for: schema,
@@ -193,13 +212,13 @@ struct MovesApp: App {
                 if let container = runtime.container {
                     readyContent(container: container)
                 } else {
-                    ProgressView("Loading Moves…")
-                        .task {
-                            await runtime.prepare()
-                        }
+                    Color.clear
                 }
             }
             .animation(.default, value: runtime.isReady)
+            .task {
+                await runtime.prepare()
+            }
         }
         #if targetEnvironment(macCatalyst)
         .windowResizability(.contentSize)
@@ -252,6 +271,7 @@ struct MovesApp: App {
         ShareMapAggregateBackgroundTask.scheduleNextRun()
         RouteFileImportBackgroundTask.schedule()
         RouteWatchFolderBackgroundTask.schedule()
+        ExplorationPreparationBackgroundTask.schedule()
         runtime.routeWatchFolderManager?.scanIfNeeded()
 
         guard let captureManager = runtime.captureManager,

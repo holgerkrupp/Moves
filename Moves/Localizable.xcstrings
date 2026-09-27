@@ -106,6 +106,16 @@
         }
       }
     },
+    "%lld location sample%@ captured." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld location sample%2$@ captured."
+          }
+        }
+      }
+    },
     "%lld location sample%@ captured. Waiting for the next visit or move." : {
       "localizations" : {
         "en" : {
@@ -197,10 +207,16 @@
     "4 hours" : {
 
     },
+    "24-hour elevation profile" : {
+
+    },
     "30 minutes" : {
 
     },
     "A route is needed to share this move as GPX" : {
+
+    },
+    "About" : {
 
     },
     "About Moves" : {
@@ -563,6 +579,12 @@
     "Edit route" : {
 
     },
+    "Elevation" : {
+
+    },
+    "Elevation Location Unavailable" : {
+
+    },
     "Enable real route tracking" : {
 
     },
@@ -600,6 +622,9 @@
 
     },
     "Export" : {
+
+    },
+    "Export & Backup" : {
 
     },
     "Export %@" : {
@@ -731,6 +756,12 @@
     "Hide Inspector (⌥⌘I)" : {
 
     },
+    "High %@" : {
+
+    },
+    "Highest elevation %@" : {
+
+    },
     "History" : {
 
     },
@@ -747,6 +778,9 @@
 
     },
     "If this journey is an inaccurate outlier, exclude it from minimum, average, and maximum commute times without deleting it." : {
+
+    },
+    "Import" : {
 
     },
     "Import (job.displayName)" : {
@@ -833,6 +867,9 @@
     "Indirect connections can include up to eight legs and stops of up to %@. Turn on return trips to calculate two-way commute statistics." : {
 
     },
+    "Integrations" : {
+
+    },
     "iOS asks for notification permission the first time. If notifications are blocked, open Settings to allow them." : {
 
     },
@@ -873,6 +910,9 @@
 
     },
     "Listen for location changes" : {
+
+    },
+    "Loading visit history…" : {
 
     },
     "Locate File" : {
@@ -985,6 +1025,9 @@
 
     },
     "Moves stores timeline data in your private iCloud container and keeps imported-route recovery information locally." : {
+
+    },
+    "Moves Timeline" : {
 
     },
     "Moves transforms route data for your timeline and does not retain the original files. Your selected files are not modified; keep them separately if you may need their original structure or metadata." : {
@@ -1107,6 +1150,9 @@
     "Open Settings" : {
 
     },
+    "Open Timeline Day" : {
+
+    },
     "Open Visited Place" : {
 
     },
@@ -1136,9 +1182,6 @@
 
     },
     "Place" : {
-
-    },
-    "Place names are looked up after route data is imported and deliberately rate-limited to stay below Apple Maps request limits. You can leave Settings while this continues in the background." : {
 
     },
     "Place remarks" : {
@@ -1208,6 +1251,9 @@
 
     },
     "Record" : {
+
+    },
+    "Record Details Unavailable" : {
 
     },
     "Recorded days" : {
@@ -1293,9 +1339,6 @@
 
     },
     "Route Mapping" : {
-
-    },
-    "Routes are being saved and map-matched in the background. Large batches may take time because each file is parsed and checkpointed separately." : {
 
     },
     "Samples" : {
@@ -1497,6 +1540,9 @@
     "Statistics & Share" : {
 
     },
+    "Status" : {
+
+    },
     "Stop" : {
 
     },
@@ -1548,6 +1594,9 @@
     "Testing…" : {
 
     },
+    "The compact record is available, but its detailed day data is no longer present." : {
+
+    },
     "The folder is scanned when Moves becomes active and opportunistically in the background. iOS may delay background scans, so imports are automatic but not necessarily immediate." : {
 
     },
@@ -1585,6 +1634,9 @@
 
     },
     "This also removes unused generated endpoint places and empty imported days. Non-imported samples are preserved." : {
+
+    },
+    "This cached elevation record does not include a map coordinate." : {
 
     },
     "This device: %@" : {
@@ -1653,6 +1705,9 @@
     "Total" : {
 
     },
+    "Tracking" : {
+
+    },
     "Tracking Duration" : {
 
     },
@@ -1708,6 +1763,9 @@
 
     },
     "Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on." : {
+
+    },
+    "Use frequent GPS updates when you need a detailed route. Battery use is higher while it is enabled." : {
 
     },
     "Use this device for tracking?" : {

@@ -394,6 +394,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         do {
             _ = try repository.appendSamples(from: locations, source: source)
             try repository.saveIfNeeded()
+            ExplorationIncrementalHooks.enqueueLiveDay(DayTimeline.makeDayKey(for: locations[0].timestamp))
         } catch {
             print("Failed to persist location samples: \(error.localizedDescription)")
         }
@@ -406,6 +407,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
 
             guard automaticallyFillsVisitGaps() else {
                 try repository.saveIfNeeded()
+                ExplorationIncrementalHooks.enqueueLiveDay(DayTimeline.makeDayKey(for: visit.arrivalDate))
                 return
             }
 
@@ -417,11 +419,13 @@ final class DefaultTimelineAssembler: TimelineAssembler {
                 )
             else {
                 try repository.saveIfNeeded()
+                ExplorationIncrementalHooks.enqueueLiveDay(DayTimeline.makeDayKey(for: visit.arrivalDate))
                 return
             }
 
             _ = try await fillGap(from: previousPlace, to: visitPlace)
             try repository.saveIfNeeded()
+            ExplorationIncrementalHooks.enqueueLiveDay(DayTimeline.makeDayKey(for: visit.arrivalDate))
         } catch {
             print("Failed to build timeline segment: \(error.localizedDescription)")
         }
@@ -440,6 +444,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             }
 
             try repository.saveIfNeeded()
+            ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
             return filledGapCount
         } catch {
             print("Failed to fill visit gaps: \(error.localizedDescription)")

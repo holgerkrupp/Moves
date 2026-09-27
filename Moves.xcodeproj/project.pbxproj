@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -13,6 +13,30 @@
 		489A763E2C4FC6F500F43B69 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763D2C4FC6F500F43B69 /* Preview Assets.xcassets */; };
 		489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76442C4FC70D00F43B69 /* LocationChange.swift */; platformFilter = ios; };
 		489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */; };
+		F60000014000000100000001 /* ExplorationRaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000004 /* ExplorationRaster.swift */; };
+		F60000014000000100000002 /* ExplorationShards.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000005 /* ExplorationShards.swift */; };
+		F60000014000000100000003 /* ExplorationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000006 /* ExplorationCache.swift */; };
+		F60000014000000100000009 /* ExplorationPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000A /* ExplorationPreparation.swift */; };
+		F6000001400000010000000B /* ExplorationPreparationDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000C /* ExplorationPreparationDebugView.swift */; platformFilter = ios; };
+		F6000001400000010000000D /* FogOfWorldDebugImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000E /* FogOfWorldDebugImporter.swift */; };
+		F6000001400000010000000F /* ExplorationDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000010 /* ExplorationDebugView.swift */; platformFilter = ios; };
+		F60000014000000100000013 /* ExplorationInsightsDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000014 /* ExplorationInsightsDebugView.swift */; platformFilter = ios; };
+		F60000014000000100000015 /* ExplorationWorkQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000016 /* ExplorationWorkQueue.swift */; };
+		F60000014000000100000017 /* ExplorationStatistics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000018 /* ExplorationStatistics.swift */; };
+		F60000014000000100000019 /* ExplorationRenderHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001A /* ExplorationRenderHierarchy.swift */; };
+		F6000001400000010000001B /* ExplorationAchievements.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001C /* ExplorationAchievements.swift */; };
+		F6000001400000010000001D /* ExplorationFileStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001E /* ExplorationFileStorage.swift */; };
+		F6000001400000010000001F /* ExplorationPreparedMapDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */; platformFilter = ios; };
+		F60000014000000100000021 /* ExplorationPerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000022 /* ExplorationPerformance.swift */; };
+		F60000014000000100000023 /* ExplorationCountryBoundaries.json in Resources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000024 /* ExplorationCountryBoundaries.json */; };
+		F60000014000000100000029 /* ExplorationAdministrativeBoundaries.json in Resources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */; };
+		F60000014000000100000025 /* ExplorationGeography.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000026 /* ExplorationGeography.swift */; };
+		F60000014000000100000027 /* ExplorationTravelEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000028 /* ExplorationTravelEvidence.swift */; };
+		F6000001400000010000002B /* ExplorationGeopoliticalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */; };
+		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
+		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
+		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
+		F60000014000000100000007 /* ExplorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000008 /* ExplorationTests.swift */; };
 		48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
 		48E2BF8C2F9958A3004B7600 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */; };
 		48F58A842FBAF2BA0027EE58 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
@@ -202,6 +226,30 @@
 		489A76462C4FCF1300F43B69 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		489A76472C4FD1A500F43B69 /* Moves.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Moves.entitlements; sourceTree = "<group>"; };
 		489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitedLocation.swift; sourceTree = "<group>"; };
+		F60000014000000100000004 /* ExplorationRaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRaster.swift; sourceTree = "<group>"; };
+		F60000014000000100000005 /* ExplorationShards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationShards.swift; sourceTree = "<group>"; };
+		F60000014000000100000006 /* ExplorationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCache.swift; sourceTree = "<group>"; };
+		F60000014000000100000008 /* ExplorationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationTests.swift; sourceTree = "<group>"; };
+		F6000001400000010000000A /* ExplorationPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparation.swift; sourceTree = "<group>"; };
+		F6000001400000010000000C /* ExplorationPreparationDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparationDebugView.swift; sourceTree = "<group>"; };
+		F6000001400000010000000E /* FogOfWorldDebugImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FogOfWorldDebugImporter.swift; sourceTree = "<group>"; };
+		F60000014000000100000010 /* ExplorationDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationDebugView.swift; sourceTree = "<group>"; };
+		F60000014000000100000014 /* ExplorationInsightsDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationInsightsDebugView.swift; sourceTree = "<group>"; };
+		F60000014000000100000016 /* ExplorationWorkQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationWorkQueue.swift; sourceTree = "<group>"; };
+		F60000014000000100000018 /* ExplorationStatistics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationStatistics.swift; sourceTree = "<group>"; };
+		F6000001400000010000001A /* ExplorationRenderHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRenderHierarchy.swift; sourceTree = "<group>"; };
+		F6000001400000010000001C /* ExplorationAchievements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationAchievements.swift; sourceTree = "<group>"; };
+		F6000001400000010000001E /* ExplorationFileStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFileStorage.swift; sourceTree = "<group>"; };
+		F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparedMapDebugView.swift; sourceTree = "<group>"; };
+		F60000014000000100000022 /* ExplorationPerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPerformance.swift; sourceTree = "<group>"; };
+		F60000014000000100000024 /* ExplorationCountryBoundaries.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExplorationCountryBoundaries.json; sourceTree = "<group>"; };
+		F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExplorationAdministrativeBoundaries.json; sourceTree = "<group>"; };
+		F60000014000000100000026 /* ExplorationGeography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationGeography.swift; sourceTree = "<group>"; };
+		F60000014000000100000028 /* ExplorationTravelEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationTravelEvidence.swift; sourceTree = "<group>"; };
+		F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationGeopoliticalPolicy.swift; sourceTree = "<group>"; };
+		F6000001400000010000002E /* ExplorationMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationMapProjection.swift; sourceTree = "<group>"; };
+		F60000014000000100000030 /* ExplorationCountryPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCountryPresence.swift; sourceTree = "<group>"; };
+		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
 		48A8FACE2F85166D000EAECA /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		48F91DF1305A5FF30011EEA3 /* BMW.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = BMW.icon; sourceTree = "<group>"; };
@@ -413,6 +461,29 @@
 				A30000012FB0000100000000 /* TimelineWidgetSnapshot.swift */,
 				489A76442C4FC70D00F43B69 /* LocationChange.swift */,
 				489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */,
+				F60000014000000100000004 /* ExplorationRaster.swift */,
+				F60000014000000100000005 /* ExplorationShards.swift */,
+				F60000014000000100000006 /* ExplorationCache.swift */,
+				F6000001400000010000000A /* ExplorationPreparation.swift */,
+				F6000001400000010000000C /* ExplorationPreparationDebugView.swift */,
+				F6000001400000010000000E /* FogOfWorldDebugImporter.swift */,
+				F60000014000000100000010 /* ExplorationDebugView.swift */,
+				F60000014000000100000014 /* ExplorationInsightsDebugView.swift */,
+				F60000014000000100000016 /* ExplorationWorkQueue.swift */,
+				F60000014000000100000018 /* ExplorationStatistics.swift */,
+				F6000001400000010000001A /* ExplorationRenderHierarchy.swift */,
+				F6000001400000010000001C /* ExplorationAchievements.swift */,
+				F6000001400000010000001E /* ExplorationFileStorage.swift */,
+				F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */,
+				F60000014000000100000022 /* ExplorationPerformance.swift */,
+				F60000014000000100000024 /* ExplorationCountryBoundaries.json */,
+				F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */,
+				F60000014000000100000026 /* ExplorationGeography.swift */,
+				F60000014000000100000028 /* ExplorationTravelEvidence.swift */,
+				F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */,
+				F6000001400000010000002E /* ExplorationMapProjection.swift */,
+				F60000014000000100000030 /* ExplorationCountryPresence.swift */,
+				F60000014000000100000032 /* ExplorationFlightTickets.swift */,
 				489A763A2C4FC6F500F43B69 /* Assets.xcassets */,
 				489A763C2C4FC6F500F43B69 /* Preview Content */,
 				48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */,
@@ -500,6 +571,7 @@
 				E22000013020000100000000 /* ImportStressTests.swift */,
 				9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */,
 				B41000012FC0000100000002 /* ImportedTransportModeInferenceTests.swift */,
+				F60000014000000100000008 /* ExplorationTests.swift */,
 			);
 			path = MovesTests;
 			sourceTree = "<group>";
@@ -563,6 +635,7 @@
 				A50000012FD0000100000004 /* CloudDataPresence */,
 				E50000013050000100000003 /* CloudKitSyncMonitor */,
 				F30000013130000100000003 /* ESADesignKit */,
+				F60000014000000100000012 /* FogOfWorldKit */,
 			);
 			productName = Moves;
 			productReference = 489A76312C4FC6F300F43B69 /* Moves.app */;
@@ -582,6 +655,9 @@
 				9A1B00012F0000010000000D /* PBXTargetDependency */,
 			);
 			name = MovesTests;
+			packageProductDependencies = (
+				F60000014000000100000012 /* FogOfWorldKit */,
+			);
 			productName = MovesTests;
 			productReference = 9A1B00012F00000100000001 /* MovesTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -688,6 +764,7 @@
 				A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */,
 				E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */,
 				F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */,
+				F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */,
 			);
 			productRefGroup = 489A76322C4FC6F300F43B69 /* Products */;
 			projectDirPath = "";
@@ -751,6 +828,8 @@
 				48F925F6305B073A0011EEA3 /* M-stadt.icon in Resources */,
 				48F92466305A78450011EEA3 /* mclaren.icon in Resources */,
 				48E2BF8C2F9958A3004B7600 /* Localizable.xcstrings in Resources */,
+				F60000014000000100000023 /* ExplorationCountryBoundaries.json in Resources */,
+				F60000014000000100000029 /* ExplorationAdministrativeBoundaries.json in Resources */,
 				48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */,
 				48F91E00305A6B830011EEA3 /* moto.icon in Resources */,
 				48F9247F305A8DB80011EEA3 /* megamanPerspective.icon in Resources */,
@@ -837,6 +916,27 @@
 				B10000013000000100000001 /* MovesAppIntents.swift in Sources */,
 				C10000013000000100000001 /* RouteTrackingLiveActivity.swift in Sources */,
 				C10000013000000100000005 /* MovesRouteTrackingAttributes.swift in Sources */,
+				F60000014000000100000001 /* ExplorationRaster.swift in Sources */,
+				F60000014000000100000002 /* ExplorationShards.swift in Sources */,
+				F60000014000000100000003 /* ExplorationCache.swift in Sources */,
+				F60000014000000100000009 /* ExplorationPreparation.swift in Sources */,
+				F6000001400000010000000B /* ExplorationPreparationDebugView.swift in Sources */,
+				F6000001400000010000000D /* FogOfWorldDebugImporter.swift in Sources */,
+				F6000001400000010000000F /* ExplorationDebugView.swift in Sources */,
+				F60000014000000100000013 /* ExplorationInsightsDebugView.swift in Sources */,
+				F60000014000000100000015 /* ExplorationWorkQueue.swift in Sources */,
+				F60000014000000100000017 /* ExplorationStatistics.swift in Sources */,
+				F60000014000000100000019 /* ExplorationRenderHierarchy.swift in Sources */,
+				F6000001400000010000001B /* ExplorationAchievements.swift in Sources */,
+				F6000001400000010000001D /* ExplorationFileStorage.swift in Sources */,
+				F6000001400000010000001F /* ExplorationPreparedMapDebugView.swift in Sources */,
+				F60000014000000100000021 /* ExplorationPerformance.swift in Sources */,
+				F60000014000000100000025 /* ExplorationGeography.swift in Sources */,
+				F60000014000000100000027 /* ExplorationTravelEvidence.swift in Sources */,
+				F6000001400000010000002B /* ExplorationGeopoliticalPolicy.swift in Sources */,
+				F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */,
+				F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */,
+				F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -851,6 +951,7 @@
 				E22000013020000100000001 /* ImportStressTests.swift in Sources */,
 				9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */,
 				B41000012FC0000100000003 /* ImportedTransportModeInferenceTests.swift in Sources */,
+				F60000014000000100000007 /* ExplorationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1447,6 +1548,17 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FogOfWorldKit;
+		};
+		F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../ESADesignKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1466,13 +1578,6 @@
 		};
 /* End XCRemoteSwiftPackageReference section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../ESADesignKit;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
 		A50000012FD0000100000004 /* CloudDataPresence */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1488,6 +1593,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */;
 			productName = ESADesignKit;
+		};
+		F60000014000000100000012 /* FogOfWorldKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */;
+			productName = FogOfWorldKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

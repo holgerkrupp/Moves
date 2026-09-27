@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/Tests/FogOfWorldKitTests/FogOfWorldKitTests.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.dia",
+    "index-unit-output-path" : "/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/Packages/FogOfWorldKit/.build/out/Intermediates.noindex/FogOfWorldKit.build/Debug/FogOfWorldKitTests-p.build/Objects-normal/arm64/FogOfWorldKitTests~partial.swiftmodule"
+  }
+}

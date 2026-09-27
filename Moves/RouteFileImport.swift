@@ -175,6 +175,29 @@ struct ImportedRouteDataSummary: Codable, Equatable, Sendable {
     static let empty = ImportedRouteDataSummary(sampleCount: 0, moveCount: 0)
 }
 
+/// Shared validation rules for elevation values used by both the active-day chart and the
+/// compact whole-history summaries. GPS altitude can contain sentinel values and corrupt
+/// spikes, so those values must never become a false personal record or a misleading line.
+enum TimelineElevationRules {
+    static let minimumTrustworthyMeters = -500.0
+    static let maximumTrustworthyMeters = 10_000.0
+    /// Samples at aircraft cruising altitude are valid GPS readings, but they are not
+    /// useful as a personal terrain-elevation record.
+    static let maximumRecordableMeters = 6_000.0
+    static let duplicateTimestampTolerance: TimeInterval = 1
+    static let maximumProfileGap: TimeInterval = 20 * 60
+
+    static func isTrustworthy(_ meters: Double) -> Bool {
+        meters.isFinite
+            && meters >= minimumTrustworthyMeters
+            && meters <= maximumTrustworthyMeters
+    }
+
+    static func isRecordable(_ meters: Double) -> Bool {
+        isTrustworthy(meters) && meters <= maximumRecordableMeters
+    }
+}
+
 struct TimelineDaySummary: Codable, Equatable, Sendable {
     var dayStart: Date = .distantPast
     var placeCount: Int
@@ -186,6 +209,14 @@ struct TimelineDaySummary: Codable, Equatable, Sendable {
     var transportDistanceMeters: [String: Double]
     var transportDuration: [String: TimeInterval]
     var hasImportedRouteData: Bool
+    var maximumElevationMeters: Double?
+    var maximumElevationTimestamp: Date?
+    var maximumElevationLatitude: Double?
+    var maximumElevationLongitude: Double?
+    var longestStayDuration: TimeInterval?
+    var longestStayPlaceID: UUID?
+    var longestStayStart: Date?
+    var longestStayEnd: Date?
 
     init(
         dayStart: Date = .distantPast,
@@ -197,7 +228,15 @@ struct TimelineDaySummary: Codable, Equatable, Sendable {
         totalMoveDuration: TimeInterval = 0,
         transportDistanceMeters: [String: Double] = [:],
         transportDuration: [String: TimeInterval] = [:],
-        hasImportedRouteData: Bool = false
+        hasImportedRouteData: Bool = false,
+        maximumElevationMeters: Double? = nil,
+        maximumElevationTimestamp: Date? = nil,
+        maximumElevationLatitude: Double? = nil,
+        maximumElevationLongitude: Double? = nil,
+        longestStayDuration: TimeInterval? = nil,
+        longestStayPlaceID: UUID? = nil,
+        longestStayStart: Date? = nil,
+        longestStayEnd: Date? = nil
     ) {
         self.dayStart = dayStart
         self.placeCount = placeCount
@@ -209,6 +248,14 @@ struct TimelineDaySummary: Codable, Equatable, Sendable {
         self.transportDistanceMeters = transportDistanceMeters
         self.transportDuration = transportDuration
         self.hasImportedRouteData = hasImportedRouteData
+        self.maximumElevationMeters = maximumElevationMeters
+        self.maximumElevationTimestamp = maximumElevationTimestamp
+        self.maximumElevationLatitude = maximumElevationLatitude
+        self.maximumElevationLongitude = maximumElevationLongitude
+        self.longestStayDuration = longestStayDuration
+        self.longestStayPlaceID = longestStayPlaceID
+        self.longestStayStart = longestStayStart
+        self.longestStayEnd = longestStayEnd
     }
 
     init(from decoder: Decoder) throws {
@@ -223,6 +270,14 @@ struct TimelineDaySummary: Codable, Equatable, Sendable {
         transportDistanceMeters = try container.decodeIfPresent([String: Double].self, forKey: .transportDistanceMeters) ?? [:]
         transportDuration = try container.decodeIfPresent([String: TimeInterval].self, forKey: .transportDuration) ?? [:]
         hasImportedRouteData = try container.decodeIfPresent(Bool.self, forKey: .hasImportedRouteData) ?? false
+        maximumElevationMeters = try container.decodeIfPresent(Double.self, forKey: .maximumElevationMeters)
+        maximumElevationTimestamp = try container.decodeIfPresent(Date.self, forKey: .maximumElevationTimestamp)
+        maximumElevationLatitude = try container.decodeIfPresent(Double.self, forKey: .maximumElevationLatitude)
+        maximumElevationLongitude = try container.decodeIfPresent(Double.self, forKey: .maximumElevationLongitude)
+        longestStayDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .longestStayDuration)
+        longestStayPlaceID = try container.decodeIfPresent(UUID.self, forKey: .longestStayPlaceID)
+        longestStayStart = try container.decodeIfPresent(Date.self, forKey: .longestStayStart)
+        longestStayEnd = try container.decodeIfPresent(Date.self, forKey: .longestStayEnd)
     }
 
     var hasRecordedActivity: Bool {
@@ -306,6 +361,17 @@ actor ImportedRouteDataSummaryWorker {
                 let latitudeBucket = Int((place.latitude * 10_000).rounded())
                 let longitudeBucket = Int((place.longitude * 10_000).rounded())
                 locationKeysByDay[dayKey, default: []].insert("\(latitudeBucket)|\(longitudeBucket)")
+                if let departure = place.departureDate {
+                    let duration = departure.timeIntervalSince(place.arrivalDate)
+                    if duration.isFinite,
+                       duration > 0,
+                       duration > (summary.longestStayDuration ?? 0) {
+                        summary.longestStayDuration = duration
+                        summary.longestStayPlaceID = place.id
+                        summary.longestStayStart = place.arrivalDate
+                        summary.longestStayEnd = departure
+                    }
+                }
                 result[dayKey] = summary
             }
             placeOffset += batch.count
@@ -355,6 +421,14 @@ actor ImportedRouteDataSummaryWorker {
                 summary.sampleCount += 1
                 summary.hasImportedRouteData = summary.hasImportedRouteData
                     || sample.sourceRawValue == LocationSampleSource.fileRouteImport.rawValue
+                if TimelineElevationRules.isRecordable(sample.altitude),
+                   (summary.maximumElevationMeters == nil
+                    || sample.altitude > (summary.maximumElevationMeters ?? -.greatestFiniteMagnitude)) {
+                    summary.maximumElevationMeters = sample.altitude
+                    summary.maximumElevationTimestamp = sample.timestamp
+                    summary.maximumElevationLatitude = sample.latitude
+                    summary.maximumElevationLongitude = sample.longitude
+                }
                 result[dayKey] = summary
             }
             sampleOffset += batch.count
@@ -390,7 +464,7 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
     private let modelContainer: ModelContainer
     private var refreshTask: Task<Void, Never>?
     private var refreshAgain = false
-    private var notificationTask: Task<Void, Never>?
+    private var notificationTasks: [Task<Void, Never>] = []
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -401,7 +475,7 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
 
     deinit {
         refreshTask?.cancel()
-        notificationTask?.cancel()
+        notificationTasks.forEach { $0.cancel() }
     }
 
     func refresh() {
@@ -441,10 +515,17 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
     }
 
     private func observeDataChanges() {
-        notificationTask = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: .movesImportedRouteDataDidChange) {
-                guard !Task.isCancelled, let self else { return }
-                refresh()
+        let names: [Notification.Name] = [
+            .movesImportedRouteDataDidChange,
+            .movesLocationSamplesDidChange,
+            .movesMoveDataDidChange
+        ]
+        notificationTasks = names.map { name in
+            Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: name) {
+                    guard !Task.isCancelled, let self else { return }
+                    refresh()
+                }
             }
         }
     }

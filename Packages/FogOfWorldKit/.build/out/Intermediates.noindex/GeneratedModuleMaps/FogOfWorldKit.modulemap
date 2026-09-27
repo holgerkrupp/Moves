@@ -1,0 +1,4 @@
+module FogOfWorldKit {
+header "FogOfWorldKit-Swift.h"
+export *
+}

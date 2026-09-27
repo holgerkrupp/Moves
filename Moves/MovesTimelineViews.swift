@@ -6,6 +6,7 @@
 //
 
 import CryptoKit
+import Charts
 import ESADesignKit
 import Foundation
 import MapKit
@@ -121,24 +122,24 @@ struct DayTimelinePageContent: View {
         liveRouteTrackingSnapshot(for: dayTimeline, captureManager: captureManager)
     }
 
-    private var timelineEntries: [TimelineEntry] {
-        var entries = presentationCache.timelineEntries
+    private var timelineRows: [TimelineEntryRow] {
+        var rows = presentationCache.timelineRows
 
-        if entries.isEmpty, let latestSample = presentationCache.latestSample {
-            entries.append(
-                .sample(
-                    location: latestSample,
-                    sampleCount: presentationCache.sampleCount,
-                    resolvedName: provisionalSampleTitle(for: latestSample)
-                )
+        if rows.isEmpty, let latestSample = presentationCache.latestSample {
+            let entry = TimelineEntry.sample(
+                location: latestSample,
+                sampleCount: presentationCache.sampleCount,
+                resolvedName: provisionalSampleTitle(for: latestSample)
             )
+            rows.append(TimelineEntryRow(entry: entry))
         }
 
         if let liveRouteSnapshot {
-            entries.append(.liveRoute(liveRouteSnapshot))
+            let entry = TimelineEntry.liveRoute(liveRouteSnapshot)
+            rows.append(TimelineEntryRow(entry: entry))
         }
 
-        return entries
+        return rows
     }
 
     private var presentationRefreshKey: String {
@@ -215,9 +216,28 @@ struct DayTimelinePageContent: View {
             source.totalMoveCount - displayedMoves.count
         )
 
+        let timelineRows = entries.map { entry in
+            let sources: TimelineMoveSourceFlags
+            if case .move(let move) = entry {
+                sources = source.sourcesByMoveID[move.id] ?? []
+            } else {
+                sources = []
+            }
+            return TimelineEntryRow(
+                entry: entry,
+                presentation: TimelineRowPresentation(entry: entry, moveSources: sources)
+            )
+        }
+
         return DayTimelinePresentationCache(
-            timelineEntries: entries,
+            timelineRows: timelineRows,
             transportSummaryMetrics: transportSummaryMetrics(for: source.visibleMoves),
+            elevationProfile: DayElevationProfileBuilder.build(
+                samples: source.visibleSamples.map {
+                    DayElevationSample(timestamp: $0.timestamp, elevationMeters: $0.altitude)
+                },
+                dayStart: dayTimeline.dayStart
+            ),
             latestSample: latestSample,
             sampleCount: source.totalSampleCount,
             omittedMoveCount: omittedMoveCount,
@@ -227,8 +247,9 @@ struct DayTimelinePageContent: View {
 
     private static func initialPresentationCache() -> DayTimelinePresentationCache {
         DayTimelinePresentationCache(
-            timelineEntries: [],
+            timelineRows: [],
             transportSummaryMetrics: [],
+            elevationProfile: nil,
             latestSample: nil,
             sampleCount: 0,
             omittedMoveCount: 0,
@@ -398,6 +419,7 @@ struct DayTimelinePageContent: View {
 
             ScrollView {
                 timelinePanel(usesSelection: true)
+                elevationPanel
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scrollEdgeEffectStyle(.soft, for: .top)
@@ -425,6 +447,8 @@ struct DayTimelinePageContent: View {
                 importedDataReviewButton
 
                 timelinePanel(usesSelection: false)
+
+                elevationPanel
 
                 daySummaryPanel
             }
@@ -469,6 +493,8 @@ struct DayTimelinePageContent: View {
 
                     timelinePanel(usesSelection: true)
 
+                    elevationPanel
+
                     importedDataReviewButton
 
                     daySummaryPanel
@@ -487,6 +513,14 @@ struct DayTimelinePageContent: View {
             hasData: hasTransportSummaryData
         )
         .panelSurface()
+    }
+
+    @ViewBuilder
+    private var elevationPanel: some View {
+        if let profile = presentationCache.elevationProfile {
+            DayElevationProfileView(dayStart: dayTimeline.dayStart, profile: profile)
+                .panelSurface()
+        }
     }
 
     @ViewBuilder
@@ -524,9 +558,12 @@ struct DayTimelinePageContent: View {
 
     @ViewBuilder
     private func timelinePanel(usesSelection: Bool) -> some View {
+        let rows = timelineRows
+
         VStack(spacing: 0) {
             if presentationCache.omittedMoveCount > 0 {
-                Text("Showing the latest \(displayedMoveCount) of \(displayedMoveCount + presentationCache.omittedMoveCount) routes.")
+                let moveCount = displayedMoveCount(in: rows)
+                Text("Showing the latest \(moveCount) of \(moveCount + presentationCache.omittedMoveCount) routes.")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -536,20 +573,20 @@ struct DayTimelinePageContent: View {
                 Divider()
             }
 
-            if timelineEntries.isEmpty {
+            if rows.isEmpty {
                 emptyTimelinePanel
             } else if usesSelection {
-                selectableTimelineList
+                selectableTimelineList(rows: rows)
             } else {
-                timelineList
+                timelineList(rows: rows)
             }
         }
         .panelSurface()
     }
 
-    private var displayedMoveCount: Int {
-        timelineEntries.reduce(into: 0) { count, entry in
-            if case .move = entry {
+    private func displayedMoveCount(in rows: [TimelineEntryRow]) -> Int {
+        rows.reduce(into: 0) { count, row in
+            if case .move = row.entry {
                 count += 1
             }
         }
@@ -574,18 +611,20 @@ struct DayTimelinePageContent: View {
         .panelSurface()
     }
 
-    private var timelineList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { index, entry in
+    private func timelineList(rows: [TimelineEntryRow]) -> some View {
+        let lastIndex = rows.count - 1
+        return LazyVStack(spacing: 0) {
+            ForEach(rows.indices, id: \.self) { index in
+                let row = rows[index]
                 timelineRow(
-                    for: entry,
+                    for: row,
                     isFirst: index == 0,
-                    isLast: index == timelineEntries.count - 1
+                    isLast: index == lastIndex
                 )
-                .timelineDeletionSwipeAction(entry: entry) { pendingDeletionEntry = entry }
-                .timelineContextMenu(entry: entry) { pendingDeletionEntry = entry }
+                .timelineDeletionSwipeAction(entry: row.entry) { pendingDeletionEntry = row.entry }
+                .timelineContextMenu(entry: row.entry) { pendingDeletionEntry = row.entry }
 
-                if index < timelineEntries.count - 1 {
+                if index < lastIndex {
                     Divider()
                         .padding(.leading, 82)
                 }
@@ -593,38 +632,40 @@ struct DayTimelinePageContent: View {
         }
     }
 
-    private var selectableTimelineList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { index, entry in
+    private func selectableTimelineList(rows: [TimelineEntryRow]) -> some View {
+        let lastIndex = rows.count - 1
+        return LazyVStack(spacing: 0) {
+            ForEach(rows.indices, id: \.self) { index in
+                let row = rows[index]
                 HStack(spacing: 0) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            mapSelection = entry.mapSelection
+                            mapSelection = row.entry.mapSelection
                         }
                     } label: {
                         StorylineRow(
-                            entry: entry,
+                            presentation: row.presentation,
                             isFirst: index == 0,
-                            isLast: index == timelineEntries.count - 1
+                            isLast: index == lastIndex
                         )
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
-                    timelineDetailLink(for: entry)
+                    timelineDetailLink(for: row)
                 }
-                .timelineDeletionSwipeAction(entry: entry) { pendingDeletionEntry = entry }
-                .timelineContextMenu(entry: entry) { pendingDeletionEntry = entry }
+                .timelineDeletionSwipeAction(entry: row.entry) { pendingDeletionEntry = row.entry }
+                .timelineContextMenu(entry: row.entry) { pendingDeletionEntry = row.entry }
                 .background {
-                    if mapSelection == entry.mapSelection {
+                    if mapSelection == row.entry.mapSelection {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(entry.iconTint.opacity(0.15))
+                            .fill(row.presentation.iconTint.opacity(0.15))
                             .padding(.horizontal, 3)
                             .padding(.vertical, 2)
                     }
                 }
 
-                if index < timelineEntries.count - 1 {
+                if index < lastIndex {
                     Divider()
                         .padding(.leading, 82)
                 }
@@ -633,8 +674,8 @@ struct DayTimelinePageContent: View {
     }
 
     @ViewBuilder
-    private func timelineDetailLink(for entry: TimelineEntry) -> some View {
-        switch entry {
+    private func timelineDetailLink(for row: TimelineEntryRow) -> some View {
+        switch row.entry {
         case .place(let place):
             NavigationLink {
                 PlaceMapDetailView(place: place)
@@ -666,13 +707,13 @@ struct DayTimelinePageContent: View {
     }
 
     @ViewBuilder
-    private func timelineRow(for entry: TimelineEntry, isFirst: Bool, isLast: Bool) -> some View {
-        switch entry {
+    private func timelineRow(for row: TimelineEntryRow, isFirst: Bool, isLast: Bool) -> some View {
+        switch row.entry {
         case .place(let place):
             NavigationLink {
                 PlaceMapDetailView(place: place)
             } label: {
-                StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+                StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
             }
             .buttonStyle(.plain)
 
@@ -680,18 +721,18 @@ struct DayTimelinePageContent: View {
             NavigationLink {
                 MoveMapDetailView(segment: segment)
             } label: {
-                StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+                StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
             }
             .buttonStyle(.plain)
 
         case .liveRoute:
-            StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+            StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
 
         case .start:
-            StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+            StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
 
         case .sample:
-            StorylineRow(entry: entry, isFirst: isFirst, isLast: isLast)
+            StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
         }
     }
 
@@ -814,6 +855,9 @@ private struct TimelineEntryContextMenu: ViewModifier {
                                 move.clearCachedRouteCoordinates()
                                 do {
                                     try modelContext.save()
+                                    if let dayKey = move.dayTimeline?.dayKey {
+                                        ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
+                                    }
                                     NotificationCenter.default.post(
                                         name: .movesMoveDataDidChange,
                                         object: move.id
@@ -937,6 +981,158 @@ private struct TimelineEntryContextMenu: ViewModifier {
     }
 }
 
+struct DayElevationSample: Sendable, Equatable {
+    let timestamp: Date
+    let elevationMeters: Double
+}
+
+struct DayElevationPoint: Identifiable, Sendable, Equatable {
+    let timestamp: Date
+    let elevationMeters: Double
+
+    var id: Date { timestamp }
+}
+
+struct DayElevationSegment: Identifiable, Sendable, Equatable {
+    let points: [DayElevationPoint]
+
+    var id: String {
+        guard let first = points.first, let last = points.last else { return "empty" }
+        return "\(first.timestamp.timeIntervalSince1970)-\(last.timestamp.timeIntervalSince1970)"
+    }
+}
+
+struct DayElevationProfile: Sendable, Equatable {
+    let segments: [DayElevationSegment]
+    let minimumElevationMeters: Double
+    let maximumElevationMeters: Double
+
+    var isEmpty: Bool { segments.allSatisfy { $0.points.isEmpty } }
+
+    var yDomain: ClosedRange<Double> {
+        guard minimumElevationMeters < maximumElevationMeters else {
+            let padding = max(abs(minimumElevationMeters) * 0.05, 10)
+            return (minimumElevationMeters - padding)...(maximumElevationMeters + padding)
+        }
+
+        let padding = max((maximumElevationMeters - minimumElevationMeters) * 0.12, 10)
+        return (minimumElevationMeters - padding)...(maximumElevationMeters + padding)
+    }
+}
+
+enum DayElevationProfileBuilder {
+    static let defaultMaximumPointCount = 180
+
+    static func build(
+        samples: [DayElevationSample],
+        dayStart: Date,
+        maximumPointCount: Int = defaultMaximumPointCount
+    ) -> DayElevationProfile? {
+        let dayEnd = Calendar.autoupdatingCurrent.date(byAdding: .day, value: 1, to: dayStart)
+            ?? dayStart.addingTimeInterval(24 * 60 * 60)
+        let sorted = samples
+            .filter {
+                $0.timestamp >= dayStart
+                    && $0.timestamp < dayEnd
+                    && TimelineElevationRules.isTrustworthy($0.elevationMeters)
+            }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        guard !sorted.isEmpty else { return nil }
+
+        var deduplicated: [DayElevationSample] = []
+        deduplicated.reserveCapacity(sorted.count)
+        for sample in sorted {
+            if let previous = deduplicated.last,
+               sample.timestamp.timeIntervalSince(previous.timestamp)
+                    <= TimelineElevationRules.duplicateTimestampTolerance {
+                deduplicated[deduplicated.count - 1] = sample
+            } else {
+                deduplicated.append(sample)
+            }
+        }
+
+        var rawSegments: [[DayElevationPoint]] = [[]]
+        for sample in deduplicated {
+            if let previous = rawSegments[rawSegments.count - 1].last,
+               sample.timestamp.timeIntervalSince(previous.timestamp) > TimelineElevationRules.maximumProfileGap {
+                rawSegments.append([])
+            }
+            rawSegments[rawSegments.count - 1].append(
+                DayElevationPoint(
+                    timestamp: sample.timestamp,
+                    elevationMeters: sample.elevationMeters
+                )
+            )
+        }
+
+        let nonEmptySegments = rawSegments.filter { !$0.isEmpty }
+        guard !nonEmptySegments.isEmpty else { return nil }
+        let pointBudget = max(maximumPointCount, nonEmptySegments.count * 2)
+        let totalPointCount = nonEmptySegments.reduce(0) { $0 + $1.count }
+        var budgets = nonEmptySegments.map { segment in
+            max(2, Int((Double(segment.count) / Double(totalPointCount) * Double(pointBudget)).rounded()))
+        }
+        while budgets.reduce(0, +) > pointBudget {
+            guard let index = budgets.indices.max(by: { budgets[$0] < budgets[$1] }), budgets[index] > 2 else {
+                break
+            }
+            budgets[index] -= 1
+        }
+
+        let segments = zip(nonEmptySegments, budgets).map { points, budget in
+            DayElevationSegment(points: downsample(points, maximumPointCount: min(budget, points.count)))
+        }
+        let elevations = deduplicated.map(\.elevationMeters)
+        return DayElevationProfile(
+            segments: segments,
+            minimumElevationMeters: elevations.min() ?? 0,
+            maximumElevationMeters: elevations.max() ?? 0
+        )
+    }
+
+    private static func downsample(
+        _ points: [DayElevationPoint],
+        maximumPointCount: Int
+    ) -> [DayElevationPoint] {
+        guard points.count > maximumPointCount else { return points }
+        if maximumPointCount <= 1 {
+            return [points[0]]
+        }
+        if maximumPointCount == 2 {
+            return [points[0], points[points.count - 1]]
+        }
+
+        var result = [points[0]]
+        let interiorCount = maximumPointCount - 2
+        let bucketWidth = Double(points.count - 2) / Double(interiorCount)
+        for bucketIndex in 0..<interiorCount {
+            let start = 1 + Int(floor(Double(bucketIndex) * bucketWidth))
+            let end = min(
+                points.count - 1,
+                1 + Int(floor(Double(bucketIndex + 1) * bucketWidth))
+            )
+            let bucket = points[start..<max(start + 1, end)]
+            if let minimum = bucket.min(by: { $0.elevationMeters < $1.elevationMeters }) {
+                result.append(minimum)
+            }
+            if let maximum = bucket.max(by: { $0.elevationMeters < $1.elevationMeters }) {
+                result.append(maximum)
+            }
+        }
+        result.append(points[points.count - 1])
+
+        var unique = result.sorted { $0.timestamp < $1.timestamp }
+        var seen = Set<Date>()
+        unique.removeAll { !seen.insert($0.timestamp).inserted }
+        if unique.count > maximumPointCount {
+            let step = Double(unique.count - 1) / Double(maximumPointCount - 1)
+            return (0..<maximumPointCount).map { unique[Int((Double($0) * step).rounded())] }
+        }
+        return unique
+    }
+}
+
 enum TimelinePresentationLimits {
     /// Imported data remains fully available in SwiftData. These limits only bound the
     /// interactive phone surfaces (rows, markers, and polylines).
@@ -1011,14 +1207,16 @@ enum TimelinePresentationLimits {
     }
 }
 
-private struct DayPresentationSource {
-    struct MoveSources: OptionSet {
-        let rawValue: UInt8
+struct TimelineMoveSourceFlags: OptionSet, Equatable {
+    let rawValue: UInt8
 
-        static let imported = MoveSources(rawValue: 1 << 0)
-        static let routeTracking = MoveSources(rawValue: 1 << 1)
-        static let healthWorkout = MoveSources(rawValue: 1 << 2)
-    }
+    static let imported = TimelineMoveSourceFlags(rawValue: 1 << 0)
+    static let routeTracking = TimelineMoveSourceFlags(rawValue: 1 << 1)
+    static let healthWorkout = TimelineMoveSourceFlags(rawValue: 1 << 2)
+}
+
+private struct DayPresentationSource {
+    typealias MoveSources = TimelineMoveSourceFlags
 
     let resolution: MultiDeviceDayResolution
     let visiblePlaces: [VisitPlace]
@@ -1253,8 +1451,9 @@ private enum DayPresentationSourceCache {
 }
 
 private struct DayTimelinePresentationCache {
-    let timelineEntries: [TimelineEntry]
+    let timelineRows: [TimelineEntryRow]
     let transportSummaryMetrics: [DayTransportSummaryMetric]
+    let elevationProfile: DayElevationProfile?
     let latestSample: LocationSample?
     let sampleCount: Int
     let omittedMoveCount: Int
@@ -2466,13 +2665,13 @@ struct DayMapStrip: View {
 }
 
 struct StorylineRow: View {
-    let entry: TimelineEntry
+    let presentation: TimelineRowPresentation
     let isFirst: Bool
     let isLast: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            Text(entry.clockText)
+            Text(presentation.clockText)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(width: 56, alignment: .leading)
@@ -2485,12 +2684,12 @@ struct StorylineRow: View {
 
                 ZStack {
                     Circle()
-                        .fill(entry.iconTint.opacity(0.18))
+                        .fill(presentation.iconTint.opacity(0.18))
                         .frame(width: 24, height: 24)
-                    Image(systemName: entry.iconName)
+                    Image(systemName: presentation.iconName)
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(entry.iconTint)
-                    if entry.showsHealthSourceBadge {
+                        .foregroundStyle(presentation.iconTint)
+                    if presentation.showsHealthSourceBadge {
                         Circle()
                             .fill(MovesPalette.healthRoute)
                             .frame(width: 8, height: 8)
@@ -2511,15 +2710,15 @@ struct StorylineRow: View {
             .frame(maxHeight: .infinity, alignment: .top)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.titleText)
+                Text(presentation.titleText)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.primary.opacity(0.92))
 
-                Text(entry.subtitleText)
+                Text(presentation.subtitleText)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.primary.opacity(0.72))
 
-                if let tertiary = entry.tertiaryText {
+                if let tertiary = presentation.tertiaryText {
                     Text(tertiary)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
@@ -2531,6 +2730,232 @@ struct StorylineRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+private struct DayElevationProfileView: View {
+    let dayStart: Date
+    let profile: DayElevationProfile
+
+    private var dayEnd: Date {
+        Calendar.autoupdatingCurrent.date(byAdding: .day, value: 1, to: dayStart)
+            ?? dayStart.addingTimeInterval(24 * 60 * 60)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Elevation", systemImage: "mountain.2.fill")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+
+                Spacer(minLength: 8)
+
+                Text("High \(elevationText(profile.maximumElevationMeters))")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Chart {
+                ForEach(profile.segments) { segment in
+                    ForEach(segment.points) { point in
+                        LineMark(
+                            x: .value("Time", point.timestamp),
+                            y: .value("Elevation", point.elevationMeters)
+                        )
+                        .foregroundStyle(MovesPalette.routeTracking)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                        .interpolationMethod(.linear)
+                    }
+
+                    if segment.points.count == 1, let point = segment.points.first {
+                        PointMark(
+                            x: .value("Time", point.timestamp),
+                            y: .value("Elevation", point.elevationMeters)
+                        )
+                        .foregroundStyle(MovesPalette.routeTracking)
+                    }
+                }
+            }
+            .chartXScale(domain: dayStart...dayEnd)
+            .chartYScale(domain: profile.yDomain)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .hour, count: 6)) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(MovesPalette.rail)
+                    AxisTick()
+                    AxisValueLabel(format: .dateTime.hour())
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(MovesPalette.rail)
+                    AxisValueLabel {
+                        if let meters = value.as(Double.self) {
+                            Text(elevationText(meters))
+                        }
+                    }
+                }
+            }
+            .frame(height: 150)
+            .accessibilityLabel("24-hour elevation profile")
+            .accessibilityValue(
+                "Highest elevation \(elevationText(profile.maximumElevationMeters))"
+            )
+        }
+    }
+
+    private func elevationText(_ meters: Double) -> String {
+        Measurement(value: meters, unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road))
+    }
+}
+
+enum TimelineTintKind: Equatable {
+    case place
+    case move
+    case routeTracking
+    case healthRoute
+    case start
+
+    var color: Color {
+        switch self {
+        case .place: return MovesPalette.place
+        case .move: return MovesPalette.move
+        case .routeTracking: return MovesPalette.routeTracking
+        case .healthRoute: return MovesPalette.healthRoute
+        case .start: return MovesPalette.start
+        }
+    }
+}
+
+struct TimelineRowPresentation: Identifiable, Equatable {
+    let id: String
+    let clockText: String
+    let titleText: String
+    let subtitleText: String
+    let tertiaryText: String?
+    let iconName: String
+    let iconTintKind: TimelineTintKind
+    let showsHealthSourceBadge: Bool
+
+    var iconTint: Color { iconTintKind.color }
+
+    init(entry: TimelineEntry, moveSources: TimelineMoveSourceFlags = []) {
+        id = entry.id
+
+        switch entry {
+        case .place(let place):
+            clockText = Self.timeString(from: place.arrivalDate)
+            titleText = place.displayTitle
+            if let departure = place.departureDate {
+                subtitleText = "Stayed \(DurationFormatter.text(for: departure.timeIntervalSince(place.arrivalDate)))"
+            } else {
+                subtitleText = "In progress"
+            }
+            tertiaryText = nil
+            iconName = "mappin.circle.fill"
+            iconTintKind = .place
+            showsHealthSourceBadge = false
+
+        case .move(let segment):
+            let timelineStartDate = segment.timelineStartDate
+            clockText = Self.timeString(from: timelineStartDate)
+            let start = segment.startPlace?.displayTitle ?? "Unknown start"
+            let end = segment.endPlace?.displayTitle ?? "Unknown destination"
+            titleText = "\(start) to \(end)"
+
+            let duration = DurationFormatter.text(for: segment.timelineDuration)
+            let distance = Measurement(value: max(segment.distanceMeters, 0), unit: UnitLength.meters)
+                .formatted(.measurement(width: .abbreviated, usage: .road))
+            var subtitleDetails = [segment.transportMode.title, duration, distance]
+            if moveSources.contains(.healthWorkout) {
+                subtitleDetails.append("Apple Health")
+            }
+            subtitleText = subtitleDetails.joined(separator: "   ")
+
+            var tertiaryDetails: [String] = []
+            if let stepCount = segment.stepCount, stepCount > 0 {
+                tertiaryDetails.append("\(stepCount.formatted(.number)) steps")
+            }
+            if DurationFormatter.showsNonzeroMinutes(for: segment.timelineDuration) {
+                let kilometersPerHour = max(segment.distanceMeters, 0) / segment.timelineDuration * 3.6
+                tertiaryDetails.append(MovesMeasurementFormatter.speed(kilometersPerHour: kilometersPerHour))
+            }
+            tertiaryText = tertiaryDetails.isEmpty ? nil : tertiaryDetails.joined(separator: "   ")
+            iconName = segment.transportMode.symbolName
+            showsHealthSourceBadge = moveSources.contains(.healthWorkout)
+            if moveSources.contains(.healthWorkout) {
+                iconTintKind = .healthRoute
+            } else if moveSources.contains(.routeTracking) {
+                iconTintKind = .routeTracking
+            } else {
+                iconTintKind = .move
+            }
+
+        case .liveRoute(let snapshot):
+            clockText = Self.timeString(from: snapshot.latestDate)
+            titleText = "Live route tracking"
+            let duration = DurationFormatter.text(for: snapshot.duration)
+            let distance = Measurement(value: max(snapshot.distanceMeters, 0), unit: UnitLength.meters)
+                .formatted(.measurement(width: .abbreviated, usage: .road))
+            subtitleText = snapshot.sampleCount == 0
+                ? "Waiting for the first live GPS fix"
+                : "\(snapshot.sampleCount) live fixes   \(duration)   \(distance)"
+            tertiaryText = snapshot.sampleCount == 0
+                ? "Tracking will start as soon as GPS provides the first fix."
+                : "Last update \(snapshot.latestDate.formatted(date: .omitted, time: .shortened))"
+            iconName = "location.fill.viewfinder"
+            iconTintKind = .routeTracking
+            showsHealthSourceBadge = false
+
+        case .start(let place, let timestamp):
+            clockText = Self.timeString(from: timestamp)
+            titleText = "Start at \(place.displayTitle)"
+            subtitleText = "Carried over from previous day"
+            tertiaryText = nil
+            iconName = "sunrise.fill"
+            iconTintKind = .start
+            showsHealthSourceBadge = false
+
+        case .sample(let location, let sampleCount, let resolvedName):
+            clockText = Self.timeString(from: location.timestamp)
+            if let resolvedName,
+               !resolvedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                titleText = resolvedName
+            } else {
+                titleText = Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
+            }
+            subtitleText = "In progress"
+            tertiaryText = sampleCount == 1
+                ? "1 location sample captured"
+                : "\(sampleCount) location samples captured"
+            iconName = "mappin.circle.fill"
+            iconTintKind = .place
+            showsHealthSourceBadge = false
+        }
+    }
+
+    private static func timeString(from date: Date) -> String {
+        date.formatted(.dateTime.hour().minute())
+    }
+
+    private static func coordinateString(latitude: Double, longitude: Double) -> String {
+        let latitudeText = String(format: "%.5f", latitude)
+        let longitudeText = String(format: "%.5f", longitude)
+        return "\(latitudeText), \(longitudeText)"
+    }
+}
+
+struct TimelineEntryRow: Identifiable {
+    let entry: TimelineEntry
+    let presentation: TimelineRowPresentation
+
+    init(entry: TimelineEntry, presentation: TimelineRowPresentation? = nil) {
+        self.entry = entry
+        self.presentation = presentation ?? TimelineRowPresentation(entry: entry)
+    }
+
+    var id: String { presentation.id }
 }
 
 enum TimelineEntry: Identifiable {
@@ -2852,7 +3277,7 @@ final class TimelineScreenshotServiceSceneView: UIView {
 
 private struct TimelineScreenshotPDFSnapshot {
     let dayStart: Date
-    let entries: [TimelineEntry]
+    let entries: [TimelineEntryRow]
     let sampleCount: Int
 }
 
@@ -2884,9 +3309,10 @@ private struct TimelineScreenshotPDFDocument: View {
                 }
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(snapshot.entries.enumerated()), id: \.element.id) { index, entry in
+                    ForEach(snapshot.entries.indices, id: \.self) { index in
+                        let row = snapshot.entries[index]
                         StorylineRow(
-                            entry: entry,
+                            presentation: row.presentation,
                             isFirst: index == 0,
                             isLast: index == snapshot.entries.count - 1
                         )
@@ -3006,9 +3432,22 @@ private enum TimelineScreenshotPDFRenderer {
             entries.append(.start(place: carriedOverPlace, timestamp: dayTimeline.dayStart))
         }
 
+        let rows = entries.map { entry in
+            let sources: TimelineMoveSourceFlags
+            if case .move(let move) = entry {
+                sources = source.sourcesByMoveID[move.id] ?? []
+            } else {
+                sources = []
+            }
+            return TimelineEntryRow(
+                entry: entry,
+                presentation: TimelineRowPresentation(entry: entry, moveSources: sources)
+            )
+        }
+
         return TimelineScreenshotPDFSnapshot(
             dayStart: dayTimeline.dayStart,
-            entries: entries,
+            entries: rows,
             sampleCount: source.totalSampleCount
         )
     }

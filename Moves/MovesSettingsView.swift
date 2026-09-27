@@ -178,6 +178,23 @@ struct MovesSettingsView: View {
                     Text("Moves")
                 }
 
+#if DEBUG
+                Section {
+                    NavigationLink {
+                        ExplorationDebugView()
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Exploration Debug",
+                            subtitle: "Prepared map, progress, import, and export",
+                            systemImage: "map.fill",
+                            tint: .indigo
+                        )
+                    }
+                } header: {
+                    Text("Debug")
+                }
+#endif
+
                 Section {
                     CloudKitSyncStatusCard()
                 } header: {

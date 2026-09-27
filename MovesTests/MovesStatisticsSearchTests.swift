@@ -4,6 +4,99 @@ import SwiftData
 @testable import Moves
 
 final class MovesStatisticsSearchTests: XCTestCase {
+    func testElevationProfileSortsFiltersDeduplicatesSplitsAndDownsamples() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let samples = [
+            DayElevationSample(timestamp: start.addingTimeInterval(10 * 60), elevationMeters: 120),
+            DayElevationSample(timestamp: start.addingTimeInterval(5 * 60), elevationMeters: 100),
+            DayElevationSample(timestamp: start.addingTimeInterval(5 * 60 + 0.5), elevationMeters: 110),
+            DayElevationSample(timestamp: start.addingTimeInterval(30 * 60), elevationMeters: 130),
+            DayElevationSample(timestamp: start.addingTimeInterval(3_600), elevationMeters: 400),
+            DayElevationSample(timestamp: start.addingTimeInterval(3_660), elevationMeters: .nan),
+            DayElevationSample(timestamp: start.addingTimeInterval(4_000), elevationMeters: 140),
+            DayElevationSample(timestamp: start.addingTimeInterval(24 * 60 * 60), elevationMeters: 900)
+        ]
+
+        let profile = try XCTUnwrap(
+            DayElevationProfileBuilder.build(
+                samples: samples,
+                dayStart: start,
+                maximumPointCount: 4
+            )
+        )
+
+        XCTAssertEqual(profile.segments.count, 2)
+        XCTAssertEqual(profile.segments.flatMap(\.points).count, 4)
+        XCTAssertEqual(profile.segments.first?.points.first?.elevationMeters, 110)
+        XCTAssertEqual(profile.maximumElevationMeters, 400)
+        XCTAssertEqual(profile.minimumElevationMeters, 110)
+    }
+
+    func testStatisticsRecordIndexUsesCompactDailySummaries() {
+        let firstDay = Date(timeIntervalSince1970: 1_700_000_000)
+        let secondDay = firstDay.addingTimeInterval(24 * 60 * 60)
+        let summaries = [
+            "first": TimelineDaySummary(
+                dayStart: firstDay,
+                placeCount: 2,
+                uniquePlaceCount: 1,
+                moveCount: 1,
+                totalDistanceMeters: 2_000,
+                maximumElevationMeters: 240,
+                longestStayDuration: 3_600
+            ),
+            "second": TimelineDaySummary(
+                dayStart: secondDay,
+                placeCount: 1,
+                uniquePlaceCount: 1,
+                moveCount: 2,
+                totalDistanceMeters: 8_000,
+                maximumElevationMeters: 320,
+                longestStayDuration: 1_800
+            )
+        ]
+
+        let records = MovesStatisticsRecordIndex(daySummaries: summaries)
+
+        XCTAssertEqual(records.recordedVisitCount, 3)
+        XCTAssertEqual(records.recordedPlaceCount, 2)
+        XCTAssertEqual(records.recordedMoveCount, 3)
+        XCTAssertEqual(records.longestTravelDay?.totalDistanceMeters, 8_000)
+        XCTAssertEqual(records.maximumElevation?.maximumElevationMeters, 320)
+        XCTAssertEqual(records.longestSingleStay?.longestStayDuration, 3_600)
+        XCTAssertEqual(records.activityStreakDays, 2)
+    }
+
+    func testStatisticsRecordIndexIgnoresFlightAltitudeRecords() {
+        let groundDay = TimelineDaySummary(
+            dayStart: Date(timeIntervalSince1970: 1_700_000_000),
+            maximumElevationMeters: 320
+        )
+        let flightDay = TimelineDaySummary(
+            dayStart: Date(timeIntervalSince1970: 1_700_000_000 + 24 * 60 * 60),
+            maximumElevationMeters: 10_000
+        )
+
+        let records = MovesStatisticsRecordIndex(daySummaries: [
+            "ground": groundDay,
+            "flight": flightDay
+        ])
+
+        XCTAssertEqual(records.maximumElevation?.maximumElevationMeters, 320)
+        XCTAssertTrue(TimelineElevationRules.isTrustworthy(10_000))
+        XCTAssertFalse(TimelineElevationRules.isRecordable(10_000))
+    }
+
+    func testTimelineDaySummaryDecodesWithoutNewRecordFields() throws {
+        let legacy = LegacyTimelineDaySummaryForTest(dayStart: Date(timeIntervalSince1970: 1_700_000_000))
+        let data = try JSONEncoder().encode(legacy)
+        let decoded = try JSONDecoder().decode(TimelineDaySummary.self, from: data)
+
+        XCTAssertEqual(decoded.dayStart, legacy.dayStart)
+        XCTAssertNil(decoded.maximumElevationMeters)
+        XCTAssertNil(decoded.longestStayDuration)
+    }
+
     func testKnownLocationUsesItsIndividualRadius() {
         let location = KnownLocation(
             name: "Office",
@@ -260,4 +353,18 @@ final class MovesStatisticsSearchTests: XCTestCase {
         move.endPlace = endPlace
         return move
     }
+}
+
+private struct LegacyTimelineDaySummaryForTest: Codable {
+    let dayStart: Date
+
+    var placeCount = 2
+    var uniquePlaceCount = 1
+    var moveCount = 3
+    var sampleCount = 4
+    var totalDistanceMeters = 5.0
+    var totalMoveDuration = 6.0
+    var transportDistanceMeters: [String: Double] = ["walking": 5]
+    var transportDuration: [String: TimeInterval] = ["walking": 6]
+    var hasImportedRouteData = false
 }

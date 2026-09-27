@@ -1,0 +1,11 @@
+Target dependency graph (4 targets)
+Target 'AllIncludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'FogOfWorldKitTests-product' in project 'FogOfWorldKit'
+➜ Dependency on target 'FogOfWorldKitTests-product' in project 'FogOfWorldKit' via transitive dependency through 'FogOfWorldKitTests-test-runner'
+➜ Explicit dependency on target 'FogOfWorldKit-product' in project 'FogOfWorldKit'
+➜ Explicit dependency on target 'FogOfWorldKit' in project 'FogOfWorldKit'
+Target 'FogOfWorldKit-product' in project 'FogOfWorldKit'
+➜ Explicit dependency on target 'FogOfWorldKit' in project 'FogOfWorldKit'
+Target 'FogOfWorldKitTests-product' in project 'FogOfWorldKit'
+➜ Explicit dependency on target 'FogOfWorldKit' in project 'FogOfWorldKit'
+Target 'FogOfWorldKit' in project 'FogOfWorldKit' (no dependencies)

@@ -230,8 +230,11 @@ final class ImportStressTests: XCTestCase {
             $0.dayTimeline = timeline
             $0.moveSegment = importedMove
         }
+        importedSamples[0].altitude = 120
+        importedSamples[1].altitude = 340
         recordedSample.dayTimeline = timeline
         recordedSample.moveSegment = recordedMove
+        recordedSample.altitude = 280
         context.insert(timeline)
         context.insert(visit)
         context.insert(importedMove)
@@ -254,6 +257,10 @@ final class ImportStressTests: XCTestCase {
         XCTAssertEqual(daySummary.moveCount, 2)
         XCTAssertEqual(daySummary.sampleCount, 3)
         XCTAssertGreaterThan(daySummary.totalDistanceMeters, 0)
+        XCTAssertEqual(daySummary.maximumElevationMeters, 340)
+        XCTAssertEqual(daySummary.maximumElevationTimestamp, importedSamples[1].timestamp)
+        XCTAssertEqual(daySummary.longestStayDuration, 60)
+        XCTAssertEqual(daySummary.longestStayPlaceID, visit.id)
     }
 }
 

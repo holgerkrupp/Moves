@@ -24,15 +24,19 @@ actor RouteFileImportWorker {
         configuration: RouteFileImportConfiguration,
         shouldPause: @Sendable @escaping () async -> Bool
     ) async throws -> Result {
+        UserDefaults.standard.set(true, forKey: "Moves.routeImport.isActive")
+        defer { UserDefaults.standard.set(false, forKey: "Moves.routeImport.isActive") }
         let repository = SwiftDataTimelineRepository(modelContext: modelContext)
         var result = Result()
         var previousImportedMove: MoveSegment?
         let importedTracks = tracks.map(makeImportedTrack).sorted {
             ($0.locations.first?.timestamp ?? .distantFuture) < ($1.locations.first?.timestamp ?? .distantFuture)
         }
+        var changedDayKeys = Set<String>()
 
         for track in importedTracks where track.locations.count >= 2 {
             try await checkpoint(shouldPause)
+            changedDayKeys.formUnion(track.locations.map { DayTimeline.makeDayKey(for: $0.timestamp) })
             if configuration.existingDataPolicy == .skipDate,
                try hasExistingData(for: track.locations) {
                 previousImportedMove = nil
@@ -89,6 +93,9 @@ actor RouteFileImportWorker {
             previousImportedMove = importsWholeTrack ? lastMoveInTrack : nil
         }
         try repository.saveIfNeeded()
+        if result.routeCount > 0 {
+            ExplorationIncrementalHooks.enqueueImportedDays(changedDayKeys)
+        }
         return result
     }
 

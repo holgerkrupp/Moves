@@ -99,6 +99,176 @@ final class DayTransportSummaryTests: XCTestCase {
     }
 }
 
+final class TimelineRowPresentationTests: XCTestCase {
+    func testMaterializedPresentationMatchesTimelineEntryValuesAcrossEntryKinds() throws {
+        let start = Date(timeIntervalSince1970: 1_790_280_000)
+        let startPlace = VisitPlace(
+            arrivalDate: start,
+            departureDate: start.addingTimeInterval(10 * 60),
+            latitude: 53.46,
+            longitude: 9.70,
+            horizontalAccuracy: 10,
+            userLabel: "Home"
+        )
+        let endPlace = VisitPlace(
+            arrivalDate: start.addingTimeInterval(30 * 60),
+            departureDate: start.addingTimeInterval(45 * 60),
+            latitude: 53.47,
+            longitude: 9.69,
+            horizontalAccuracy: 10,
+            userLabel: "Office"
+        )
+
+        let normalMove = MoveSegment(
+            dedupeKey: "normal",
+            startDate: start.addingTimeInterval(10 * 60),
+            endDate: start.addingTimeInterval(30 * 60),
+            transportMode: .walking,
+            distanceMeters: 1_500,
+            stepCount: 2_000
+        )
+        normalMove.startPlace = startPlace
+        normalMove.endPlace = endPlace
+
+        let routeMove = MoveSegment(
+            dedupeKey: "route",
+            startDate: start.addingTimeInterval(50 * 60),
+            endDate: start.addingTimeInterval(80 * 60),
+            transportMode: .automotive,
+            distanceMeters: 12_000,
+            stepCount: nil
+        )
+        routeMove.startPlace = endPlace
+        routeMove.endPlace = startPlace
+
+        let routeSample = LocationSample(
+            location: CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 53.465, longitude: 9.695),
+                altitude: 0,
+                horizontalAccuracy: 10,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: 8,
+                timestamp: start.addingTimeInterval(60 * 60)
+            ),
+            source: .routeTracking,
+            dedupeKey: "route-sample"
+        )
+        routeSample.moveSegment = routeMove
+        routeMove.samples = [routeSample]
+
+        let healthMove = MoveSegment(
+            dedupeKey: "health",
+            startDate: start.addingTimeInterval(90 * 60),
+            endDate: start.addingTimeInterval(120 * 60),
+            transportMode: .cycling,
+            distanceMeters: 8_000,
+            stepCount: nil
+        )
+        let healthSample = LocationSample(
+            location: CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 53.466, longitude: 9.696),
+                altitude: 0,
+                horizontalAccuracy: 10,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: 5,
+                timestamp: start.addingTimeInterval(100 * 60)
+            ),
+            source: .healthWorkoutRoute,
+            dedupeKey: "health-sample"
+        )
+        healthSample.moveSegment = healthMove
+        healthMove.samples = [healthSample]
+
+        let importedMove = MoveSegment(
+            dedupeKey: "imported",
+            startDate: start.addingTimeInterval(130 * 60),
+            endDate: start.addingTimeInterval(160 * 60),
+            transportMode: .train,
+            distanceMeters: 20_000,
+            stepCount: nil
+        )
+        let importedSample = LocationSample(
+            location: CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 53.467, longitude: 9.697),
+                altitude: 0,
+                horizontalAccuracy: 10,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: 20,
+                timestamp: start.addingTimeInterval(140 * 60)
+            ),
+            source: .fileRouteImport,
+            dedupeKey: "imported-sample"
+        )
+        importedSample.moveSegment = importedMove
+        importedMove.samples = [importedSample]
+
+        let entries: [(TimelineEntry, TimelineMoveSourceFlags, TimelineTintKind)] = [
+            (.move(normalMove), [], .move),
+            (.move(routeMove), [.routeTracking], .routeTracking),
+            (.move(healthMove), [.routeTracking, .healthWorkout], .healthRoute),
+            (.move(importedMove), [.imported, .routeTracking], .routeTracking),
+            (.place(startPlace), [], .place),
+            (.start(place: startPlace, timestamp: start.addingTimeInterval(-1)), [], .start)
+        ]
+
+        for (entry, sources, tintKind) in entries {
+            let expected = TimelineRowPresentation(entry: entry, moveSources: sources)
+            let legacy = TimelineEntryPresentationValues(entry: entry)
+            XCTAssertEqual(expected.clockText, legacy.clockText)
+            XCTAssertEqual(expected.titleText, legacy.titleText)
+            XCTAssertEqual(expected.subtitleText, legacy.subtitleText)
+            XCTAssertEqual(expected.tertiaryText, legacy.tertiaryText)
+            XCTAssertEqual(expected.iconName, legacy.iconName)
+            XCTAssertEqual(expected.iconTintKind, tintKind)
+            XCTAssertEqual(expected.showsHealthSourceBadge, legacy.showsHealthSourceBadge)
+        }
+
+        let provisionalSample = LocationSample(
+            location: CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 53.468, longitude: 9.698),
+                altitude: 0,
+                horizontalAccuracy: 10,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: 0,
+                timestamp: start.addingTimeInterval(170 * 60)
+            ),
+            source: .significantChange,
+            dedupeKey: "provisional"
+        )
+        let sampleEntry = TimelineEntry.sample(
+            location: provisionalSample,
+            sampleCount: 3,
+            resolvedName: "Current place"
+        )
+        let samplePresentation = TimelineRowPresentation(entry: sampleEntry)
+        XCTAssertEqual(samplePresentation.titleText, "Current place")
+        XCTAssertEqual(samplePresentation.subtitleText, TimelineEntryPresentationValues(entry: sampleEntry).subtitleText)
+        XCTAssertEqual(samplePresentation.tertiaryText, "3 location samples captured")
+    }
+}
+
+private struct TimelineEntryPresentationValues {
+    let clockText: String
+    let titleText: String
+    let subtitleText: String
+    let tertiaryText: String?
+    let iconName: String
+    let showsHealthSourceBadge: Bool
+
+    init(entry: TimelineEntry) {
+        clockText = entry.clockText
+        titleText = entry.titleText
+        subtitleText = entry.subtitleText
+        tertiaryText = entry.tertiaryText
+        iconName = entry.iconName
+        showsHealthSourceBadge = entry.showsHealthSourceBadge
+    }
+}
+
 @MainActor
 final class TimelineAssemblerTests: XCTestCase {
     func testAppStartupCreatesCurrentDaySynchronouslyAndOnlyOnce() throws {
