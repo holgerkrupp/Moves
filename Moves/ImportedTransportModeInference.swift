@@ -153,9 +153,26 @@ actor ImportedTransportModeInferenceWorker {
 
 enum ImportedTransportModeRefinement {
     static func run(in modelContainer: ModelContainer) async {
+        let coordinator = CrossDeviceWorkCoordinator(modelContainer: modelContainer)
+        let workKey = BackgroundWorkKey(
+            kind: "transportInference",
+            partition: "algorithm-v2",
+            version: 2
+        )
+        guard let claim = try? await coordinator.acquire(
+            key: workKey,
+            scope: .accountShared
+        ), case .acquired(let lease) = claim else {
+            return
+        }
+
         let worker = await Task.detached(priority: .utility) {
             ImportedTransportModeInferenceWorker(modelContainer: modelContainer)
         }.value
         _ = await worker.refineUnknownImportedMoves()
+
+        // This is a recurring maintenance pass: release the lease after the
+        // run so a later import can be refined on any eligible device.
+        try? await coordinator.finish(lease, completed: false)
     }
 }

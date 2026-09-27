@@ -36,6 +36,7 @@
 		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
 		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
 		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
+		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; platformFilter = ios; };
 		F60000014000000100000007 /* ExplorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000008 /* ExplorationTests.swift */; };
 		48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
 		48E2BF8C2F9958A3004B7600 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */; };
@@ -94,6 +95,7 @@
 		48F925F4305AD7120011EEA3 /* sydney.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F3305AD7120011EEA3 /* sydney.icon */; };
 		48F925F6305B073A0011EEA3 /* M-stadt.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F5305B073A0011EEA3 /* M-stadt.icon */; };
 		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; platformFilter = ios; };
+		9A1B00012F00000100000010 /* PhotosIntegrationDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */; platformFilter = ios; };
 		A10000012F00000100000002 /* MovesRouteSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000001 /* MovesRouteSupport.swift */; };
 		A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000003 /* MovesTimelineViews.swift */; platformFilter = ios; };
 		A10000012F00000100000006 /* MovesDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000005 /* MovesDetailViews.swift */; platformFilter = ios; };
@@ -135,6 +137,8 @@
 		C10000013000000100000005 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; platformFilter = ios; };
 		C10000013000000100000006 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; };
 		D10000013010000100000001 /* DawarichSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000000 /* DawarichSync.swift */; platformFilter = ios; };
+		E60000014000000100000001 /* CrossDeviceWorkCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */; };
+		E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */; platformFilter = ios; };
 		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; platformFilter = ios; };
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; platformFilter = ios; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; platformFilter = ios; };
@@ -250,6 +254,7 @@
 		F6000001400000010000002E /* ExplorationMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationMapProjection.swift; sourceTree = "<group>"; };
 		F60000014000000100000030 /* ExplorationCountryPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCountryPresence.swift; sourceTree = "<group>"; };
 		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
+		F60000014000000100000034 /* PhotosIntegrationDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebug.swift; sourceTree = "<group>"; };
 		48A8FACE2F85166D000EAECA /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		48F91DF1305A5FF30011EEA3 /* BMW.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = BMW.icon; sourceTree = "<group>"; };
@@ -301,6 +306,7 @@
 		48F925F5305B073A0011EEA3 /* M-stadt.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "M-stadt.icon"; sourceTree = "<group>"; };
 		9A1B00012F00000100000001 /* MovesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAssemblerTests.swift; sourceTree = "<group>"; };
+		9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebugTests.swift; sourceTree = "<group>"; };
 		A10000012F00000100000001 /* MovesRouteSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteSupport.swift; sourceTree = "<group>"; };
 		A10000012F00000100000003 /* MovesTimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesTimelineViews.swift; sourceTree = "<group>"; };
 		A10000012F00000100000005 /* MovesDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesDetailViews.swift; sourceTree = "<group>"; };
@@ -343,6 +349,8 @@
 		C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteTrackingAttributes.swift; sourceTree = "<group>"; };
 		D10000013010000100000000 /* DawarichSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DawarichSync.swift; sourceTree = "<group>"; };
 		D10000013010000100000002 /* DawarichSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DawarichSyncTests.swift; sourceTree = "<group>"; };
+		E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinator.swift; sourceTree = "<group>"; };
+		E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinatorTests.swift; sourceTree = "<group>"; };
 		E10000013020000100000000 /* MovesStatisticsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchView.swift; sourceTree = "<group>"; };
 		E20000013020000100000000 /* MovesStatisticsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchTests.swift; sourceTree = "<group>"; };
 		E21000013020000100000000 /* ImportQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueTests.swift; sourceTree = "<group>"; };
@@ -425,6 +433,7 @@
 		489A76332C4FC6F300F43B69 /* Moves */ = {
 			isa = PBXGroup;
 			children = (
+				E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */,
 				48F91DF0305A5FD70011EEA3 /* Icons */,
 				D10000013010000100000000 /* DawarichSync.swift */,
 				48A8FACE2F85166D000EAECA /* AppIcon.icon */,
@@ -484,6 +493,7 @@
 				F6000001400000010000002E /* ExplorationMapProjection.swift */,
 				F60000014000000100000030 /* ExplorationCountryPresence.swift */,
 				F60000014000000100000032 /* ExplorationFlightTickets.swift */,
+				F60000014000000100000034 /* PhotosIntegrationDebug.swift */,
 				489A763A2C4FC6F500F43B69 /* Assets.xcassets */,
 				489A763C2C4FC6F500F43B69 /* Preview Content */,
 				48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */,
@@ -564,12 +574,14 @@
 		9A1B00012F00000100000003 /* MovesTests */ = {
 			isa = PBXGroup;
 			children = (
+				E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */,
 				F20000013120000100000000 /* MacSearchTests.swift */,
 				D10000013010000100000002 /* DawarichSyncTests.swift */,
 				E20000013020000100000000 /* MovesStatisticsSearchTests.swift */,
 				E21000013020000100000000 /* ImportQueueTests.swift */,
 				E22000013020000100000000 /* ImportStressTests.swift */,
 				9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */,
+				9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */,
 				B41000012FC0000100000002 /* ImportedTransportModeInferenceTests.swift */,
 				F60000014000000100000008 /* ExplorationTests.swift */,
 			);
@@ -884,6 +896,7 @@
 			files = (
 				F10000013100000100000014 /* MovesMacApp.swift in Sources */,
 				D10000013010000100000001 /* DawarichSync.swift in Sources */,
+				E60000014000000100000001 /* CrossDeviceWorkCoordinator.swift in Sources */,
 				489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */,
 				A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */,
 				A40000012FC0000100000001 /* RouteFileImport.swift in Sources */,
@@ -937,6 +950,7 @@
 				F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */,
 				F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */,
 				F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */,
+				F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -946,10 +960,12 @@
 			files = (
 				F20000013120000100000001 /* MacSearchTests.swift in Sources */,
 				D10000013010000100000003 /* DawarichSyncTests.swift in Sources */,
+				E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */,
 				E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */,
 				E21000013020000100000001 /* ImportQueueTests.swift in Sources */,
 				E22000013020000100000001 /* ImportStressTests.swift in Sources */,
 				9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */,
+				9A1B00012F00000100000010 /* PhotosIntegrationDebugTests.swift in Sources */,
 				B41000012FC0000100000003 /* ImportedTransportModeInferenceTests.swift in Sources */,
 				F60000014000000100000007 /* ExplorationTests.swift in Sources */,
 			);
@@ -1177,6 +1193,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Moves uses motion data to improve transport mode inference in your private daily timeline.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Moves reads photo metadata only after you explicitly enable Photos integration.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
@@ -1244,6 +1261,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Moves uses motion data to improve transport mode inference in your private daily timeline.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Moves reads photo metadata only after you explicitly enable Photos integration.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;

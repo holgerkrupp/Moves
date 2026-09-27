@@ -33,6 +33,7 @@ enum DailyTimelineBackupError: LocalizedError {
     case noTimeline(for: Date)
     case couldNotCreateExport
     case fileWasNotWritten
+    case workHandledByAnotherDevice
     case couldNotScheduleBackgroundRun(String)
 
     var errorDescription: String? {
@@ -47,6 +48,8 @@ enum DailyTimelineBackupError: LocalizedError {
             "Moves could not create the backup file."
         case .fileWasNotWritten:
             "Moves created the backup folder, but the backup file could not be written."
+        case .workHandledByAnotherDevice:
+            "Another device is already creating this backup. Moves will retry if the shared file is not available."
         case .couldNotScheduleBackgroundRun(let reason):
             "Moves could not schedule the nightly backup: \(reason)"
         }
@@ -98,21 +101,47 @@ enum DailyTimelineBackup {
         let format = DailyTimelineBackupFormat(
             rawValue: userDefaults.string(forKey: formatKey) ?? "gpx"
         ) ?? .gpx
-        let worker = DailyTimelineBackupWorker(modelContainer: modelContainer)
-        let payload = try await worker.export(
-            dayKey: dayKey,
-            date: yesterday,
-            format: format.timelineExportFormat
+        let destination = destinationDirectory.appendingPathComponent(
+            "Moves-\(dayKey).\(format.timelineExportFormat.fileExtension)"
         )
-
-        let destination = destinationDirectory.appendingPathComponent(payload.filename)
-        try writeCoordinated(payload.data, to: destination)
-        guard FileManager.default.fileExists(atPath: destination.path) else {
-            log.error("Write reported success but no file at \(destination.path, privacy: .public)")
-            throw DailyTimelineBackupError.fileWasNotWritten
+        let coordinator = CrossDeviceWorkCoordinator(modelContainer: modelContainer)
+        let workKey = BackgroundWorkKey(
+            kind: "dailyBackup",
+            partition: "\(dayKey)-\(format.rawValue)",
+            version: 1
+        )
+        let claim = try await coordinator.acquire(key: workKey, scope: .accountShared)
+        guard case .acquired(let lease) = claim else {
+            guard FileManager.default.fileExists(atPath: destination.path) else {
+                throw DailyTimelineBackupError.workHandledByAnotherDevice
+            }
+            return destination
         }
-        log.info("Wrote \(payload.data.count) bytes to \(destination.path, privacy: .public)")
-        return destination
+
+        do {
+            let worker = DailyTimelineBackupWorker(modelContainer: modelContainer)
+            let payload = try await worker.export(
+                dayKey: dayKey,
+                date: yesterday,
+                format: format.timelineExportFormat
+            )
+
+            try writeCoordinated(payload.data, to: destination)
+            guard FileManager.default.fileExists(atPath: destination.path) else {
+                log.error("Write reported success but no file at \(destination.path, privacy: .public)")
+                throw DailyTimelineBackupError.fileWasNotWritten
+            }
+            try? await coordinator.finish(
+                lease,
+                completed: true,
+                completionMarker: destination.lastPathComponent
+            )
+            log.info("Wrote \(payload.data.count) bytes to \(destination.path, privacy: .public)")
+            return destination
+        } catch {
+            try? await coordinator.finish(lease, completed: false)
+            throw error
+        }
     }
 
     /// Writes through `NSFileCoordinator` so iCloud picks the file up for upload

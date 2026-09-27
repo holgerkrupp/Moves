@@ -126,6 +126,7 @@ struct MovesApp: App {
             MoveSegment.self,
             LocationSample.self,
             MovesDeviceProfile.self,
+            CrossDeviceWorkLease.self,
         ])
         let cacheSchema = Schema([ShareMapAggregate.self])
         let schema = Schema([
@@ -135,6 +136,7 @@ struct MovesApp: App {
             MoveSegment.self,
             LocationSample.self,
             MovesDeviceProfile.self,
+            CrossDeviceWorkLease.self,
             ShareMapAggregate.self,
         ])
 

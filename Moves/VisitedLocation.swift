@@ -2888,6 +2888,7 @@ enum DemoDataSeeder {
             MoveSegment.self,
             LocationSample.self,
             MovesDeviceProfile.self,
+            CrossDeviceWorkLease.self,
         ])
         let configuration = ModelConfiguration(
             schema: schema,

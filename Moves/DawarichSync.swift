@@ -7,6 +7,7 @@
 //
 
 import CoreLocation
+import CryptoKit
 import Foundation
 import Security
 import SwiftData
@@ -655,6 +656,7 @@ final class LocationServiceSyncManager: ObservableObject {
     private let modelContainer: ModelContainer
     private let defaults: UserDefaults
     private let client: LocationServiceAPIClient
+    private let crossDeviceWorkCoordinator: CrossDeviceWorkCoordinator
     private var notificationObserver: NSObjectProtocol?
     private var resyncRequested: Set<LocationService> = []
     private static let batchSize = 100
@@ -668,6 +670,7 @@ final class LocationServiceSyncManager: ObservableObject {
         self.modelContainer = modelContainer
         self.defaults = defaults
         self.client = client
+        self.crossDeviceWorkCoordinator = CrossDeviceWorkCoordinator(modelContainer: modelContainer)
         migrateLegacyDawarichDefaultsIfNeeded()
         reloadSettings()
 
@@ -840,39 +843,97 @@ final class LocationServiceSyncManager: ObservableObject {
             }
             let credentials = try LocationServiceKeychain.load(for: service) ?? LocationServiceCredentials()
             let input = connectionInput(for: service)
+            let upperBound = Date.now
+            let workKey = externalSyncWorkKey(
+                service: service,
+                configuration: configuration,
+                input: input,
+                allHistory: allHistory,
+                now: upperBound
+            )
+            let claim = try await crossDeviceWorkCoordinator.acquire(
+                key: workKey,
+                scope: .accountShared
+            )
+            guard case .acquired(let lease) = claim else {
+                updateState(for: service) {
+                    $0.lastOperationFailed = false
+                    $0.lastMessage = "Upload skipped because another device is already handling this source range."
+                }
+                return
+            }
+
             let originalCursor = defaults.object(forKey: key(service, "uploadCursor")) as? Date
             let cursor = allHistory ? Date.distantPast : (originalCursor ?? Date.now)
-            let upperBound = Date.now
             var uploadedCount = 0
 
-            uploadedCount += try await uploadMappedRoutes(
-                createdAfter: cursor,
-                createdThrough: upperBound,
-                configuration: configuration,
-                credentials: credentials,
-                input: input
-            )
-            uploadedCount += try await uploadUnattachedSamples(
-                createdAfter: cursor,
-                createdThrough: upperBound,
-                configuration: configuration,
-                credentials: credentials,
-                input: input
-            )
+            do {
+                uploadedCount += try await uploadMappedRoutes(
+                    createdAfter: cursor,
+                    createdThrough: upperBound,
+                    configuration: configuration,
+                    credentials: credentials,
+                    input: input
+                )
+                uploadedCount += try await uploadUnattachedSamples(
+                    createdAfter: cursor,
+                    createdThrough: upperBound,
+                    configuration: configuration,
+                    credentials: credentials,
+                    input: input
+                )
 
-            defaults.set(max(originalCursor ?? Date.distantPast, upperBound), forKey: key(service, "uploadCursor"))
-            let completedAt = Date.now
-            defaults.set(completedAt, forKey: key(service, "lastSuccess"))
-            updateState(for: service) {
-                $0.lastSuccessfulSyncAt = completedAt
-                $0.lastOperationFailed = false
-                $0.lastMessage = uploadedCount == 0
-                    ? "\(service.title) is up to date."
-                    : "Uploaded \(uploadedCount) route/location point\(uploadedCount == 1 ? "" : "s") to \(service.title)."
+                defaults.set(max(originalCursor ?? Date.distantPast, upperBound), forKey: key(service, "uploadCursor"))
+                let completedAt = Date.now
+                defaults.set(completedAt, forKey: key(service, "lastSuccess"))
+                updateState(for: service) {
+                    $0.lastSuccessfulSyncAt = completedAt
+                    $0.lastOperationFailed = false
+                    $0.lastMessage = uploadedCount == 0
+                        ? "\(service.title) is up to date."
+                        : "Uploaded \(uploadedCount) route/location point\(uploadedCount == 1 ? "" : "s") to \(service.title)."
+                }
+                try? await crossDeviceWorkCoordinator.finish(
+                    lease,
+                    completed: true,
+                    completionMarker: upperBound.timeIntervalSince1970.description
+                )
+            } catch {
+                try? await crossDeviceWorkCoordinator.finish(lease, completed: false)
+                throw error
             }
         } catch {
             record(error: error, for: service)
         }
+    }
+
+    private func externalSyncWorkKey(
+        service: LocationService,
+        configuration: LocationServiceConfiguration,
+        input: LocationServiceConnectionInput,
+        allHistory: Bool,
+        now: Date
+    ) -> BackgroundWorkKey {
+        var identity = [service.rawValue, configuration.baseURL.absoluteString.lowercased()]
+        if [.geoPulse, .ownTracksRecorder].contains(service) {
+            identity.append(input.trackingUsername.lowercased())
+            identity.append(input.deviceID.lowercased())
+        }
+        let destinationFingerprint = SHA256.hash(data: Data(identity.joined(separator: "\u{1f}").utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let bucket: String
+        if allHistory {
+            bucket = "history-\(DayTimeline.makeDayKey(for: now))"
+        } else {
+            let hour = Int(now.timeIntervalSince1970 / (60 * 60))
+            bucket = "incremental-\(hour)"
+        }
+        return BackgroundWorkKey(
+            kind: "externalSync",
+            partition: "\(destinationFingerprint)-\(bucket)",
+            version: 1
+        )
     }
 
     private func uploadMappedRoutes(
