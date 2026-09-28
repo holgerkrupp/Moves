@@ -663,6 +663,9 @@ final class VisitPlace {
     var comment: String? = nil
     /// The source that created this place. Nil keeps older records unchanged.
     var provenanceRawValue: String? = nil
+    /// PhotoKit local identifiers for assets that contributed to this visit.
+    /// Stored as JSON in one optional string to keep the SwiftData/CloudKit field simple.
+    var photoAssetIDsRawValue: String? = nil
     var createdAt: Date = Date.now
 
     var dayTimeline: DayTimeline?
@@ -686,6 +689,25 @@ final class VisitPlace {
     var provenance: VisitPlaceProvenance {
         get { VisitPlaceProvenance(rawValue: provenanceRawValue ?? "") ?? .moves }
         set { provenanceRawValue = newValue.rawValue }
+    }
+
+    var photoAssetIDs: [String] {
+        get {
+            guard let photoAssetIDsRawValue,
+                  let data = photoAssetIDsRawValue.data(using: .utf8),
+                  let values = try? JSONDecoder().decode([String].self, from: data) else {
+                return []
+            }
+            return values
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let value = String(data: data, encoding: .utf8) else {
+                photoAssetIDsRawValue = nil
+                return
+            }
+            photoAssetIDsRawValue = newValue.isEmpty ? nil : value
+        }
     }
 
     init(
@@ -1056,6 +1078,7 @@ struct VisitPlaceSnapshot: Codable {
     let autoLabel: String?
     let comment: String?
     let provenanceRawValue: String?
+    let photoAssetIDsRawValue: String?
     let createdAt: Date
     let dayKey: String?
 }
@@ -1226,6 +1249,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     autoLabel: place.autoLabel,
                     comment: place.comment,
                     provenanceRawValue: place.provenanceRawValue,
+                    photoAssetIDsRawValue: place.photoAssetIDsRawValue,
                     createdAt: place.createdAt,
                     dayKey: place.dayTimeline?.dayKey
                 )
@@ -1306,6 +1330,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             place.deviceIdentifier = placeSnapshot.deviceIdentifier ?? ""
             place.createdAt = placeSnapshot.createdAt
             place.provenanceRawValue = placeSnapshot.provenanceRawValue
+            place.photoAssetIDsRawValue = placeSnapshot.photoAssetIDsRawValue
             if let dayKey = placeSnapshot.dayKey {
                 place.dayTimeline = timelinesByDayKey[dayKey]
             }

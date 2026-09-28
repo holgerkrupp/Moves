@@ -412,6 +412,7 @@ private enum MovesMacSettingsKey {
     static let hasCompletedOnboarding = "Moves.mac.hasCompletedOnboarding"
     static let showsInspector = "Moves.mac.showsInspector"
     static let showsLargeMapMarkers = "showBigMapMarkers"
+    static let showsPhotoThumbnails = "Moves.mac.showsPhotoThumbnails"
     static let selectsLatestDay = "Moves.mac.selectsLatestDay"
     static let showsMapElevation = "Moves.mac.showsMapElevation"
     static let routeLineWidth = "Moves.mac.routeLineWidth"
@@ -778,7 +779,7 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
     var searchTerms: String {
         switch self {
         case .general: "workspace window inspector latest day startup"
-        case .appearance: "map marker route line elevation"
+        case .appearance: "map marker route line elevation photos thumbnails"
         case .importDefaults: "route mapping transport overlap existing data progress menu bar pause stop"
         case .export: "gpx geojson csv places comments"
         case .data: "timeline samples moves imports recovery storage"
@@ -796,6 +797,7 @@ private struct MovesMacSettingsView: View {
     @AppStorage(MovesMacSettingsKey.showsInspector) private var showsInspector = true
     @AppStorage(MovesMacSettingsKey.selectsLatestDay) private var selectsLatestDay = true
     @AppStorage(MovesMacSettingsKey.showsLargeMapMarkers) private var showsLargeMapMarkers = false
+    @AppStorage(MovesMacSettingsKey.showsPhotoThumbnails) private var showsPhotoThumbnails = false
     @AppStorage(MovesMacSettingsKey.showsMapElevation) private var showsMapElevation = true
     @AppStorage(MovesMacSettingsKey.routeLineWidth) private var routeLineWidth = 4.0
     @AppStorage(MovesMacSettingsKey.defaultImportMappingMode) private var defaultMappingMode = RouteFileImportMappingMode.automatic.rawValue
@@ -863,6 +865,9 @@ private struct MovesMacSettingsView: View {
             settingsForm(title: section.title) {
                 Section("Map") {
                     Toggle("Show large place markers", isOn: $showsLargeMapMarkers)
+#if DEBUG
+                    Toggle("Show Photos thumbnails for imported locations", isOn: $showsPhotoThumbnails)
+#endif
                     Toggle("Show realistic map elevation", isOn: $showsMapElevation)
                     LabeledContent("Route line width") {
                         HStack {
@@ -876,7 +881,7 @@ private struct MovesMacSettingsView: View {
                 }
 
                 Section {
-                    Text("These options affect day maps throughout the macOS app.")
+                    Text("These options affect day maps throughout the macOS app. Photos thumbnails are available for locations linked to Apple Photos assets.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1994,7 +1999,9 @@ private struct MacDayWorkspace: View {
 
     private var rows: [MacActivityRow] {
         let places = day.places.map { place in
-            MacActivityRow(startTime: place.arrivalDate.formatted(date: .omitted, time: .shortened), title: place.displayTitle, icon: "mappin.and.ellipse", details: place.departureDate.map { "Until \($0.formatted(date: .omitted, time: .shortened))" } ?? "Still here", metadata: place.comment ?? "Visit", selection: .place(place.id), sortDate: place.arrivalDate)
+            let photoSummary = place.photoAssetIDs.isEmpty ? nil : "\(place.photoAssetIDs.count) Apple Photos asset(s)"
+            let metadata = [photoSummary, place.comment ?? "Visit"].compactMap { $0 }.joined(separator: " · ")
+            return MacActivityRow(startTime: place.arrivalDate.formatted(date: .omitted, time: .shortened), title: place.displayTitle, icon: place.photoAssetIDs.isEmpty ? "mappin.and.ellipse" : "photo.on.rectangle.angled", details: place.departureDate.map { "Until \($0.formatted(date: .omitted, time: .shortened))" } ?? "Still here", metadata: metadata, selection: .place(place.id), sortDate: place.arrivalDate)
         }
         let moves = day.moves.map { move in
             MacActivityRow(startTime: move.timelineStartDate.formatted(date: .omitted, time: .shortened), title: move.transportMode.title, icon: move.transportMode.symbolName, details: "\(formatDistance(move.distanceMeters)) · \(formatDuration(move.timelineDuration))", metadata: move.comment ?? "\(move.samples.count) samples", selection: .move(move.id), sortDate: move.timelineStartDate)
@@ -2023,9 +2030,13 @@ private struct MacDayMap: View {
     let day: DayTimeline
     let initialVisibleRect: MKMapRect?
     @State private var showsLargeMapMarkers: Bool
+    @State private var showsPhotoThumbnails: Bool
     @State private var showsMapElevation: Bool
     @State private var routeLineWidth: Double
     @State private var matchedRoutes: [UUID: MatchedRoute] = [:]
+#if DEBUG
+    @ObservedObject private var photoThumbnailStore = PhotosAssetThumbnailStore.shared
+#endif
 
     init(day: DayTimeline, initialVisibleRect: MKMapRect?) {
         self.day = day
@@ -2033,6 +2044,9 @@ private struct MacDayMap: View {
         let defaults = UserDefaults.standard
         _showsLargeMapMarkers = State(
             initialValue: defaults.object(forKey: MovesMacSettingsKey.showsLargeMapMarkers) as? Bool ?? false
+        )
+        _showsPhotoThumbnails = State(
+            initialValue: defaults.object(forKey: MovesMacSettingsKey.showsPhotoThumbnails) as? Bool ?? false
         )
         _showsMapElevation = State(
             initialValue: defaults.object(forKey: MovesMacSettingsKey.showsMapElevation) as? Bool ?? true
@@ -2057,7 +2071,8 @@ private struct MacDayMap: View {
                 id: $0.id,
                 title: $0.displayTitle,
                 coordinate: $0.coordinate,
-                usesLargeMarker: showsLargeMapMarkers
+                usesLargeMarker: showsLargeMapMarkers,
+                photoAssetID: showsPhotoThumbnails ? $0.photoAssetIDs.first : nil
             )
         }
     }
@@ -2092,7 +2107,13 @@ private struct MacDayMap: View {
 
     private var renderedContentID: String {
         let resolvedKeys = matchedRoutes.keys.map(\.uuidString).sorted().joined(separator: ",")
-        return "\(routeMatchingKey)|\(resolvedKeys)|\(showsLargeMapMarkers)|\(showsMapElevation)|\(routeLineWidth)"
+        let photoKeys = day.places.map { "\($0.id.uuidString):\($0.photoAssetIDs.joined(separator: ","))" }.joined(separator: ";")
+#if DEBUG
+        let loadedPhotoKeys = photoThumbnailStore.images.keys.sorted().joined(separator: ",")
+#else
+        let loadedPhotoKeys = ""
+#endif
+        return "\(routeMatchingKey)|\(resolvedKeys)|\(showsLargeMapMarkers)|\(showsPhotoThumbnails)|\(photoKeys)|\(loadedPhotoKeys)|\(showsMapElevation)|\(routeLineWidth)"
     }
 
     var body: some View {
@@ -2121,9 +2142,11 @@ private struct MacDayMap: View {
     private func refreshMapSettings() {
         let defaults = UserDefaults.standard
         let largeMarkers = defaults.object(forKey: MovesMacSettingsKey.showsLargeMapMarkers) as? Bool ?? false
+        let photoThumbnails = defaults.object(forKey: MovesMacSettingsKey.showsPhotoThumbnails) as? Bool ?? false
         let elevation = defaults.object(forKey: MovesMacSettingsKey.showsMapElevation) as? Bool ?? true
         let lineWidth = (defaults.object(forKey: MovesMacSettingsKey.routeLineWidth) as? NSNumber)?.doubleValue ?? 4
         if showsLargeMapMarkers != largeMarkers { showsLargeMapMarkers = largeMarkers }
+        if showsPhotoThumbnails != photoThumbnails { showsPhotoThumbnails = photoThumbnails }
         if showsMapElevation != elevation { showsMapElevation = elevation }
         if routeLineWidth != lineWidth { routeLineWidth = lineWidth }
     }
@@ -2164,6 +2187,7 @@ private struct MacNativeMap: NSViewRepresentable {
         let title: String
         let coordinate: CLLocationCoordinate2D
         let usesLargeMarker: Bool
+        let photoAssetID: String?
     }
 
     struct Route {
@@ -2179,12 +2203,14 @@ private struct MacNativeMap: NSViewRepresentable {
         let title: String?
         let coordinate: CLLocationCoordinate2D
         let usesLargeMarker: Bool
+        let photoAssetID: String?
 
         init(place: Place) {
             id = place.id
             title = place.title
             coordinate = place.coordinate
             usesLargeMarker = place.usesLargeMarker
+            photoAssetID = place.photoAssetID
         }
     }
 
@@ -2223,14 +2249,37 @@ private struct MacNativeMap: NSViewRepresentable {
             let marker = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
                 ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
             marker.annotation = annotation
-            marker.markerTintColor = .systemBlue
+            marker.markerTintColor = annotation.photoAssetID == nil ? .systemBlue : .systemPink
             marker.glyphImage = NSImage(
                 systemSymbolName: annotation.usesLargeMarker ? "mappin.circle.fill" : "mappin",
                 accessibilityDescription: annotation.title
             )
             marker.canShowCallout = true
+#if DEBUG
+            if let photoAssetID = annotation.photoAssetID {
+                marker.rightCalloutAccessoryView = NSButton(
+                    image: NSImage(systemSymbolName: "arrow.up.right.square", accessibilityDescription: "Open in Photos")!,
+                    target: self,
+                    action: #selector(openPhotoAsset(_:))
+                )
+                (marker.rightCalloutAccessoryView as? NSButton)?.identifier = NSUserInterfaceItemIdentifier(photoAssetID)
+                PhotosAssetThumbnailStore.shared.requestThumbnail(for: photoAssetID)
+                if let thumbnail = PhotosAssetThumbnailStore.shared.images[photoAssetID] {
+                    marker.glyphImage = thumbnail
+                }
+            } else {
+                marker.rightCalloutAccessoryView = nil
+            }
+#endif
             return marker
         }
+
+#if DEBUG
+        @objc func openPhotoAsset(_ sender: NSButton) {
+            guard let assetID = sender.identifier?.rawValue else { return }
+            PhotosAssetOpener.open(assetID: assetID)
+        }
+#endif
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
             guard let polyline = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
@@ -2348,6 +2397,13 @@ private struct MacInspector: View {
             Section("Place") { Text(place.displayTitle).font(.headline); LabeledContent("Arrived", value: place.arrivalDate.formatted(date: .long, time: .shortened)); if let departure = place.departureDate { LabeledContent("Departed", value: departure.formatted(date: .omitted, time: .shortened)) } }
             Section("Location") { LabeledContent("Latitude", value: place.latitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Longitude", value: place.longitude.formatted(.number.precision(.fractionLength(5)))); LabeledContent("Accuracy", value: "±\(MovesMeasurementFormatter.accuracy(meters: place.horizontalAccuracy))") }
             if let comment = place.comment, !comment.isEmpty { Section("Comment") { Text(comment) } }
+#if DEBUG
+            if !place.photoAssetIDs.isEmpty {
+                Section("Photos") {
+                    PhotosAssetReviewView(assetIDs: place.photoAssetIDs)
+                }
+            }
+#endif
             Section("Record") { LabeledContent("ID", value: place.id.uuidString) }
             Section("Actions") {
                 Button("Delete Entry", systemImage: "trash", role: .destructive, action: requestEntryDeletion)

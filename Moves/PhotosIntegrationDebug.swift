@@ -5,6 +5,10 @@ import Foundation
 import Photos
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 
 // This entire integration is intentionally debug-only while the PhotoKit
 // workflow is being exercised against real libraries. The value types below
@@ -575,6 +579,7 @@ enum PhotoVisitImporter {
                 if nearby.comment?.localizedCaseInsensitiveContains("Apple Photos") != true {
                     nearby.comment = [nearby.comment, "Apple Photos: \(candidate.assetIDs.count) asset(s)"].compactMap { $0 }.joined(separator: " · ")
                 }
+                nearby.photoAssetIDs = Array(Set(nearby.photoAssetIDs + candidate.assetIDs)).sorted()
                 enriched += 1
             } else {
                 let place = VisitPlace(
@@ -586,6 +591,7 @@ enum PhotoVisitImporter {
                     comment: "Imported from Apple Photos: \(candidate.assetIDs.count) asset(s)"
                 )
                 place.provenance = .applePhotos
+                place.photoAssetIDs = candidate.assetIDs
                 place.dayTimeline = try timeline(for: candidate.startDate, in: context)
                 context.insert(place)
                 imported += 1
@@ -608,13 +614,14 @@ enum PhotoVisitImporter {
     }
 
     static func deleteAllImportedVisits(in context: ModelContext) throws -> Int {
-        let importedVisits = try context.fetch(FetchDescriptor<VisitPlace>(
-            predicate: #Predicate { place in
-                place.provenanceRawValue == "applePhotos"
+        let visits = try context.fetch(FetchDescriptor<VisitPlace>())
+        let importedVisits = visits.filter { $0.provenance == .applePhotos }
+        for visit in visits where !visit.photoAssetIDs.isEmpty {
+            if visit.provenance == .applePhotos {
+                context.delete(visit)
+            } else {
+                visit.photoAssetIDs = []
             }
-        ))
-        for visit in importedVisits {
-            context.delete(visit)
         }
         try context.save()
         return importedVisits.count
@@ -982,6 +989,125 @@ final class PhotosIntegrationDebugCoordinator: ObservableObject {
         authorizationStatus == .authorized || authorizationStatus == .limited
     }
 }
+
+#if os(macOS)
+@MainActor
+final class PhotosAssetThumbnailStore: ObservableObject {
+    static let shared = PhotosAssetThumbnailStore()
+
+    @Published private(set) var images: [String: NSImage] = [:]
+    private var requestedIDs: Set<String> = []
+
+    func requestThumbnail(for assetID: String) {
+        guard !requestedIDs.contains(assetID), images[assetID] == nil else { return }
+        requestedIDs.insert(assetID)
+
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+        guard let asset = assets.firstObject else { return }
+
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+        PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: CGSize(width: 180, height: 180),
+            contentMode: .aspectFill,
+            options: options
+        ) { [weak self] image, _ in
+            guard let image else { return }
+            Task { @MainActor [weak self] in
+                self?.images[assetID] = image
+            }
+        }
+    }
+}
+
+enum PhotosAssetOpener {
+    static func open(assetID: String) {
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+        guard let asset = assets.firstObject,
+              let resource = PHAssetResource.assetResources(for: asset).first else {
+            return
+        }
+
+        let fileExtension = UTType(resource.uniformTypeIdentifier)?.preferredFilenameExtension ?? "dat"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Moves-Photos-\(UUID().uuidString).\(fileExtension)")
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+
+        PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: options) { error in
+            guard error == nil else { return }
+            DispatchQueue.main.async {
+                if let photosURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Photos") {
+                    NSWorkspace.shared.open(
+                        [url],
+                        withApplicationAt: photosURL,
+                        configuration: NSWorkspace.OpenConfiguration()
+                    )
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+    }
+}
+
+struct PhotosAssetReviewView: View {
+    let assetIDs: [String]
+    @ObservedObject private var thumbnailStore: PhotosAssetThumbnailStore
+
+    init(assetIDs: [String]) {
+        self.assetIDs = assetIDs
+        _thumbnailStore = ObservedObject(wrappedValue: PhotosAssetThumbnailStore.shared)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Apple Photos", systemImage: "photo.on.rectangle.angled")
+                    .font(.headline)
+                Spacer()
+                Text("\(assetIDs.count) asset(s)")
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(assetIDs.prefix(12)), id: \.self) { assetID in
+                        Button {
+                            PhotosAssetOpener.open(assetID: assetID)
+                        } label: {
+                            Group {
+                                if let image = thumbnailStore.images[assetID] {
+                                    Image(nsImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else {
+                                    ProgressView()
+                                }
+                            }
+                            .frame(width: 72, height: 72)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open this asset in Photos")
+                        .task {
+                            thumbnailStore.requestThumbnail(for: assetID)
+                        }
+                    }
+                }
+            }
+
+            Text("Select a thumbnail to open a copy of the asset in Photos.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+#endif
 
 struct PhotosIntegrationDebugView: View {
     @Environment(\.modelContext) private var modelContext

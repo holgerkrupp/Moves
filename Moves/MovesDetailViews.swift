@@ -1502,6 +1502,7 @@ private struct RawPlaceData: Encodable {
     let userLabel: String?
     let autoLabel: String?
     let comment: String?
+    let photoAssetIDsRawValue: String?
     let createdAt: Date
 
     init?(place: VisitPlace?) {
@@ -1515,6 +1516,7 @@ private struct RawPlaceData: Encodable {
         userLabel = place.userLabel
         autoLabel = place.autoLabel
         comment = place.comment
+        photoAssetIDsRawValue = place.photoAssetIDsRawValue
         createdAt = place.createdAt
     }
 }
@@ -1653,6 +1655,7 @@ private struct DeletedPlaceUndoPayload {
     let userLabel: String?
     let autoLabel: String?
     let comment: String?
+    let photoAssetIDsRawValue: String?
     let createdAt: Date
     let dayTimeline: DayTimeline?
     let outgoingMoves: [MoveSegment]
@@ -1668,6 +1671,7 @@ private struct DeletedPlaceUndoPayload {
         userLabel = place.userLabel
         autoLabel = place.autoLabel
         comment = place.comment
+        photoAssetIDsRawValue = place.photoAssetIDsRawValue
         createdAt = place.createdAt
         dayTimeline = place.dayTimeline
         outgoingMoves = place.outgoingMoves
@@ -1690,6 +1694,7 @@ private struct DeletedPlaceUndoPayload {
         )
         restored.id = id
         restored.createdAt = createdAt
+        restored.photoAssetIDsRawValue = photoAssetIDsRawValue
         restored.dayTimeline = dayTimeline
         context.insert(restored)
 
