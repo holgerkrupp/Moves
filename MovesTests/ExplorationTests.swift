@@ -206,6 +206,21 @@ final class ExplorationTests: XCTestCase {
         XCTAssertEqual(historical.first?.dayKey, "2020-01-01")
     }
 
+    func testWorkQueueSnapshotReclaimsExpiredLease() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = ExplorationWorkQueue(rootURL: root)
+        let now = Date(timeIntervalSince1970: 20_000)
+
+        try await queue.enqueue(dayKeys: ["2026-09-28"], lane: .historical)
+        _ = try await queue.claim(maximum: 1, leaseDuration: 1, now: now)
+
+        let snapshot = try await queue.snapshot(now: now.addingTimeInterval(2))
+        XCTAssertEqual(snapshot.queuedCount, 1)
+        XCTAssertEqual(snapshot.processingCount, 0)
+        XCTAssertEqual(snapshot.staleProcessingCount, 0)
+    }
+
     func testDerivedStatisticsAreLatitudeAwareAndRebuildable() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

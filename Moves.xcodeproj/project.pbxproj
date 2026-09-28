@@ -13,32 +13,9 @@
 		489A763E2C4FC6F500F43B69 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763D2C4FC6F500F43B69 /* Preview Assets.xcassets */; };
 		489A76452C4FC70D00F43B69 /* LocationChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76442C4FC70D00F43B69 /* LocationChange.swift */; platformFilter = ios; };
 		489A76492C4FDE1E00F43B69 /* VisitedLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */; };
-		F60000014000000100000001 /* ExplorationRaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000004 /* ExplorationRaster.swift */; };
-		F60000014000000100000002 /* ExplorationShards.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000005 /* ExplorationShards.swift */; };
-		F60000014000000100000003 /* ExplorationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000006 /* ExplorationCache.swift */; };
-		F60000014000000100000009 /* ExplorationPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000A /* ExplorationPreparation.swift */; };
-		F6000001400000010000000B /* ExplorationPreparationDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000C /* ExplorationPreparationDebugView.swift */; platformFilter = ios; };
-		F6000001400000010000000D /* FogOfWorldDebugImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000E /* FogOfWorldDebugImporter.swift */; };
-		F6000001400000010000000F /* ExplorationDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000010 /* ExplorationDebugView.swift */; platformFilter = ios; };
-		F60000014000000100000013 /* ExplorationInsightsDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000014 /* ExplorationInsightsDebugView.swift */; platformFilter = ios; };
-		F60000014000000100000015 /* ExplorationWorkQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000016 /* ExplorationWorkQueue.swift */; };
-		F60000014000000100000017 /* ExplorationStatistics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000018 /* ExplorationStatistics.swift */; };
-		F60000014000000100000019 /* ExplorationRenderHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001A /* ExplorationRenderHierarchy.swift */; };
-		F6000001400000010000001B /* ExplorationAchievements.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001C /* ExplorationAchievements.swift */; };
-		F6000001400000010000001D /* ExplorationFileStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001E /* ExplorationFileStorage.swift */; };
-		F6000001400000010000001F /* ExplorationPreparedMapDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */; platformFilter = ios; };
-		F60000014000000100000021 /* ExplorationPerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000022 /* ExplorationPerformance.swift */; };
-		F60000014000000100000023 /* ExplorationCountryBoundaries.json in Resources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000024 /* ExplorationCountryBoundaries.json */; };
-		F60000014000000100000029 /* ExplorationAdministrativeBoundaries.json in Resources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */; };
-		F60000014000000100000025 /* ExplorationGeography.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000026 /* ExplorationGeography.swift */; };
-		F60000014000000100000027 /* ExplorationTravelEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000028 /* ExplorationTravelEvidence.swift */; };
-		F6000001400000010000002B /* ExplorationGeopoliticalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */; };
-		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
-		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
-		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
-		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; platformFilter = ios; };
-		F60000014000000100000007 /* ExplorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000008 /* ExplorationTests.swift */; };
 		48A8FACF2F85166D000EAECA /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
+		48BE44A630697FC000551B11 /* FogOfWorldKit in Frameworks */ = {isa = PBXBuildFile; productRef = F60000014000000100000012 /* FogOfWorldKit */; };
+		48BE44A730697FC000551B11 /* FogOfWorldKit in Frameworks */ = {isa = PBXBuildFile; productRef = F60000014000000100000012 /* FogOfWorldKit */; };
 		48E2BF8C2F9958A3004B7600 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */; };
 		48F58A842FBAF2BA0027EE58 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
 		48F58A852FBAF2BA0027EE58 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48A8FACE2F85166D000EAECA /* AppIcon.icon */; };
@@ -137,8 +114,6 @@
 		C10000013000000100000005 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; platformFilter = ios; };
 		C10000013000000100000006 /* MovesRouteTrackingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */; };
 		D10000013010000100000001 /* DawarichSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000000 /* DawarichSync.swift */; platformFilter = ios; };
-		E60000014000000100000001 /* CrossDeviceWorkCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */; };
-		E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */; platformFilter = ios; };
 		D10000013010000100000003 /* DawarichSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000013010000100000002 /* DawarichSyncTests.swift */; platformFilter = ios; };
 		E10000013020000100000001 /* MovesStatisticsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000013020000100000000 /* MovesStatisticsSearchView.swift */; platformFilter = ios; };
 		E20000013020000100000001 /* MovesStatisticsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000013020000100000000 /* MovesStatisticsSearchTests.swift */; platformFilter = ios; };
@@ -147,10 +122,37 @@
 		E30000013030000100000001 /* MovesKnownLocationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30000013030000100000000 /* MovesKnownLocationsView.swift */; platformFilter = ios; };
 		E40000013040000100000001 /* MovesHistoryMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000013040000100000000 /* MovesHistoryMapView.swift */; platformFilter = ios; };
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
+		E60000014000000100000001 /* CrossDeviceWorkCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */; };
+		E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */; platformFilter = ios; };
 		F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
 		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
 		F20000013120000100000001 /* MacSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000013120000100000000 /* MacSearchTests.swift */; };
 		F30000013130000100000001 /* ESADesignKit in Frameworks */ = {isa = PBXBuildFile; productRef = F30000013130000100000003 /* ESADesignKit */; };
+		F60000014000000100000001 /* ExplorationRaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000004 /* ExplorationRaster.swift */; };
+		F60000014000000100000002 /* ExplorationShards.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000005 /* ExplorationShards.swift */; };
+		F60000014000000100000003 /* ExplorationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000006 /* ExplorationCache.swift */; };
+		F60000014000000100000007 /* ExplorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000008 /* ExplorationTests.swift */; };
+		F60000014000000100000009 /* ExplorationPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000A /* ExplorationPreparation.swift */; };
+		F6000001400000010000000B /* ExplorationPreparationDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000C /* ExplorationPreparationDebugView.swift */; };
+		F6000001400000010000000D /* FogOfWorldDebugImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000000E /* FogOfWorldDebugImporter.swift */; };
+		F6000001400000010000000F /* ExplorationDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000010 /* ExplorationDebugView.swift */; };
+		F60000014000000100000013 /* ExplorationInsightsDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000014 /* ExplorationInsightsDebugView.swift */; };
+		F60000014000000100000015 /* ExplorationWorkQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000016 /* ExplorationWorkQueue.swift */; };
+		F60000014000000100000017 /* ExplorationStatistics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000018 /* ExplorationStatistics.swift */; };
+		F60000014000000100000019 /* ExplorationRenderHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001A /* ExplorationRenderHierarchy.swift */; };
+		F6000001400000010000001B /* ExplorationAchievements.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001C /* ExplorationAchievements.swift */; };
+		F6000001400000010000001D /* ExplorationFileStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000001E /* ExplorationFileStorage.swift */; };
+		F6000001400000010000001F /* ExplorationPreparedMapDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */; };
+		F60000014000000100000021 /* ExplorationPerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000022 /* ExplorationPerformance.swift */; };
+		F60000014000000100000023 /* ExplorationCountryBoundaries.json in Resources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000024 /* ExplorationCountryBoundaries.json */; };
+		F60000014000000100000025 /* ExplorationGeography.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000026 /* ExplorationGeography.swift */; };
+		F60000014000000100000027 /* ExplorationTravelEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000028 /* ExplorationTravelEvidence.swift */; };
+		F60000014000000100000029 /* ExplorationAdministrativeBoundaries.json in Resources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */; };
+		F6000001400000010000002B /* ExplorationGeopoliticalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */; };
+		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
+		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
+		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
+		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; platformFilter = ios; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -230,31 +232,6 @@
 		489A76462C4FCF1300F43B69 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		489A76472C4FD1A500F43B69 /* Moves.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Moves.entitlements; sourceTree = "<group>"; };
 		489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitedLocation.swift; sourceTree = "<group>"; };
-		F60000014000000100000004 /* ExplorationRaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRaster.swift; sourceTree = "<group>"; };
-		F60000014000000100000005 /* ExplorationShards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationShards.swift; sourceTree = "<group>"; };
-		F60000014000000100000006 /* ExplorationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCache.swift; sourceTree = "<group>"; };
-		F60000014000000100000008 /* ExplorationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationTests.swift; sourceTree = "<group>"; };
-		F6000001400000010000000A /* ExplorationPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparation.swift; sourceTree = "<group>"; };
-		F6000001400000010000000C /* ExplorationPreparationDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparationDebugView.swift; sourceTree = "<group>"; };
-		F6000001400000010000000E /* FogOfWorldDebugImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FogOfWorldDebugImporter.swift; sourceTree = "<group>"; };
-		F60000014000000100000010 /* ExplorationDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationDebugView.swift; sourceTree = "<group>"; };
-		F60000014000000100000014 /* ExplorationInsightsDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationInsightsDebugView.swift; sourceTree = "<group>"; };
-		F60000014000000100000016 /* ExplorationWorkQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationWorkQueue.swift; sourceTree = "<group>"; };
-		F60000014000000100000018 /* ExplorationStatistics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationStatistics.swift; sourceTree = "<group>"; };
-		F6000001400000010000001A /* ExplorationRenderHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRenderHierarchy.swift; sourceTree = "<group>"; };
-		F6000001400000010000001C /* ExplorationAchievements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationAchievements.swift; sourceTree = "<group>"; };
-		F6000001400000010000001E /* ExplorationFileStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFileStorage.swift; sourceTree = "<group>"; };
-		F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparedMapDebugView.swift; sourceTree = "<group>"; };
-		F60000014000000100000022 /* ExplorationPerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPerformance.swift; sourceTree = "<group>"; };
-		F60000014000000100000024 /* ExplorationCountryBoundaries.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExplorationCountryBoundaries.json; sourceTree = "<group>"; };
-		F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExplorationAdministrativeBoundaries.json; sourceTree = "<group>"; };
-		F60000014000000100000026 /* ExplorationGeography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationGeography.swift; sourceTree = "<group>"; };
-		F60000014000000100000028 /* ExplorationTravelEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationTravelEvidence.swift; sourceTree = "<group>"; };
-		F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationGeopoliticalPolicy.swift; sourceTree = "<group>"; };
-		F6000001400000010000002E /* ExplorationMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationMapProjection.swift; sourceTree = "<group>"; };
-		F60000014000000100000030 /* ExplorationCountryPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCountryPresence.swift; sourceTree = "<group>"; };
-		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
-		F60000014000000100000034 /* PhotosIntegrationDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebug.swift; sourceTree = "<group>"; };
 		48A8FACE2F85166D000EAECA /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		48E2BF8B2F9958A3004B7600 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		48F91DF1305A5FF30011EEA3 /* BMW.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = BMW.icon; sourceTree = "<group>"; };
@@ -349,18 +326,43 @@
 		C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteTrackingAttributes.swift; sourceTree = "<group>"; };
 		D10000013010000100000000 /* DawarichSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DawarichSync.swift; sourceTree = "<group>"; };
 		D10000013010000100000002 /* DawarichSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DawarichSyncTests.swift; sourceTree = "<group>"; };
-		E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinator.swift; sourceTree = "<group>"; };
-		E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinatorTests.swift; sourceTree = "<group>"; };
 		E10000013020000100000000 /* MovesStatisticsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchView.swift; sourceTree = "<group>"; };
 		E20000013020000100000000 /* MovesStatisticsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesStatisticsSearchTests.swift; sourceTree = "<group>"; };
 		E21000013020000100000000 /* ImportQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueTests.swift; sourceTree = "<group>"; };
 		E22000013020000100000000 /* ImportStressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportStressTests.swift; sourceTree = "<group>"; };
 		E30000013030000100000000 /* MovesKnownLocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesKnownLocationsView.swift; sourceTree = "<group>"; };
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
+		E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinator.swift; sourceTree = "<group>"; };
+		E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinatorTests.swift; sourceTree = "<group>"; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
 		F10000013100000100000001 /* MovesMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovesMac.entitlements; sourceTree = "<group>"; };
 		F1000001310000010000000E /* RouteCoordinateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteCoordinateStorage.swift; sourceTree = "<group>"; };
 		F20000013120000100000000 /* MacSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchTests.swift; sourceTree = "<group>"; };
+		F60000014000000100000004 /* ExplorationRaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRaster.swift; sourceTree = "<group>"; };
+		F60000014000000100000005 /* ExplorationShards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationShards.swift; sourceTree = "<group>"; };
+		F60000014000000100000006 /* ExplorationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCache.swift; sourceTree = "<group>"; };
+		F60000014000000100000008 /* ExplorationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationTests.swift; sourceTree = "<group>"; };
+		F6000001400000010000000A /* ExplorationPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparation.swift; sourceTree = "<group>"; };
+		F6000001400000010000000C /* ExplorationPreparationDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparationDebugView.swift; sourceTree = "<group>"; };
+		F6000001400000010000000E /* FogOfWorldDebugImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FogOfWorldDebugImporter.swift; sourceTree = "<group>"; };
+		F60000014000000100000010 /* ExplorationDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationDebugView.swift; sourceTree = "<group>"; };
+		F60000014000000100000014 /* ExplorationInsightsDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationInsightsDebugView.swift; sourceTree = "<group>"; };
+		F60000014000000100000016 /* ExplorationWorkQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationWorkQueue.swift; sourceTree = "<group>"; };
+		F60000014000000100000018 /* ExplorationStatistics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationStatistics.swift; sourceTree = "<group>"; };
+		F6000001400000010000001A /* ExplorationRenderHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRenderHierarchy.swift; sourceTree = "<group>"; };
+		F6000001400000010000001C /* ExplorationAchievements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationAchievements.swift; sourceTree = "<group>"; };
+		F6000001400000010000001E /* ExplorationFileStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFileStorage.swift; sourceTree = "<group>"; };
+		F60000014000000100000020 /* ExplorationPreparedMapDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPreparedMapDebugView.swift; sourceTree = "<group>"; };
+		F60000014000000100000022 /* ExplorationPerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationPerformance.swift; sourceTree = "<group>"; };
+		F60000014000000100000024 /* ExplorationCountryBoundaries.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExplorationCountryBoundaries.json; sourceTree = "<group>"; };
+		F60000014000000100000026 /* ExplorationGeography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationGeography.swift; sourceTree = "<group>"; };
+		F60000014000000100000028 /* ExplorationTravelEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationTravelEvidence.swift; sourceTree = "<group>"; };
+		F6000001400000010000002A /* ExplorationAdministrativeBoundaries.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExplorationAdministrativeBoundaries.json; sourceTree = "<group>"; };
+		F6000001400000010000002C /* ExplorationGeopoliticalPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationGeopoliticalPolicy.swift; sourceTree = "<group>"; };
+		F6000001400000010000002E /* ExplorationMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationMapProjection.swift; sourceTree = "<group>"; };
+		F60000014000000100000030 /* ExplorationCountryPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCountryPresence.swift; sourceTree = "<group>"; };
+		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
+		F60000014000000100000034 /* PhotosIntegrationDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebug.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -368,6 +370,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				48BE44A630697FC000551B11 /* FogOfWorldKit in Frameworks */,
 				A50000012FD0000100000002 /* CloudDataPresence in Frameworks */,
 				E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */,
 				F30000013130000100000001 /* ESADesignKit in Frameworks */,
@@ -378,6 +381,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				48BE44A730697FC000551B11 /* FogOfWorldKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1164,7 +1168,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Moves/Moves.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1193,8 +1197,8 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Moves uses motion data to improve transport mode inference in your private daily timeline.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Moves reads photo metadata only after you explicitly enable Photos integration.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Moves reads photo metadata only after you explicitly enable Photos integration.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphonesimulator*]" = YES;
@@ -1210,7 +1214,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1232,7 +1236,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Moves/Moves.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1261,8 +1265,8 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Moves records your visits and routes on this device only to build your private daily timeline.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Moves uses motion data to improve transport mode inference in your private daily timeline.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Moves reads photo metadata only after you explicitly enable Photos integration.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save images to the library";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Moves reads photo metadata only after you explicitly enable Photos integration.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_NSSupportsLiveActivities[sdk=iphonesimulator*]" = YES;
@@ -1278,7 +1282,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1353,14 +1357,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Moves Watch App/MovesWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1379,14 +1383,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Moves Watch App/MovesWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1405,7 +1409,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1413,7 +1417,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1432,7 +1436,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1440,7 +1444,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1459,7 +1463,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1467,7 +1471,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1486,7 +1490,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 100;
+				CURRENT_PROJECT_VERSION = 111;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1494,7 +1498,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.20;
+				MARKETING_VERSION = 2026.21;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1567,13 +1571,13 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/FogOfWorldKit;
-		};
 		F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../ESADesignKit;
+		};
+		F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FogOfWorldKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 

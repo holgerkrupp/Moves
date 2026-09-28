@@ -98,6 +98,8 @@ struct DayTimelinePageContent: View {
     @State private var presentationGeneration = 0
     @State private var importedDataStatus: Bool?
     @State private var isReviewingImportedData = false
+    @State private var isShowingFullScreenMap = false
+    @State private var timelineScrollOffset: CGFloat = 0
     @State private var pendingDeletionEntry: TimelineEntry?
     @State private var deletionErrorMessage = ""
     @State private var isShowingDeletionError = false
@@ -455,6 +457,11 @@ struct DayTimelinePageContent: View {
             .safeAreaPadding(.horizontal, 14)
             .safeAreaPadding(.bottom, 24)
         }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            max(0, geometry.contentOffset.y + geometry.contentInsets.top)
+        } action: { _, newOffset in
+            timelineScrollOffset = newOffset
+        }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollingHero(
             height: DayMapStrip.collapsedMapHeight,
@@ -465,8 +472,29 @@ struct DayTimelinePageContent: View {
                 isActive: isActive,
                 selection: $mapSelection,
                 fillsAvailableSpace: true,
-                usesHeroStyle: true
+                usesHeroStyle: true,
+                fullScreenMapState: $isShowingFullScreenMap
             )
+        }
+        .overlay(alignment: .top) {
+            if horizontalSizeClass == .compact {
+                let buttonOpacity = max(0, 1 - min(timelineScrollOffset / 28, 1))
+
+                VStack {
+                    Spacer()
+
+                    HStack {
+                        Spacer()
+                        TimelineFullScreenMapButton(isFullScreen: $isShowingFullScreenMap)
+                            .padding(10)
+                            .opacity(buttonOpacity)
+                            .allowsHitTesting(buttonOpacity > 0.01)
+                            .accessibilityHidden(buttonOpacity <= 0.01)
+                    }
+                }
+                .frame(height: DayMapStrip.collapsedMapHeight)
+                .animation(.easeOut(duration: 0.16), value: buttonOpacity <= 0.01)
+            }
         }
     }
 
@@ -1846,6 +1874,41 @@ enum TimelinePresentationCacheInvalidator {
     }
 }
 
+private struct TimelineFullScreenMapButton: View {
+    private static let animation = Animation.spring(response: 0.42, dampingFraction: 0.86)
+
+    let isFullScreen: Bool
+    let action: () -> Void
+
+    init(isFullScreen: Binding<Bool>) {
+        self.isFullScreen = isFullScreen.wrappedValue
+        self.action = {
+            withAnimation(Self.animation) {
+                isFullScreen.wrappedValue.toggle()
+            }
+        }
+    }
+
+    init(isFullScreen: Bool, action: @escaping () -> Void) {
+        self.isFullScreen = isFullScreen
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 52, height: 52)
+        .contentShape(Circle())
+        .frostedCircle(enabled: true)
+        .accessibilityLabel(isFullScreen ? "Shrink map" : "Expand map")
+        .help(isFullScreen ? "Shrink map" : "Expand map")
+    }
+}
+
 struct DayMapStrip: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @Environment(\.colorScheme) private var colorScheme
@@ -1855,6 +1918,7 @@ struct DayMapStrip: View {
     @Binding var selection: TimelineMapSelection?
     let fillsAvailableSpace: Bool
     let usesHeroStyle: Bool
+    private let externalFullScreenMapState: Binding<Bool>?
     static let collapsedMapHeight: CGFloat = 180
     private static let collapsedMapCornerRadius: CGFloat = 14
     private static let fullScreenMapAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
@@ -1865,7 +1929,7 @@ struct DayMapStrip: View {
     @State private var historicalRoutes: [RenderedRoute]
     @State private var presentationCache: DayMapPresentationCache
     @State private var presentationGeneration = 0
-    @State private var isShowingFullScreenMap = false
+    @State private var localIsShowingFullScreenMap = false
     @State private var collapsedSnapshotImage: UIImage?
     @State private var collapsedSnapshotKey: String?
 
@@ -1899,13 +1963,15 @@ struct DayMapStrip: View {
         isActive: Bool,
         selection: Binding<TimelineMapSelection?> = .constant(nil),
         fillsAvailableSpace: Bool = false,
-        usesHeroStyle: Bool = false
+        usesHeroStyle: Bool = false,
+        fullScreenMapState: Binding<Bool>? = nil
     ) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
         _selection = selection
         self.fillsAvailableSpace = fillsAvailableSpace
         self.usesHeroStyle = usesHeroStyle
+        self.externalFullScreenMapState = fullScreenMapState
         let initialPresentation: DayMapPresentationCache
         if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey) {
             initialPresentation = cached
@@ -1946,13 +2012,16 @@ struct DayMapStrip: View {
                 }
             }
             .overlay(alignment: isShowingFullScreenMap ? .topTrailing : .bottomTrailing) {
-                if !fillsAvailableSpace {
-                    fullScreenToggleButton(isFullScreen: isShowingFullScreenMap)
+                if externalFullScreenMapState == nil {
+                    TimelineFullScreenMapButton(isFullScreen: fullScreenMapState)
                         .padding(isShowingFullScreenMap ? 18 : 10)
                 }
             }
             .shadow(color: .black.opacity(isShowingFullScreenMap ? 0.12 : 0), radius: 18, x: 0, y: 8)
             .animation(Self.fullScreenMapAnimation, value: isShowingFullScreenMap)
+            .fullScreenCover(isPresented: fullScreenMapPresentationBinding) {
+                fullScreenMapView
+            }
             .task(id: "\(cameraRefreshKey)|\(dayTimeline.dayKey)|\(isActive ? 1 : 0)") {
                 guard isActive else { return }
                 refreshCamera()
@@ -2039,6 +2108,38 @@ struct DayMapStrip: View {
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
+    }
+
+    private var fullScreenMapPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { fillsAvailableSpace && isShowingFullScreenMap },
+            set: { isPresented in
+                if !isPresented {
+                    fullScreenMapState.wrappedValue = false
+                }
+            }
+        )
+    }
+
+    private var fullScreenMapState: Binding<Bool> {
+        externalFullScreenMapState ?? $localIsShowingFullScreenMap
+    }
+
+    private var isShowingFullScreenMap: Bool {
+        fullScreenMapState.wrappedValue
+    }
+
+    private var fullScreenMapView: some View {
+        ZStack(alignment: .topTrailing) {
+            mapView
+                .ignoresSafeArea()
+
+            TimelineFullScreenMapButton(isFullScreen: true, action: {
+                fullScreenMapState.wrappedValue = false
+            })
+                .padding(18)
+        }
+        .background(Color.black)
     }
 
     private var collapsedMapSnapshotView: some View {
@@ -2152,23 +2253,6 @@ struct DayMapStrip: View {
     private var isSampleSelected: Bool {
         guard case .sample = selection else { return false }
         return true
-    }
-
-    private func fullScreenToggleButton(isFullScreen: Bool) -> some View {
-        Button {
-            withAnimation(Self.fullScreenMapAnimation) {
-                isShowingFullScreenMap = !isFullScreen
-            }
-        } label: {
-            Image(systemName: isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .frame(width: 40, height: 40)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .frostedCircle(enabled: true)
-        .accessibilityLabel(isFullScreen ? "Shrink map" : "Expand map")
-        .help(isFullScreen ? "Shrink map" : "Expand map")
     }
 
     private static var expandedMapHeight: CGFloat {

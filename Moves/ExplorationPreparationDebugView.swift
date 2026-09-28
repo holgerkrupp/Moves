@@ -1,15 +1,19 @@
 #if DEBUG
 import Foundation
+import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct ExplorationPreparationDebugView: View {
+    @Environment(\.modelContext) private var modelContext
     @AppStorage(ExplorationPreparation.isEnabledKey) private var preparationIsEnabled = false
     @State private var statistics: ExplorationPreparationStatistics?
     @State private var queueSnapshot: ExplorationWorkQueueSnapshot?
     @State private var errorMessage: String?
+    @State private var sliceMessage: String?
     @State private var isConfirmingReset = false
     @State private var isResetting = false
+    @State private var isRunningSlice = false
     @State private var isRebuildingCache = false
     @State private var isShowingFogImporter = false
     @State private var isImportingFog = false
@@ -34,6 +38,28 @@ struct ExplorationPreparationDebugView: View {
                 Text("This switch is DEBUG-only. It enables bounded background preparation for testing and never exposes Exploration navigation in a release build.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+
+                Button {
+                    Task { @MainActor in
+                        await runOnePreparationSlice()
+                    }
+                } label: {
+                    Label(
+                        isRunningSlice ? "Running preparation slice…" : "Run one preparation slice",
+                        systemImage: "play.fill"
+                    )
+                }
+                .disabled(isRunningSlice || isResetting || isRebuildingCache)
+
+                Text("Processes at most one bounded DayTimeline work unit. This does not enable automatic background scheduling.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if let sliceMessage {
+                    Text(sliceMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
 
                 if let statistics {
                     debugRow("State", stateText(for: statistics.checkpoint.readiness))
@@ -185,7 +211,9 @@ struct ExplorationPreparationDebugView: View {
             }
         }
         .navigationTitle("Exploration Prep")
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
         .task {
             await refreshLoop()
         }
@@ -254,6 +282,30 @@ struct ExplorationPreparationDebugView: View {
             errorMessage = nil
         } catch {
             errorMessage = "Could not read preparation checkpoint: \(error.localizedDescription)"
+        }
+    }
+
+    private func runOnePreparationSlice() async {
+        guard !isRunningSlice else { return }
+        isRunningSlice = true
+        sliceMessage = "Preparing one bounded history slice…"
+        errorMessage = nil
+        defer { isRunningSlice = false }
+
+        do {
+            let result = try await ExplorationPreparation.runSlice(in: modelContext.container)
+            statistics = ExplorationPreparationStatistics(checkpoint: result.checkpoint)
+            queueSnapshot = try await ExplorationWorkQueue.shared.snapshot()
+            if result.daysProcessed == 0 {
+                sliceMessage = "No unprepared DayTimeline work unit is available."
+            } else {
+                sliceMessage = "Prepared \(result.daysProcessed.formatted()) day, \(result.routesProcessed.formatted()) route(s), and \(result.blocksWritten.formatted()) block(s)."
+            }
+        } catch is CancellationError {
+            sliceMessage = "Preparation slice cancelled. It can be run again safely."
+        } catch {
+            sliceMessage = nil
+            errorMessage = "Could not run preparation slice: \(error.localizedDescription)"
         }
     }
 

@@ -26,6 +26,9 @@ struct ExplorationPreparationCheckpoint: Codable, Equatable, Sendable {
     var totalDayCount: Int?
     var processedDayCount = 0
     var isProcessing = false
+    /// Lease used to recover a checkpoint left in the processing state after
+    /// termination or a background-task expiration.
+    var processingLeaseUntil: Date?
     var updatedAt = Date.distantPast
 
     private enum CodingKeys: String, CodingKey {
@@ -37,6 +40,7 @@ struct ExplorationPreparationCheckpoint: Codable, Equatable, Sendable {
         case totalDayCount
         case processedDayCount
         case isProcessing
+        case processingLeaseUntil
         case updatedAt
     }
 
@@ -52,6 +56,7 @@ struct ExplorationPreparationCheckpoint: Codable, Equatable, Sendable {
         totalDayCount = try container.decodeIfPresent(Int.self, forKey: .totalDayCount)
         processedDayCount = try container.decodeIfPresent(Int.self, forKey: .processedDayCount) ?? preparedShardCount
         isProcessing = try container.decodeIfPresent(Bool.self, forKey: .isProcessing) ?? false
+        processingLeaseUntil = try container.decodeIfPresent(Date.self, forKey: .processingLeaseUntil)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
 }
@@ -237,7 +242,14 @@ enum ExplorationPreparation {
     static let isEnabledKey = "Moves.exploration.phaseA.enabled"
 
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+#if DEBUG
         userDefaults.bool(forKey: isEnabledKey)
+#else
+        // Phase A is intentionally silent in release builds. The preparation
+        // worker is bounded and disposable, so production devices can slowly
+        // build the data needed by the later user-facing Exploration rollout.
+        true
+#endif
     }
 
     /// Runs at most one bounded historical source unit by default. Nothing calls
@@ -256,8 +268,17 @@ enum ExplorationPreparation {
         var checkpoint = try await checkpointStore.load()
         let sourceWorker = ExplorationPreparationSourceWorker(modelContainer: modelContainer)
 
+        let now = Date.now
         if checkpoint.startedAt == nil {
-            checkpoint.startedAt = .now
+            checkpoint.startedAt = now
+        }
+        let checkpointLeaseExpired = checkpoint.processingLeaseUntil.map { $0 <= now }
+            ?? (checkpoint.updatedAt.addingTimeInterval(15 * 60) <= now)
+        if checkpoint.isProcessing, checkpointLeaseExpired {
+            // Checkpoints written by older builds have no lease field. An old
+            // processing marker is therefore treated as abandoned as well.
+            checkpoint.isProcessing = false
+            checkpoint.processingLeaseUntil = nil
         }
         // Count the bounded DayTimeline work units, not LocationSample rows. This is
         // persisted for the debug projection and is never performed by SwiftUI.
@@ -266,23 +287,28 @@ enum ExplorationPreparation {
         checkpoint.processedDayCount = max(checkpoint.processedDayCount, checkpoint.preparedShardCount)
         checkpoint.readiness = .preparing
         checkpoint.isProcessing = true
-        checkpoint.updatedAt = .now
+        checkpoint.processingLeaseUntil = now.addingTimeInterval(15 * 60)
+        checkpoint.updatedAt = now
         try await checkpointStore.save(checkpoint)
 
         let workQueue = ExplorationWorkQueue.shared
         let claimedWork = try await workQueue.claim(maximum: 1)
         var claimedWorkID = claimedWork.first?.id
         var claimedWorkCompleted = false
+        var deferredCleanupRequired = true
 
         defer {
-            Task {
-                if let claimedWorkID, !claimedWorkCompleted {
-                    try? await workQueue.retry(claimedWorkID, error: "Preparation slice ended before completion")
+            if deferredCleanupRequired {
+                Task {
+                    if let claimedWorkID, !claimedWorkCompleted {
+                        try? await workQueue.retry(claimedWorkID, error: "Preparation slice ended before completion")
+                    }
+                    var finalCheckpoint = (try? await checkpointStore.load()) ?? checkpoint
+                    finalCheckpoint.isProcessing = false
+                    finalCheckpoint.processingLeaseUntil = nil
+                    finalCheckpoint.updatedAt = .now
+                    try? await checkpointStore.save(finalCheckpoint)
                 }
-                var finalCheckpoint = (try? await checkpointStore.load()) ?? checkpoint
-                finalCheckpoint.isProcessing = false
-                finalCheckpoint.updatedAt = .now
-                try? await checkpointStore.save(finalCheckpoint)
             }
         }
 
@@ -301,7 +327,9 @@ enum ExplorationPreparation {
             guard let historicalInput = try await sourceWorker.nextDay(after: checkpoint.nextDayKey, maximumRoutes: budget.maximumRoutes) else {
                 checkpoint.readiness = checkpoint.preparedShardCount == 0 ? .notStarted : .ready
                 checkpoint.isProcessing = false
+                checkpoint.processingLeaseUntil = nil
                 try await checkpointStore.save(checkpoint)
+                deferredCleanupRequired = false
                 return ExplorationPreparationResult(daysProcessed: 0, routesProcessed: 0, blocksWritten: 0, checkpoint: checkpoint)
             }
             input = historicalInput
@@ -309,10 +337,18 @@ enum ExplorationPreparation {
         }
 
         if input.routes.isEmpty && input.visits.isEmpty && !isQueuedWork {
-            checkpoint.readiness = checkpoint.preparedShardCount == 0 ? .notStarted : .ready
+            // Quiet days still advance the durable cursor. Otherwise the first
+            // empty DayTimeline would stop historical preparation permanently.
+            checkpoint.nextDayKey = input.dayKey
+            checkpoint.processedThroughDayKey = input.dayKey
+            checkpoint.processedDayCount += 1
+            checkpoint.readiness = .partiallyReady
             checkpoint.isProcessing = false
+            checkpoint.processingLeaseUntil = nil
+            checkpoint.updatedAt = .now
             try await checkpointStore.save(checkpoint)
-            return ExplorationPreparationResult(daysProcessed: 0, routesProcessed: 0, blocksWritten: 0, checkpoint: checkpoint)
+            deferredCleanupRequired = false
+            return ExplorationPreparationResult(daysProcessed: 1, routesProcessed: 0, blocksWritten: 0, checkpoint: checkpoint)
         }
 
         try Task.checkCancellation()
@@ -320,9 +356,11 @@ enum ExplorationPreparation {
         let sources = ExplorationShardFileStore(rootURL: rootURL)
         let sourceID = "day:\(input.dayKey)"
         let previousRevision = try await sources.read(sourceID: sourceID)?.revision ?? 0
-        let shard = try ExplorationPerformance.measure("shard generation") {
-            try makeShard(from: input, revision: previousRevision + 1, budget: budget)
-        }
+        let shard = try await Task.detached(priority: .utility) {
+            try ExplorationPerformance.measure("shard generation") {
+                try makeShard(from: input, revision: previousRevision + 1, budget: budget)
+            }
+        }.value
         let cache = ExplorationMergedCache(rootURL: rootURL, shardStore: sources)
         try await cache.replaceShard(shard)
         // Keep the compact country-day index moving with the same bounded
@@ -342,14 +380,53 @@ enum ExplorationPreparation {
         }
         checkpoint.readiness = .partiallyReady
         checkpoint.isProcessing = false
+        checkpoint.processingLeaseUntil = nil
         checkpoint.updatedAt = .now
         try await checkpointStore.save(checkpoint)
+        deferredCleanupRequired = false
         return ExplorationPreparationResult(
             daysProcessed: 1,
             routesProcessed: input.routes.count,
             blocksWritten: shard.blocks.count,
             checkpoint: checkpoint
         )
+    }
+
+    /// Runs several independently checkpointed day slices during one
+    /// opportunistic overnight window. Each iteration remains bounded and
+    /// cancellable; the window stops at the first resource/cancellation signal,
+    /// when the backlog is exhausted, or when either cap is reached.
+    static func runBackgroundWindow(
+        in modelContainer: ModelContainer,
+        rootURL: URL = ExplorationStorageLocations.rootURL,
+        sliceBudget: ExplorationPreparationBudget = ExplorationPreparationBudget(),
+        maximumDays: Int = 16,
+        maximumDuration: TimeInterval = 120
+    ) async throws -> [ExplorationPreparationResult] {
+        guard maximumDays > 0, maximumDuration > 0 else { return [] }
+        let deadline = Date().addingTimeInterval(maximumDuration)
+        var results: [ExplorationPreparationResult] = []
+        results.reserveCapacity(maximumDays)
+
+        while results.count < maximumDays, Date() < deadline {
+            try Task.checkCancellation()
+            try await ExplorationPreparationResourceGate.check()
+
+            var boundedBudget = sliceBudget
+            boundedBudget.maximumDays = 1
+            let result = try await runSlice(
+                in: modelContainer,
+                rootURL: rootURL,
+                budget: boundedBudget
+            )
+            results.append(result)
+
+            // A zero-day result means there is no next DayTimeline work unit.
+            if result.daysProcessed == 0 { break }
+            await Task.yield()
+        }
+
+        return results
     }
 
     private static func makeShard(
@@ -461,14 +538,29 @@ enum ExplorationPreparationBackgroundTask {
         }
     }
 
-    static func schedule() {
+    static func schedule(now: Date = .now) {
         guard ExplorationPreparation.isEnabled() else { return }
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: taskIdentifier)
         let request = BGProcessingTaskRequest(identifier: taskIdentifier)
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower = false
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        // Preparation is intentionally an overnight opportunistic job. The
+        // system may delay it further, but repeated app launches must not turn
+        // this into a foreground-adjacent polling loop.
+        request.earliestBeginDate = nextRunDate(now: now)
         try? BGTaskScheduler.shared.submit(request)
+    }
+
+    static func nextRunDate(
+        now: Date = .now,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Date {
+        let startOfToday = calendar.startOfDay(for: now)
+        if let tonight = calendar.date(bySettingHour: 3, minute: 0, second: 0, of: startOfToday), tonight > now {
+            return tonight
+        }
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? now
+        return calendar.date(bySettingHour: 3, minute: 0, second: 0, of: tomorrow) ?? tomorrow
     }
 
     private static func handle(_ task: BGProcessingTask) {
@@ -476,7 +568,7 @@ enum ExplorationPreparationBackgroundTask {
         let work = Task {
             do {
                 let container = try await MainActor.run { try MovesApp.makeModelContainer() }
-                _ = try await ExplorationPreparation.runSlice(in: container)
+                _ = try await ExplorationPreparation.runBackgroundWindow(in: container)
                 task.setTaskCompleted(success: !Task.isCancelled)
             } catch {
                 task.setTaskCompleted(success: false)

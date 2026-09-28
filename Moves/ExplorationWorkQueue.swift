@@ -134,15 +134,17 @@ actor ExplorationWorkQueue {
 
     func snapshot(now: Date = .now) throws -> ExplorationWorkQueueSnapshot {
         try loadIfNeeded()
-        let stale = items.values.filter {
-            $0.state == .processing && ($0.leaseUntil ?? .distantPast) <= now
-        }.count
+        // A process termination can leave a leased item behind. Reading the
+        // debug view is also a recovery opportunity; reporting the item as
+        // stale without re-queuing it would make the queue look permanently
+        // blocked until another worker happened to claim it.
+        _ = try recoverExpired(now: now)
         var counts = [ExplorationWorkLane: Int]()
         for item in items.values { counts[item.lane, default: 0] += 1 }
         return ExplorationWorkQueueSnapshot(
             queuedCount: items.values.filter { $0.state == .queued }.count,
             processingCount: items.values.filter { $0.state == .processing }.count,
-            staleProcessingCount: stale,
+            staleProcessingCount: 0,
             countsByLane: counts
         )
     }

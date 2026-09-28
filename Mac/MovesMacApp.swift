@@ -58,6 +58,9 @@ private final class MovesMacAppDelegate: NSObject, NSApplicationDelegate {
 struct MovesMacApp: App {
     private static let mainWindowID = "moves.main-window"
     private static let aboutWindowID = "moves.about-window"
+#if DEBUG
+    private static let explorationDebugWindowID = "moves.exploration-debug-window"
+#endif
 
     @NSApplicationDelegateAdaptor(MovesMacAppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
@@ -136,7 +139,13 @@ struct MovesMacApp: App {
                     }
                 }
 
-                MovesMacCommands()
+                MovesMacCommands(
+                    openExplorationDebug: {
+#if DEBUG
+                        openWindow(id: Self.explorationDebugWindowID)
+#endif
+                    }
+                )
             }
 
         Settings {
@@ -151,6 +160,14 @@ struct MovesMacApp: App {
         }
         .defaultSize(width: 420, height: 390)
         .windowResizability(.contentSize)
+
+#if DEBUG
+        Window("Exploration Debug", id: Self.explorationDebugWindowID) {
+            ExplorationDebugView()
+                .modelContainer(modelContainer)
+        }
+        .defaultSize(width: 980, height: 760)
+#endif
 
         MenuBarExtra(isInserted: importMenuBarInsertion) {
             MacImportMenuBarView(
@@ -457,6 +474,7 @@ private extension FocusedValues {
 }
 
 private struct MovesMacCommands: Commands {
+    let openExplorationDebug: () -> Void
     @FocusedValue(\.movesMacCommandActions) private var actions
 
     var body: some Commands {
@@ -525,6 +543,12 @@ private struct MovesMacCommands: Commands {
                 )
             }
             .disabled(actions == nil)
+
+            Divider()
+
+            Button("Exploration Debug") {
+                openExplorationDebug()
+            }
         }
 #endif
 
@@ -756,9 +780,6 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
 
 private struct MovesMacSettingsView: View {
     @EnvironmentObject private var importCoordinator: ImportCoordinator
-    @Query private var samples: [LocationSample]
-    @Query private var moves: [MoveSegment]
-    @Query private var timelines: [DayTimeline]
 
     @AppStorage(MovesMacSettingsKey.showsInspector) private var showsInspector = true
     @AppStorage(MovesMacSettingsKey.selectsLatestDay) private var selectsLatestDay = true
@@ -907,25 +928,7 @@ private struct MovesMacSettingsView: View {
             }
 
         case .data:
-            settingsForm(title: section.title) {
-                Section("Timeline") {
-                    LabeledContent("Recorded days", value: timelines.filter(\.hasRecordedActivity).count.formatted())
-                    LabeledContent("Moves", value: moves.count.formatted())
-                    LabeledContent("Location samples", value: samples.count.formatted())
-                }
-
-                Section("Imports") {
-                    LabeledContent("Imported moves", value: moves.filter { $0.samples.contains { $0.source == .fileRouteImport } }.count.formatted())
-                    LabeledContent("Imported samples", value: samples.filter { $0.source == .fileRouteImport }.count.formatted())
-                    LabeledContent("Active jobs", value: importCoordinator.snapshot.unfinishedJobs.count.formatted())
-                    LabeledContent("Needs attention", value: importCoordinator.unresolvedRecoveryCount.formatted())
-                }
-
-                Section {
-                    Text("Moves stores timeline data in your private iCloud container and keeps imported-route recovery information locally.")
-                        .foregroundStyle(.secondary)
-                }
-            }
+            MovesMacDataSettingsDetailView(importCoordinator: importCoordinator)
 
         case .about:
             settingsForm(title: section.title) {
@@ -965,6 +968,37 @@ private struct MovesMacSettingsView: View {
         .navigationTitle(title)
     }
 
+}
+
+private struct MovesMacDataSettingsDetailView: View {
+    @ObservedObject var importCoordinator: ImportCoordinator
+    @Query private var samples: [LocationSample]
+    @Query private var moves: [MoveSegment]
+    @Query private var timelines: [DayTimeline]
+
+    var body: some View {
+        Form {
+            Section("Timeline") {
+                LabeledContent("Recorded days", value: timelines.filter(\.hasRecordedActivity).count.formatted())
+                LabeledContent("Moves", value: moves.count.formatted())
+                LabeledContent("Location samples", value: samples.count.formatted())
+            }
+
+            Section("Imports") {
+                LabeledContent("Imported moves", value: moves.filter { $0.samples.contains { $0.source == .fileRouteImport } }.count.formatted())
+                LabeledContent("Imported samples", value: samples.filter { $0.source == .fileRouteImport }.count.formatted())
+                LabeledContent("Active jobs", value: importCoordinator.snapshot.unfinishedJobs.count.formatted())
+                LabeledContent("Needs attention", value: importCoordinator.unresolvedRecoveryCount.formatted())
+            }
+
+            Section {
+                Text("Moves stores timeline data in your private iCloud container and keeps imported-route recovery information locally.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(MovesMacSettingsSection.data.title)
+    }
 }
 
 private struct MovesMacAboutView: View {

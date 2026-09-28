@@ -537,6 +537,9 @@
     "Discard" : {
 
     },
+    "Discard candidate" : {
+
+    },
     "Discard saved import" : {
 
     },
@@ -568,6 +571,9 @@
 
     },
     "Duplicate Activity" : {
+
+    },
+    "Duplicate awaiting review" : {
 
     },
     "Duration" : {
@@ -669,7 +675,7 @@
     "Files" : {
 
     },
-    "Files with ambiguous or missing timestamps will appear here before any timeline data is written." : {
+    "Files with duplicate content, ambiguous timestamps, or failures will appear here before they block the rest of an import." : {
 
     },
     "Fill Missing Moves" : {
@@ -784,6 +790,9 @@
 
     },
     "Import (job.displayName)" : {
+
+    },
+    "Import anyway" : {
 
     },
     "Import failed" : {
@@ -1069,13 +1078,13 @@
     "No Connections Found" : {
 
     },
-    "No Failed Imports" : {
-
-    },
     "No GPX data in this time span" : {
 
     },
     "No History" : {
+
+    },
+    "No Import Recovery Items" : {
 
     },
     "No imported routes" : {
@@ -1489,6 +1498,9 @@
     "Skip dates that already contain data" : {
 
     },
+    "Skip duplicate" : {
+
+    },
     "Sort" : {
 
     },
@@ -1609,7 +1621,7 @@
     "The menu bar item shows the current and upcoming files, progress, the estimated completion time, and controls to pause or stop an import." : {
 
     },
-    "The quarantined file will be deleted. No timeline data has been written from it." : {
+    "The saved candidate will be deleted. Existing timeline data is not changed." : {
 
     },
     "The saved server and credentials will be removed. Data already uploaded to %@ is not deleted." : {

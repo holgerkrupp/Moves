@@ -214,7 +214,7 @@ struct MovesApp: App {
                 if let container = runtime.container {
                     readyContent(container: container)
                 } else {
-                    Color.clear
+                    MovesLaunchPlaceholder()
                 }
             }
             .animation(.default, value: runtime.isReady)
@@ -296,6 +296,21 @@ struct MovesApp: App {
         }
         Task(priority: .utility) {
             await ImportedTransportModeRefinement.run(in: container)
+        }
+    }
+}
+
+private struct MovesLaunchPlaceholder: View {
+    var body: some View {
+        ZStack {
+            Color("AccentColor")
+                .ignoresSafeArea()
+
+            Image("LaunchLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 200, height: 200)
+                .accessibilityHidden(true)
         }
     }
 }

@@ -376,7 +376,9 @@ struct ExplorationInsightsDebugView: View {
             }
         }
         .navigationTitle("Exploration Stats")
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
         .task { await refresh() }
         .refreshable { await refresh() }
         .onChange(of: includeFlight) { _, _ in
@@ -443,7 +445,9 @@ private struct ExplorationPassportDebugView: View {
             }
         }
         .navigationTitle("Debug Passport")
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
     }
 
     private func areaText(_ squareMeters: Double) -> String {
@@ -499,7 +503,9 @@ private struct ExplorationCountryDetailDebugView: View {
                 .foregroundStyle(.secondary)
         }
         .navigationTitle(countryName)
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
     }
 }
 
@@ -550,7 +556,9 @@ private struct ExplorationCountryMapDebugView: View {
             }
         }
         .navigationTitle("Visited Countries")
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
         .task { await load() }
     }
 
@@ -605,7 +613,9 @@ private struct ExplorationCountryPresenceDebugView: View {
             }
         }
         .navigationTitle("\(countryName) Days")
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
         .task { await load() }
     }
 
@@ -755,7 +765,9 @@ private struct ExplorationManualTravelDebugView: View {
             }
         }
         .navigationTitle("Manual Travel")
+#if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
         .task { await load() }
     }
 
