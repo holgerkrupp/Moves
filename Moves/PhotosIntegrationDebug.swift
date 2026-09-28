@@ -189,6 +189,19 @@ struct PhotoScanResult: Sendable {
     let candidates: [PhotoVisitCandidate]
 }
 
+struct PhotoVisitImportProgress: Sendable {
+    let completedCount: Int
+    let totalCount: Int
+    let importedCount: Int
+    let enrichedCount: Int
+    let currentCandidate: PhotoVisitCandidate?
+
+    var fractionCompleted: Double {
+        guard totalCount > 0 else { return 1 }
+        return Double(completedCount) / Double(totalCount)
+    }
+}
+
 enum PhotoLibraryMetadataReader {
     static func batches(batchSize: Int = 250) -> AsyncThrowingStream<[PhotoMetadataRecord], Error> {
         let batchSize = max(batchSize, 1)
@@ -335,6 +348,12 @@ enum PhotosIntegrationEngine {
     static func markImported(_ candidates: [PhotoVisitCandidate]) async throws {
         var state = try await PhotosIntegrationStateStore.shared.load()
         state.importedCandidateIDs.formUnion(candidates.map(\.id))
+        try await PhotosIntegrationStateStore.shared.save(state)
+    }
+
+    static func clearImportedCandidates() async throws {
+        var state = try await PhotosIntegrationStateStore.shared.load()
+        state.importedCandidateIDs.removeAll()
         try await PhotosIntegrationStateStore.shared.save(state)
     }
 }
@@ -515,12 +534,28 @@ actor PhotoLocationMatcherWorker {
 
 @MainActor
 enum PhotoVisitImporter {
+    struct Result: Sendable {
+        let importedCount: Int
+        let enrichedCount: Int
+    }
+
     static func importCandidates(
         _ candidates: [PhotoVisitCandidate],
-        into context: ModelContext
-    ) throws -> Int {
+        into context: ModelContext,
+        progress: (PhotoVisitImportProgress) -> Void
+    ) async throws -> Result {
         var imported = 0
-        for candidate in candidates {
+        var enriched = 0
+        progress(PhotoVisitImportProgress(
+            completedCount: 0,
+            totalCount: candidates.count,
+            importedCount: imported,
+            enrichedCount: enriched,
+            currentCandidate: candidates.first
+        ))
+
+        for (index, candidate) in candidates.enumerated() {
+            try Task.checkCancellation()
             let searchStart = candidate.startDate.addingTimeInterval(-4 * 60 * 60)
             let nearby = try context.fetch(FetchDescriptor<VisitPlace>(
                 predicate: #Predicate { place in
@@ -540,7 +575,7 @@ enum PhotoVisitImporter {
                 if nearby.comment?.localizedCaseInsensitiveContains("Apple Photos") != true {
                     nearby.comment = [nearby.comment, "Apple Photos: \(candidate.assetIDs.count) asset(s)"].compactMap { $0 }.joined(separator: " · ")
                 }
-                nearby.provenance = .applePhotos
+                enriched += 1
             } else {
                 let place = VisitPlace(
                     arrivalDate: candidate.startDate,
@@ -555,9 +590,34 @@ enum PhotoVisitImporter {
                 context.insert(place)
                 imported += 1
             }
+
+            if (index + 1).isMultiple(of: 100) {
+                try context.save()
+            }
+            progress(PhotoVisitImportProgress(
+                completedCount: index + 1,
+                totalCount: candidates.count,
+                importedCount: imported,
+                enrichedCount: enriched,
+                currentCandidate: index + 1 < candidates.count ? candidates[index + 1] : nil
+            ))
+            await Task.yield()
         }
         try context.save()
-        return imported
+        return Result(importedCount: imported, enrichedCount: enriched)
+    }
+
+    static func deleteAllImportedVisits(in context: ModelContext) throws -> Int {
+        let importedVisits = try context.fetch(FetchDescriptor<VisitPlace>(
+            predicate: #Predicate { place in
+                place.provenanceRawValue == "applePhotos"
+            }
+        ))
+        for visit in importedVisits {
+            context.delete(visit)
+        }
+        try context.save()
+        return importedVisits.count
     }
 
     private static func timeline(for date: Date, in context: ModelContext) throws -> DayTimeline {
@@ -794,8 +854,10 @@ final class PhotosIntegrationDebugCoordinator: ObservableObject {
     @Published var isWorking = false
     @Published var authorizationStatus = PhotoLibraryMetadataReader.authorizationStatus()
     @Published var visitScan: PhotoScanResult?
+    @Published var visitImportProgress: PhotoVisitImportProgress?
     @Published var locationPreview: PhotoLocationPreview?
     @Published var shouldConfirmLocationWrite = false
+    @Published var shouldConfirmDeleteImportedVisits = false
     @Published var markWrittenAssetsInAlbum = true
 
     func requestAccess() {
@@ -830,12 +892,38 @@ final class PhotosIntegrationDebugCoordinator: ObservableObject {
         Task { @MainActor in
             defer { isWorking = false }
             do {
-                let count = try PhotoVisitImporter.importCandidates(visitScan.candidates, into: context)
+                let result = try await PhotoVisitImporter.importCandidates(
+                    visitScan.candidates,
+                    into: context,
+                    progress: { [weak self] progress in
+                        self?.visitImportProgress = progress
+                    }
+                )
                 try await PhotosIntegrationEngine.markImported(visitScan.candidates)
-                statusMessage = "Imported \(count) new Photos visit(s); nearby Moves visits were enriched."
+                statusMessage = "Imported \(result.importedCount) new Photos visit(s); enriched \(result.enrichedCount) nearby Moves visit(s)."
                 self.visitScan = nil
+                self.visitImportProgress = nil
             } catch {
                 statusMessage = "Photo visit import failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func deleteAllImportedVisits(context: ModelContext) {
+        guard !isWorking else { return }
+        isWorking = true
+        Task { @MainActor in
+            defer { isWorking = false }
+            do {
+                let count = try PhotoVisitImporter.deleteAllImportedVisits(in: context)
+                try await PhotosIntegrationEngine.clearImportedCandidates()
+                visitScan = nil
+                visitImportProgress = nil
+                statusMessage = count == 0
+                    ? "There are no Apple Photos visits to delete."
+                    : "Deleted \(count) Apple Photos visit(s)."
+            } catch {
+                statusMessage = "Deleting Apple Photos visits failed: \(error.localizedDescription)"
             }
         }
     }
@@ -934,6 +1022,61 @@ struct PhotosIntegrationDebugView: View {
                         .disabled(coordinator.isWorking)
                     }
                 }
+
+                Button("Delete All Photo-Imported Visits", role: .destructive) {
+                    coordinator.shouldConfirmDeleteImportedVisits = true
+                }
+                .disabled(coordinator.isWorking)
+
+                Text("This deletes visits created by Apple Photos. Existing Moves visits enriched during import are preserved.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let visitScan = coordinator.visitScan, !visitScan.candidates.isEmpty {
+                Section("Candidate Visit Preview") {
+                    ForEach(Array(visitScan.candidates.prefix(100))) { candidate in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(candidate.startDate.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.headline)
+                                Spacer()
+                                Text("\(candidate.assetIDs.count) photos")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("\(candidate.latitude, specifier: "%.5f"), \(candidate.longitude, specifier: "%.5f")")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                            Text("\(Int(candidate.duration / 60)) min visit")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 3)
+                    }
+
+                    if visitScan.candidates.count > 100 {
+                        Text("Showing the first 100 of \(visitScan.candidates.count) candidate visits.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let progress = coordinator.visitImportProgress {
+                Section("Importing Visits") {
+                    ProgressView(value: progress.fractionCompleted)
+                    LabeledContent(
+                        "Progress",
+                        value: "\(progress.completedCount.formatted()) of \(progress.totalCount.formatted())"
+                    )
+                    LabeledContent("New visits", value: progress.importedCount.formatted())
+                    LabeledContent("Enriched visits", value: progress.enrichedCount.formatted())
+                    if let currentCandidate = progress.currentCandidate {
+                        Text("Next: \(currentCandidate.startDate.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section("Moves → Photos") {
@@ -990,6 +1133,18 @@ struct PhotosIntegrationDebugView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only photos without existing locations will be changed. The preview will be written in one PhotoKit operation and audited for safe undo.")
+        }
+        .confirmationDialog(
+            "Delete Photo-Imported Visits?",
+            isPresented: $coordinator.shouldConfirmDeleteImportedVisits,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All Photo-Imported Visits", role: .destructive) {
+                coordinator.deleteAllImportedVisits(context: modelContext)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only visits created by the Apple Photos importer will be deleted. Existing Moves visits are kept.")
         }
     }
 }
