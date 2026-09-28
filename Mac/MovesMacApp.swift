@@ -741,6 +741,9 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
     case export
     case data
     case about
+#if DEBUG
+    case photos
+#endif
 
     var id: Self { self }
 
@@ -752,6 +755,9 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
         case .export: "Export"
         case .data: "Data"
         case .about: "About"
+#if DEBUG
+        case .photos: "Photos Integration"
+#endif
         }
     }
 
@@ -763,6 +769,9 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
         case .export: "square.and.arrow.up"
         case .data: "externaldrive"
         case .about: "info.circle"
+#if DEBUG
+        case .photos: "photo.on.rectangle.angled"
+#endif
         }
     }
 
@@ -774,6 +783,9 @@ private enum MovesMacSettingsSection: String, CaseIterable, Identifiable {
         case .export: "gpx geojson csv places comments"
         case .data: "timeline samples moves imports recovery storage"
         case .about: "version privacy application"
+#if DEBUG
+        case .photos: "photos photokit metadata location visits import preview write audit undo"
+#endif
         }
     }
 }
@@ -929,6 +941,11 @@ private struct MovesMacSettingsView: View {
 
         case .data:
             MovesMacDataSettingsDetailView(importCoordinator: importCoordinator)
+
+#if DEBUG
+        case .photos:
+            PhotosIntegrationDebugView()
+#endif
 
         case .about:
             settingsForm(title: section.title) {

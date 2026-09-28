@@ -152,7 +152,7 @@
 		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
 		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
 		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
-		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; platformFilter = ios; };
+		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
