@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/Sources/RoutePreviewKit/RoutePreviewKit.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.dia",
+    "index-unit-output-path" : "/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/build/RouteFileKit.build/Debug/RoutePreviewKit-t.build/Objects-normal/arm64/RoutePreviewKit~partial.swiftmodule"
+  }
+}

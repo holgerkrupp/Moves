@@ -321,6 +321,7 @@ struct MoveMapDetailView: View {
     @State private var isSplittingTrack = false
     @State private var splitErrorMessage = ""
     @State private var isShowingSplitError = false
+    @State private var isShowingFlightMatching = false
 
     private var activeRenderedRoute: RenderedRoute {
         RenderedRoute(
@@ -519,6 +520,9 @@ struct MoveMapDetailView: View {
         .sheet(isPresented: $isShowingDetails) {
             MoveDetailsView(segment: segment, displayedRouteCoordinates: routeCoordinates)
         }
+        .sheet(isPresented: $isShowingFlightMatching) {
+            FlightMatchingView(segment: segment, routeCoordinates: routeCoordinates)
+        }
         .task(id: routeRefreshKey) {
             await refreshRouteCoordinates()
         }
@@ -595,6 +599,24 @@ struct MoveMapDetailView: View {
                     Label("Apple Health route", systemImage: "heart.fill")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(MovesPalette.healthRoute)
+                }
+                if segment.transportMode == .plane {
+                    if let metadata = segment.flightMetadata,
+                       metadata.provenance != .providerSuggested,
+                       !metadata.isStale {
+                        Label(metadata.displayName.isEmpty ? "Flight details confirmed" : metadata.displayName, systemImage: "checkmark.seal.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.green)
+                    } else {
+                        Button {
+                            isShowingFlightMatching = true
+                        } label: {
+                            Label("Find flight details…", systemImage: "airplane.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityHint("Optionally searches historical flight data using this move's endpoints and timing")
+                    }
                 }
                 if segment.hasManualRouteCoordinates {
                     HStack(spacing: 10) {
@@ -975,8 +997,6 @@ struct MoveMapDetailView: View {
         guard segment.transportMode != newMode else { return }
 
         let previousMode = segment.transportMode
-        let previousRouteCacheSignature = segment.routeCacheSignature
-        let previousRouteCacheCoordinatesData = segment.routeCacheCoordinatesData
         let previousManualRouteCoordinatesData = segment.manualRouteCoordinatesData
         segment.transportMode = newMode
         segment.clearCachedRouteCoordinates()
@@ -1003,8 +1023,6 @@ struct MoveMapDetailView: View {
             }
         } catch {
             segment.transportMode = previousMode
-            segment.routeCacheSignature = previousRouteCacheSignature
-            segment.routeCacheCoordinatesData = previousRouteCacheCoordinatesData
             segment.manualRouteCoordinatesData = previousManualRouteCoordinatesData
             routeCoordinates = segment.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: segment)
             refreshMoveGPXShareFile()
@@ -1264,6 +1282,152 @@ struct MoveMapDetailView: View {
     }
 }
 
+private struct FlightMatchingView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    let segment: MoveSegment
+    let routeCoordinates: [CLLocationCoordinate2D]
+    let provider: any HistoricalFlightProvider
+
+    @State private var response: FlightMatchResponse?
+    @State private var errorMessage: String?
+    @State private var isLoading = true
+
+    init(
+        segment: MoveSegment,
+        routeCoordinates: [CLLocationCoordinate2D],
+        provider: any HistoricalFlightProvider = UnavailableHistoricalFlightProvider()
+    ) {
+        self.segment = segment
+        self.routeCoordinates = routeCoordinates
+        self.provider = provider
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Finding likely flight details…")
+                } else if let errorMessage {
+                    ContentUnavailableView("Could Not Search", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
+                } else if let response {
+                    resultContent(response)
+                }
+            }
+            .padding()
+            .navigationTitle("Flight Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .task {
+            await findMatches()
+        }
+    }
+
+    @ViewBuilder
+    private func resultContent(_ response: FlightMatchResponse) -> some View {
+        if response.providerUnavailable && response.matches.isEmpty {
+            ContentUnavailableView(
+                "Historical Search Unavailable",
+                systemImage: "network.slash",
+                description: Text("No historical flight provider is configured. The recorded flight and its local keepsake remain unchanged.")
+            )
+        } else if response.matches.isEmpty {
+            ContentUnavailableView(
+                "No Matching Flight",
+                systemImage: "airplane.circle",
+                description: Text("No useful historical candidate matched this move. Nothing was added to the move.")
+            )
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(response.hasAmbiguity ? "Several flights are plausible" : "Likely flight")
+                        .font(.headline)
+                    Text("Candidates use airport proximity, timing, duration, route distance and provider track data where available. Confirm a candidate before it becomes move metadata.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(response.matches.prefix(5)) { match in
+                        Button {
+                            confirm(match)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack {
+                                    Text(match.candidate.displayFlightNumber)
+                                        .font(.headline)
+                                    if let airlineName = match.candidate.airlineName {
+                                        Text(airlineName)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(match.confidence.formatted(.percent.precision(.fractionLength(0))))
+                                        .font(.caption.weight(.semibold))
+                                }
+                                Text("\(match.candidate.origin.iataCode ?? match.candidate.origin.icaoCode) → \(match.candidate.destination.iataCode ?? match.candidate.destination.icaoCode)")
+                                    .font(.subheadline.weight(.medium))
+                                ForEach(match.evidence.prefix(3), id: \.signal) { evidence in
+                                    Text(evidence.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("Confirm this flight")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tint)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if segment.flightMetadata?.provenance == .providerSuggested {
+                        Button("Keep recorded flight data") {
+                            _ = segment.rejectProviderSuggestion()
+                            try? modelContext.save()
+                            dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+        }
+    }
+
+    private func findMatches() async {
+        let fingerprint = FlightFingerprint(move: segment, route: routeCoordinates)
+        let service = FlightMatchingService(provider: provider)
+        do {
+            response = try await service.match(fingerprint)
+            if let bestMatch = response?.bestMatch,
+               segment.storeProviderSuggestion(bestMatch) {
+                try? modelContext.save()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func confirm(_ match: FlightMatch) {
+        guard segment.confirmFlightMatch(match) else { return }
+        do {
+            try modelContext.save()
+            dismiss()
+        } catch {
+            modelContext.rollback()
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 private struct MoveDetailsView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -1319,6 +1483,7 @@ private struct MoveDetailsView: View {
             routeCacheSignature: segment.routeCacheSignature,
             routeCacheByteCount: segment.routeCacheCoordinatesData?.count,
             manualRouteByteCount: segment.manualRouteCoordinatesData?.count,
+            flightMetadata: segment.flightMetadata,
             displayedRouteCoordinateCount: displayedRouteCoordinates.count,
             samples: sortedSamples.map(RawLocationSampleData.init)
         )
@@ -1488,6 +1653,7 @@ private struct RawMoveData: Encodable {
     let routeCacheSignature: String?
     let routeCacheByteCount: Int?
     let manualRouteByteCount: Int?
+    let flightMetadata: FlightMetadata?
     let displayedRouteCoordinateCount: Int
     let samples: [RawLocationSampleData]
 }

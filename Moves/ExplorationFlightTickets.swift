@@ -15,6 +15,25 @@ struct ExplorationFlightFacts: Codable, Equatable, Sendable {
     let origin: ExplorationFlightEndpoint
     let destination: ExplorationFlightEndpoint
     let distanceMeters: Double?
+    let flightMetadata: FlightMetadata?
+
+    init(
+        moveID: UUID,
+        departureDate: Date,
+        arrivalDate: Date,
+        origin: ExplorationFlightEndpoint,
+        destination: ExplorationFlightEndpoint,
+        distanceMeters: Double?,
+        flightMetadata: FlightMetadata? = nil
+    ) {
+        self.moveID = moveID
+        self.departureDate = departureDate
+        self.arrivalDate = arrivalDate
+        self.origin = origin
+        self.destination = destination
+        self.distanceMeters = distanceMeters
+        self.flightMetadata = flightMetadata
+    }
 }
 
 struct ExplorationFlightTicketRecipe: Codable, Equatable, Sendable {
@@ -119,7 +138,8 @@ struct ExplorationFlightTicketDebugView: View {
                 countryID: endCountry?.id,
                 countryName: endCountry?.name
             ),
-            distanceMeters: segment.distanceMeters.isFinite ? segment.distanceMeters : nil
+            distanceMeters: segment.distanceMeters.isFinite ? segment.distanceMeters : nil,
+            flightMetadata: segment.hasAuthoritativeFlightMetadata ? segment.flightMetadata : nil
         )
         ticket = ExplorationFlightTicketGenerator.make(from: facts)
     }
@@ -144,6 +164,15 @@ private struct ExplorationFlightTicketCard: View {
                 Image(systemName: "arrow.right")
                     .foregroundStyle(ink)
                 endpoint(ticket.facts.destination)
+            }
+            if let metadata = ticket.facts.flightMetadata {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(metadata.displayName.isEmpty ? "Identified flight" : metadata.displayName)
+                        .font(.headline)
+                    Text("Confirmed flight metadata · (metadata.provenance.rawValue)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Divider()
             HStack {

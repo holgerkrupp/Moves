@@ -1294,6 +1294,11 @@ private struct DayPresentationSource {
             samplesByMoveID[moveID] = TimelinePresentationLimits.routeSamples(from: moveSamples)
         }
 
+        for move in visibleMoves where move.usesImportedRoute {
+            sourcesByMoveID[move.id, default: []].insert(.imported)
+            hasImportedRouteData = true
+        }
+
         self.resolution = resolution
         self.visiblePlaces = visiblePlaces
         self.visibleMoves = visibleMoves
@@ -1341,7 +1346,8 @@ private struct DayPresentationSource {
                 samples: samples,
                 totalMoveCount: allMoves.count,
                 totalSampleCount: allSamples.count,
-                hasImportedRouteData: samples.contains { $0.source == .fileRouteImport },
+                hasImportedRouteData: samples.contains { $0.source == .fileRouteImport }
+                    || moves.contains(where: { $0.importedRouteData != nil }),
                 carriedOverPlace: nil
             )
         }
@@ -1398,7 +1404,9 @@ private struct DayPresentationSource {
             let samples = try context.fetch(sampleDescriptor)
             let totalMoveCount = try context.fetchCount(FetchDescriptor(predicate: movePredicate))
             let totalSampleCount = try context.fetchCount(FetchDescriptor(predicate: samplePredicate))
-            let hasImportedRouteData = try !context.fetch(importedDescriptor).isEmpty
+            let hasImportedSamples = try !context.fetch(importedDescriptor).isEmpty
+            let hasImportedRouteData = moves.contains { $0.importedRouteData != nil }
+                || hasImportedSamples
 
             var carriedOverPlace: VisitPlace?
             if moves.isEmpty, places.isEmpty, totalSampleCount == 0 {
@@ -1436,7 +1444,8 @@ private struct DayPresentationSource {
                 samples: samples,
                 totalMoveCount: allMoves.count,
                 totalSampleCount: allSamples.count,
-                hasImportedRouteData: samples.contains { $0.source == .fileRouteImport },
+                hasImportedRouteData: samples.contains { $0.source == .fileRouteImport }
+                    || moves.contains(where: { $0.importedRouteData != nil }),
                 carriedOverPlace: nil
             )
         }

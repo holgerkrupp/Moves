@@ -1,7 +1,7 @@
 import CoreLocation
 import Foundation
 
-struct RouteCoordinateStoragePoint: Codable, Hashable {
+struct RouteCoordinateStoragePoint: Codable, Hashable, Sendable {
     let latitude: Double
     let longitude: Double
 
@@ -42,4 +42,6 @@ extension Notification.Name {
     static let movesLocationSamplesDidChange = Notification.Name("Moves.locationSamplesDidChange")
     static let movesImportedRouteDataDidChange = Notification.Name("Moves.importedRouteDataDidChange")
     static let movesMoveDataDidChange = Notification.Name("Moves.moveDataDidChange")
+    static let movesTimelineDidChange = Notification.Name("Moves.timelineDidChange")
+    static let movesCloudKitImportObserved = Notification.Name("Moves.cloudKitImportObserved")
 }

@@ -122,13 +122,19 @@ actor ImportedTransportModeInferenceWorker {
         var changedCount = 0
         for move in moves {
             guard !Task.isCancelled else { break }
-            let importedSamples = move.samples
-                .filter { $0.source == .fileRouteImport }
-                .sorted { $0.timestamp < $1.timestamp }
-            guard !importedSamples.isEmpty else { continue }
+            let importedLocations: [CLLocation]
+            if let payload = ImportedRoutePayloadCodec.decode(move.importedRouteData) {
+                importedLocations = payload.map(\.asLocation)
+            } else {
+                importedLocations = move.samples
+                    .filter { $0.source == .fileRouteImport }
+                    .sorted { $0.timestamp < $1.timestamp }
+                    .map(\.asLocation)
+            }
+            guard !importedLocations.isEmpty else { continue }
 
             let inferred = ImportedTransportModeInference.infer(
-                from: importedSamples.map(\.asLocation),
+                from: importedLocations,
                 distanceMeters: move.distanceMeters,
                 duration: move.endDate.timeIntervalSince(move.startDate)
             )

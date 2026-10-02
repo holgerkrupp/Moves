@@ -108,16 +108,9 @@ actor RouteFileImportWorker {
         guard !Task.isCancelled else { return }
         let places: [(id: UUID, coordinate: CLLocationCoordinate2D)]
         do {
-            let importedSource = LocationSampleSource.fileRouteImport.rawValue
-            let samplePredicate = #Predicate<LocationSample> { sample in
-                sample.sourceRawValue == importedSource
-            }
-            let importedSampleMoveIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: samplePredicate))
-                .compactMap { $0.moveSegment?.id })
-            let movePredicate = #Predicate<MoveSegment> { move in
-                importedSampleMoveIDs.contains(move.id)
-            }
-            let importedMoveIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: movePredicate)).map(\.id))
+            let importedMoves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+                .filter(\.usesImportedRoute)
+            let importedMoveIDs = Set(importedMoves.map(\.id))
             let placePredicate = #Predicate<VisitPlace> { place in
                 place.horizontalAccuracy <= 180
             }

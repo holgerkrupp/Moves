@@ -327,6 +327,9 @@
     "Cancel track split" : {
 
     },
+    "Candidates use airport proximity, timing, duration, route distance and provider track data where available. Confirm a candidate before it becomes move metadata." : {
+
+    },
     "Captured location" : {
 
     },
@@ -364,6 +367,9 @@
 
     },
     "Comment" : {
+
+    },
+    "Confirm this flight" : {
 
     },
     "Connection" : {
@@ -412,6 +418,9 @@
 
     },
     "Could Not Save Location" : {
+
+    },
+    "Could Not Search" : {
 
     },
     "Could Not Split Track" : {
@@ -532,6 +541,9 @@
 
     },
     "Details" : {
+
+    },
+    "Diagnostics are device-local and contain counts/timestamps only; no coordinates or location text is recorded." : {
 
     },
     "Discard" : {
@@ -693,6 +705,15 @@
     "Filters" : {
 
     },
+    "Find flight details…" : {
+
+    },
+    "Finding likely flight details…" : {
+
+    },
+    "Flight Details" : {
+
+    },
     "Flight endpoint" : {
 
     },
@@ -766,6 +787,9 @@
 
     },
     "Highest elevation %@" : {
+
+    },
+    "Historical Search Unavailable" : {
 
     },
     "History" : {
@@ -894,6 +918,9 @@
     "Keep Moves running in the background. Visits and movement segments appear as iOS records them." : {
 
     },
+    "Keep recorded flight data" : {
+
+    },
     "Keep your original files" : {
 
     },
@@ -901,6 +928,15 @@
 
     },
     "Last 7 days" : {
+
+    },
+    "Last error: %@" : {
+
+    },
+    "Last export" : {
+
+    },
+    "Last import" : {
 
     },
     "Last scan: %@" : {
@@ -913,6 +949,9 @@
 
     },
     "Library" : {
+
+    },
+    "Likely flight" : {
 
     },
     "Limit by date" : {
@@ -1081,6 +1120,9 @@
     "No GPX data in this time span" : {
 
     },
+    "No historical flight provider is configured. The recorded flight and its local keepsake remain unchanged." : {
+
+    },
     "No History" : {
 
     },
@@ -1094,6 +1136,9 @@
 
     },
     "No matching days for this filter yet." : {
+
+    },
+    "No Matching Flight" : {
 
     },
     "No matching recorded journey exists between these locations." : {
@@ -1120,6 +1165,9 @@
     "No timeline yet" : {
 
     },
+    "No useful historical candidate matched this move. Nothing was added to the move." : {
+
+    },
     "No Visits Yet" : {
 
     },
@@ -1136,6 +1184,9 @@
 
     },
     "Notify when tracking stops" : {
+
+    },
+    "Observed" : {
 
     },
     "OK" : {
@@ -1163,6 +1214,9 @@
 
     },
     "Open Visited Place" : {
+
+    },
+    "Optionally searches historical flight data using this move's endpoints and timing" : {
 
     },
     "Optionally upload recorded points to one or more supported cloud or self-hosted location servers." : {
@@ -1413,6 +1467,9 @@
     "Settings…" : {
 
     },
+    "Several flights are plausible" : {
+
+    },
     "Shaded circle is the recognized area" : {
 
     },
@@ -1588,6 +1645,9 @@
     "Swap" : {
 
     },
+    "Sync diagnostics" : {
+
+    },
     "Tap images to select several, or use the share button on a single design. Statistics are calculated entirely on this device." : {
 
     },
@@ -1639,7 +1699,7 @@
     "These journeys remain in your timeline but do not affect commute statistics." : {
 
     },
-    "These options affect day maps throughout the macOS app." : {
+    "These options affect day maps throughout the macOS app. Photos thumbnails are available for locations linked to Apple Photos assets." : {
 
     },
     "These safeguards can end the session early if power gets tight." : {

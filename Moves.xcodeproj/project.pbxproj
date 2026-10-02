@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		13F2901544F7737794EA0147 /* RouteFileKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F8808470F5A4588C0C4BF95 /* RouteFileKit */; };
+		14FAD9561C371D9BB84C83CB /* CoreText.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E3D9A02FF44C234613C38175 /* CoreText.framework */; };
+		2EA88BDB5F3637C0F5F2D2FA /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609CEA33FBE3C59E6FB3F232 /* PreviewProvider.swift */; };
+		305EFC96DEA5B6BB1FF2EEE8 /* RoutePreviewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */; };
+		3A861385F9AA7A6F541A6DFF /* Moves Quick Look Thumbnails.appex in Embed Quick Look Extensions */ = {isa = PBXBuildFile; fileRef = F5A84185D84FA0424F9E7B53 /* Moves Quick Look Thumbnails.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		489A76352C4FC6F300F43B69 /* MovesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76342C4FC6F300F43B69 /* MovesApp.swift */; platformFilter = ios; };
 		489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489A76362C4FC6F300F43B69 /* ContentView.swift */; platformFilter = ios; };
 		489A763B2C4FC6F500F43B69 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 489A763A2C4FC6F500F43B69 /* Assets.xcassets */; };
@@ -71,8 +76,17 @@
 		48F925F2305AD31C0011EEA3 /* metroMelbourne.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F1305AD31C0011EEA3 /* metroMelbourne.icon */; };
 		48F925F4305AD7120011EEA3 /* sydney.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F3305AD7120011EEA3 /* sydney.icon */; };
 		48F925F6305B073A0011EEA3 /* M-stadt.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F5305B073A0011EEA3 /* M-stadt.icon */; };
+		4E9B81F23F4DDEAEA5667DEF /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */; };
+		507E360AAA1F24F3DF4DA9A5 /* RoutePreviewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */; };
+		61BFCAF2845C004C3FBC9EAD /* Moves Quick Look Preview.appex in Embed Quick Look Extensions */ = {isa = PBXBuildFile; fileRef = 306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		66AE2247E432E29925E3CFB0 /* RouteFileKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F8808470F5A4588C0C4BF95 /* RouteFileKit */; };
+		6D0DFB3E801D7F1166F8E1AF /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B8CB235774F07DEB3FFC2CFC /* QuickLookThumbnailing.framework */; };
+		88B7109D72782030A430DC8F /* RouteFileKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F8808470F5A4588C0C4BF95 /* RouteFileKit */; };
+		A50000012FD0000100000005 /* RoutePreviewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */; };
+		8BA59BD28B4A0147757DC52C /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */; };
 		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; platformFilter = ios; };
 		9A1B00012F00000100000010 /* PhotosIntegrationDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */; platformFilter = ios; };
+		9EFC8E0E631FFE9F00DAB89F /* QuickLook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EAC9868DEC97A4F8F267FC9E /* QuickLook.framework */; };
 		A10000012F00000100000002 /* MovesRouteSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000001 /* MovesRouteSupport.swift */; };
 		A10000012F00000100000004 /* MovesTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000003 /* MovesTimelineViews.swift */; platformFilter = ios; };
 		A10000012F00000100000006 /* MovesDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012F00000100000005 /* MovesDetailViews.swift */; platformFilter = ios; };
@@ -98,12 +112,13 @@
 		A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A42000012FC0000100000000 /* RouteImportAcquisition.swift */; };
 		A44000012FC0000100000001 /* ImportQueueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44000012FC0000100000000 /* ImportQueueViews.swift */; };
 		A45000012FC0000100000001 /* RouteFileImportConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */; };
-		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; platformFilter = ios; };
+		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; };
 		A50000012FD0000100000002 /* CloudDataPresence in Frameworks */ = {isa = PBXBuildFile; productRef = A50000012FD0000100000004 /* CloudDataPresence */; };
 		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; platformFilter = ios; };
 		A70000012FF0000100000001 /* MovesShareViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000012FF0000100000000 /* MovesShareViews.swift */; platformFilter = ios; };
 		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; };
 		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; platformFilter = ios; };
+		AC6BEC2A92CDFA332032BD37 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */; };
 		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; platformFilter = ios; };
 		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
 		B41000012FC0000100000001 /* ImportedTransportModeInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41000012FC0000100000000 /* ImportedTransportModeInference.swift */; };
@@ -126,6 +141,9 @@
 		E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */; platformFilter = ios; };
 		F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
 		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
+		F10000013100000100000025 /* TimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000015 /* TimelineStore.swift */; };
+		F10000013100000100000026 /* MoveRouteCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000016 /* MoveRouteCacheStore.swift */; };
+		F10000013100000100000027 /* SyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000017 /* SyncDiagnostics.swift */; };
 		F20000013120000100000001 /* MacSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000013120000100000000 /* MacSearchTests.swift */; };
 		F30000013130000100000001 /* ESADesignKit in Frameworks */ = {isa = PBXBuildFile; productRef = F30000013130000100000003 /* ESADesignKit */; };
 		F60000014000000100000001 /* ExplorationRaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000004 /* ExplorationRaster.swift */; };
@@ -152,6 +170,7 @@
 		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
 		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
 		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
+		F60000014000000100000035 /* FlightMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000036 /* FlightMatching.swift */; };
 		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; };
 /* End PBXBuildFile section */
 
@@ -162,6 +181,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = A30000012FB000010000002F;
 			remoteInfo = "Moves Watch Widgets";
+		};
+		504CBF975C028467F63088DE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 489A76292C4FC6F300F43B69 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2C3ABC81C22E0672E5A5C121;
+			remoteInfo = "Moves Quick Look Preview";
+		};
+		738D4005B7A41E0E8F34B27A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 489A76292C4FC6F300F43B69 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DF0D30F053362FF41DC95F7E;
+			remoteInfo = "Moves Quick Look Thumbnails";
 		};
 		9A1B00012F0000010000000C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -187,6 +220,18 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		1EBB73D914E69416900193D2 /* Embed Quick Look Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				61BFCAF2845C004C3FBC9EAD /* Moves Quick Look Preview.appex in Embed Quick Look Extensions */,
+				3A861385F9AA7A6F541A6DFF /* Moves Quick Look Thumbnails.appex in Embed Quick Look Extensions */,
+			);
+			name = "Embed Quick Look Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		48F58C352FBB06570027EE58 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -223,6 +268,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
+		306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; name = "Moves Quick Look Preview.appex"; path = "Moves Quick Look Preview.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		30A1B6C2D9E14B7A8F0C1123 /* QuickLookPreview.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookPreview.entitlements; sourceTree = "<group>"; };
 		489A76312C4FC6F300F43B69 /* Moves.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Moves.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		489A76342C4FC6F300F43B69 /* MovesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesApp.swift; sourceTree = "<group>"; };
 		489A76362C4FC6F300F43B69 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -281,6 +329,8 @@
 		48F925F1305AD31C0011EEA3 /* metroMelbourne.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = metroMelbourne.icon; sourceTree = "<group>"; };
 		48F925F3305AD7120011EEA3 /* sydney.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = sydney.icon; sourceTree = "<group>"; };
 		48F925F5305B073A0011EEA3 /* M-stadt.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "M-stadt.icon"; sourceTree = "<group>"; };
+		609CEA33FBE3C59E6FB3F232 /* PreviewProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
+		85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		9A1B00012F00000100000001 /* MovesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAssemblerTests.swift; sourceTree = "<group>"; };
 		9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebugTests.swift; sourceTree = "<group>"; };
@@ -321,6 +371,7 @@
 		B41000012FC0000100000000 /* ImportedTransportModeInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedTransportModeInference.swift; sourceTree = "<group>"; };
 		B41000012FC0000100000002 /* ImportedTransportModeInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedTransportModeInferenceTests.swift; sourceTree = "<group>"; };
 		B50000013050000100000001 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = ../LaunchScreen.storyboard; sourceTree = "<group>"; };
+		B8CB235774F07DEB3FFC2CFC /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/QuickLookThumbnailing.framework; sourceTree = DEVELOPER_DIR; };
 		C10000013000000100000000 /* RouteTrackingLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteTrackingLiveActivity.swift; sourceTree = "<group>"; };
 		C10000013000000100000002 /* MovesRouteTrackingLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteTrackingLiveActivityWidget.swift; sourceTree = "<group>"; };
 		C10000013000000100000004 /* MovesRouteTrackingAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteTrackingAttributes.swift; sourceTree = "<group>"; };
@@ -331,13 +382,20 @@
 		E21000013020000100000000 /* ImportQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportQueueTests.swift; sourceTree = "<group>"; };
 		E22000013020000100000000 /* ImportStressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportStressTests.swift; sourceTree = "<group>"; };
 		E30000013030000100000000 /* MovesKnownLocationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesKnownLocationsView.swift; sourceTree = "<group>"; };
+		E3D9A02FF44C234613C38175 /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/CoreText.framework; sourceTree = DEVELOPER_DIR; };
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 		E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinator.swift; sourceTree = "<group>"; };
 		E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinatorTests.swift; sourceTree = "<group>"; };
+		EAC9868DEC97A4F8F267FC9E /* QuickLook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLook.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/QuickLook.framework; sourceTree = DEVELOPER_DIR; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
 		F10000013100000100000001 /* MovesMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovesMac.entitlements; sourceTree = "<group>"; };
 		F1000001310000010000000E /* RouteCoordinateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteCoordinateStorage.swift; sourceTree = "<group>"; };
+		F10000013100000100000015 /* TimelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineStore.swift; sourceTree = "<group>"; };
+		F10000013100000100000016 /* MoveRouteCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveRouteCacheStore.swift; sourceTree = "<group>"; };
+		F10000013100000100000017 /* SyncDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDiagnostics.swift; sourceTree = "<group>"; };
 		F20000013120000100000000 /* MacSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchTests.swift; sourceTree = "<group>"; };
+		F5A84185D84FA0424F9E7B53 /* Moves Quick Look Thumbnails.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; name = "Moves Quick Look Thumbnails.appex"; path = "Moves Quick Look Thumbnails.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		30A1B6C2D9E14B7A8F0C1124 /* QuickLookThumbnails.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookThumbnails.entitlements; sourceTree = "<group>"; };
 		F60000014000000100000004 /* ExplorationRaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRaster.swift; sourceTree = "<group>"; };
 		F60000014000000100000005 /* ExplorationShards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationShards.swift; sourceTree = "<group>"; };
 		F60000014000000100000006 /* ExplorationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCache.swift; sourceTree = "<group>"; };
@@ -362,10 +420,22 @@
 		F6000001400000010000002E /* ExplorationMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationMapProjection.swift; sourceTree = "<group>"; };
 		F60000014000000100000030 /* ExplorationCountryPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCountryPresence.swift; sourceTree = "<group>"; };
 		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
+		F60000014000000100000036 /* FlightMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightMatching.swift; sourceTree = "<group>"; };
 		F60000014000000100000034 /* PhotosIntegrationDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebug.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		2BD1B7D4D14CE5B1B856B7A0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9EFC8E0E631FFE9F00DAB89F /* QuickLook.framework in Frameworks */,
+				14FAD9561C371D9BB84C83CB /* CoreText.framework in Frameworks */,
+				13F2901544F7737794EA0147 /* RouteFileKit in Frameworks */,
+				305EFC96DEA5B6BB1FF2EEE8 /* RoutePreviewKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		489A762E2C4FC6F300F43B69 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -374,6 +444,8 @@
 				A50000012FD0000100000002 /* CloudDataPresence in Frameworks */,
 				E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */,
 				F30000013130000100000001 /* ESADesignKit in Frameworks */,
+				88B7109D72782030A430DC8F /* RouteFileKit in Frameworks */,
+				A50000012FD0000100000005 /* RoutePreviewKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -406,6 +478,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FB032E73AD11DCCAA03F5832 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D0DFB3E801D7F1166F8E1AF /* QuickLookThumbnailing.framework in Frameworks */,
+				66AE2247E432E29925E3CFB0 /* RouteFileKit in Frameworks */,
+				507E360AAA1F24F3DF4DA9A5 /* RoutePreviewKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -419,6 +501,8 @@
 				9A1B00012F00000100000003 /* MovesTests */,
 				48F58C312FBB06570027EE58 /* Frameworks */,
 				489A76322C4FC6F300F43B69 /* Products */,
+				9B27C80568886AE8893FF1E7 /* QuickLookPreview */,
+				6337FFD4C7B2B15CA3448851 /* QuickLookThumbnails */,
 			);
 			sourceTree = "<group>";
 		};
@@ -430,6 +514,8 @@
 				A20000012FA0000100000017 /* Moves Watch App.app */,
 				A30000012FB0000100000020 /* Moves Widgets.appex */,
 				A30000012FB0000100000022 /* Moves Watch Widgets.appex */,
+				306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */,
+				F5A84185D84FA0424F9E7B53 /* Moves Quick Look Thumbnails.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -471,6 +557,9 @@
 				A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */,
 				A20000012FA0000100000002 /* WatchRouteInbox.swift */,
 				F1000001310000010000000E /* RouteCoordinateStorage.swift */,
+				F10000013100000100000015 /* TimelineStore.swift */,
+				F10000013100000100000016 /* MoveRouteCacheStore.swift */,
+				F10000013100000100000017 /* SyncDiagnostics.swift */,
 				A30000012FB0000100000000 /* TimelineWidgetSnapshot.swift */,
 				489A76442C4FC70D00F43B69 /* LocationChange.swift */,
 				489A76482C4FDE1E00F43B69 /* VisitedLocation.swift */,
@@ -497,6 +586,7 @@
 				F6000001400000010000002E /* ExplorationMapProjection.swift */,
 				F60000014000000100000030 /* ExplorationCountryPresence.swift */,
 				F60000014000000100000032 /* ExplorationFlightTickets.swift */,
+				F60000014000000100000036 /* FlightMatching.swift */,
 				F60000014000000100000034 /* PhotosIntegrationDebug.swift */,
 				489A763A2C4FC6F500F43B69 /* Assets.xcassets */,
 				489A763C2C4FC6F500F43B69 /* Preview Content */,
@@ -517,6 +607,7 @@
 		48F58C312FBB06570027EE58 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				D697DC31591E3E2F65B31C8B /* OS X */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -575,6 +666,16 @@
 			path = Icons;
 			sourceTree = "<group>";
 		};
+		6337FFD4C7B2B15CA3448851 /* QuickLookThumbnails */ = {
+			isa = PBXGroup;
+			children = (
+				30A1B6C2D9E14B7A8F0C1124 /* QuickLookThumbnails.entitlements */,
+				11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */,
+			);
+			name = QuickLookThumbnails;
+			path = QuickLookThumbnails;
+			sourceTree = "<group>";
+		};
 		9A1B00012F00000100000003 /* MovesTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -590,6 +691,16 @@
 				F60000014000000100000008 /* ExplorationTests.swift */,
 			);
 			path = MovesTests;
+			sourceTree = "<group>";
+		};
+		9B27C80568886AE8893FF1E7 /* QuickLookPreview */ = {
+			isa = PBXGroup;
+			children = (
+				30A1B6C2D9E14B7A8F0C1123 /* QuickLookPreview.entitlements */,
+				609CEA33FBE3C59E6FB3F232 /* PreviewProvider.swift */,
+			);
+			name = QuickLookPreview;
+			path = QuickLookPreview;
 			sourceTree = "<group>";
 		};
 		A20000012FA000010000001D /* Moves Watch App */ = {
@@ -618,6 +729,17 @@
 			path = "Moves Widgets";
 			sourceTree = "<group>";
 		};
+		D697DC31591E3E2F65B31C8B /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */,
+				EAC9868DEC97A4F8F267FC9E /* QuickLook.framework */,
+				E3D9A02FF44C234613C38175 /* CoreText.framework */,
+				B8CB235774F07DEB3FFC2CFC /* QuickLookThumbnailing.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
 		F10000013100000100000004 /* Mac */ = {
 			isa = PBXGroup;
 			children = (
@@ -630,6 +752,27 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2C3ABC81C22E0672E5A5C121 /* Moves Quick Look Preview */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37660B5F8212365EDBC47C67 /* Build configuration list for PBXNativeTarget "Moves Quick Look Preview" */;
+			buildPhases = (
+				D7B00AE7B6AB4ADBE0099321 /* Sources */,
+				2BD1B7D4D14CE5B1B856B7A0 /* Frameworks */,
+				262DA31EABF3418EF6891129 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Moves Quick Look Preview";
+			packageProductDependencies = (
+				5F8808470F5A4588C0C4BF95 /* RouteFileKit */,
+				73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */,
+			);
+			productName = "Moves Quick Look Preview";
+			productReference = 306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		489A76302C4FC6F300F43B69 /* Moves */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 489A76412C4FC6F500F43B69 /* Build configuration list for PBXNativeTarget "Moves" */;
@@ -639,12 +782,15 @@
 				489A762F2C4FC6F300F43B69 /* Resources */,
 				A20000012FA0000100000019 /* Embed Watch Content */,
 				A30000012FB0000100000025 /* Embed Foundation Extensions */,
+				1EBB73D914E69416900193D2 /* Embed Quick Look Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				A20000012FA0000100000023 /* PBXTargetDependency */,
 				A30000012FB0000100000030 /* PBXTargetDependency */,
+				9B10E707C7C0167448813654 /* PBXTargetDependency */,
+				86CD47ABC389B682448F2F71 /* PBXTargetDependency */,
 			);
 			name = Moves;
 			packageProductDependencies = (
@@ -652,6 +798,8 @@
 				E50000013050000100000003 /* CloudKitSyncMonitor */,
 				F30000013130000100000003 /* ESADesignKit */,
 				F60000014000000100000012 /* FogOfWorldKit */,
+				5F8808470F5A4588C0C4BF95 /* RouteFileKit */,
+				73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */,
 			);
 			productName = Moves;
 			productReference = 489A76312C4FC6F300F43B69 /* Moves.app */;
@@ -731,6 +879,27 @@
 			productReference = A30000012FB0000100000022 /* Moves Watch Widgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		DF0D30F053362FF41DC95F7E /* Moves Quick Look Thumbnails */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 60B25FFD61E2F1390B138F66 /* Build configuration list for PBXNativeTarget "Moves Quick Look Thumbnails" */;
+			buildPhases = (
+				0731B4DAC688463645356F97 /* Sources */,
+				FB032E73AD11DCCAA03F5832 /* Frameworks */,
+				4022DC3DFDFA355802495B70 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Moves Quick Look Thumbnails";
+			packageProductDependencies = (
+				5F8808470F5A4588C0C4BF95 /* RouteFileKit */,
+				73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */,
+			);
+			productName = "Moves Quick Look Thumbnails";
+			productReference = F5A84185D84FA0424F9E7B53 /* Moves Quick Look Thumbnails.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -779,8 +948,9 @@
 			packageReferences = (
 				A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */,
 				E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */,
-				F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */,
-				F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */,
+				F30000013130000100000002 /* XCLocalSwiftPackageReference "ESADesignKit" */,
+				F60000014000000100000011 /* XCLocalSwiftPackageReference "FogOfWorldKit" */,
+				9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */,
 			);
 			productRefGroup = 489A76322C4FC6F300F43B69 /* Products */;
 			projectDirPath = "";
@@ -791,11 +961,27 @@
 				A30000012FB000010000002E /* Moves Widgets */,
 				A30000012FB000010000002F /* Moves Watch Widgets */,
 				9A1B00012F00000100000008 /* MovesTests */,
+				2C3ABC81C22E0672E5A5C121 /* Moves Quick Look Preview */,
+				DF0D30F053362FF41DC95F7E /* Moves Quick Look Thumbnails */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		262DA31EABF3418EF6891129 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4022DC3DFDFA355802495B70 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		489A762F2C4FC6F300F43B69 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -894,6 +1080,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0731B4DAC688463645356F97 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8BA59BD28B4A0147757DC52C /* ThumbnailProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		489A762D2C4FC6F300F43B69 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -912,6 +1106,9 @@
 				A45000012FC0000100000001 /* RouteFileImportConfiguration.swift in Sources */,
 				A20000012FA0000100000003 /* WatchRouteInbox.swift in Sources */,
 				F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */,
+				F10000013100000100000025 /* TimelineStore.swift in Sources */,
+				F10000013100000100000026 /* MoveRouteCacheStore.swift in Sources */,
+				F10000013100000100000027 /* SyncDiagnostics.swift in Sources */,
 				A30000012FB0000100000001 /* TimelineWidgetSnapshot.swift in Sources */,
 				489A76372C4FC6F300F43B69 /* ContentView.swift in Sources */,
 				A70000012FF0000100000001 /* MovesShareViews.swift in Sources */,
@@ -954,6 +1151,7 @@
 				F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */,
 				F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */,
 				F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */,
+				F60000014000000100000035 /* FlightMatching.swift in Sources */,
 				F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1007,6 +1205,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D7B00AE7B6AB4ADBE0099321 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2EA88BDB5F3637C0F5F2D2FA /* PreviewProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1015,10 +1221,22 @@
 			target = A30000012FB000010000002F /* Moves Watch Widgets */;
 			targetProxy = 48F58C332FBB06570027EE58 /* PBXContainerItemProxy */;
 		};
+		86CD47ABC389B682448F2F71 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Moves Quick Look Thumbnails";
+			target = DF0D30F053362FF41DC95F7E /* Moves Quick Look Thumbnails */;
+			targetProxy = 738D4005B7A41E0E8F34B27A /* PBXContainerItemProxy */;
+		};
 		9A1B00012F0000010000000D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 489A76302C4FC6F300F43B69 /* Moves */;
 			targetProxy = 9A1B00012F0000010000000C /* PBXContainerItemProxy */;
+		};
+		9B10E707C7C0167448813654 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Moves Quick Look Preview";
+			target = 2C3ABC81C22E0672E5A5C121 /* Moves Quick Look Preview */;
+			targetProxy = 504CBF975C028467F63088DE /* PBXContainerItemProxy */;
 		};
 		A20000012FA0000100000023 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -1035,6 +1253,29 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		3CBB9F4E892290DC2525D1CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = QuickLookPreview/QuickLookPreview.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 111;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QuickLookPreview/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 2026.21;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.preview;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		489A763F2C4FC6F500F43B69 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1296,6 +1537,52 @@
 			};
 			name = Release;
 		};
+		628187ECF3A7594F297A4118 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = QuickLookPreview/QuickLookPreview.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 111;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QuickLookPreview/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 2026.21;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.preview;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		72E4A41A8406D4ECF46EB0EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = QuickLookThumbnails/QuickLookThumbnails.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 111;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QuickLookThumbnails/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 2026.21;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.thumbnails;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		9A1B00012F0000010000000A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1511,9 +1798,41 @@
 			};
 			name = Release;
 		};
+		F932C4CBA6DC589846AE89CA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = QuickLookThumbnails/QuickLookThumbnails.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 111;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QuickLookThumbnails/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 2026.21;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.thumbnails;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		37660B5F8212365EDBC47C67 /* Build configuration list for PBXNativeTarget "Moves Quick Look Preview" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3CBB9F4E892290DC2525D1CC /* Release */,
+				628187ECF3A7594F297A4118 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		489A762C2C4FC6F300F43B69 /* Build configuration list for PBXProject "Moves" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1528,6 +1847,15 @@
 			buildConfigurations = (
 				489A76422C4FC6F500F43B69 /* Debug */,
 				489A76432C4FC6F500F43B69 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		60B25FFD61E2F1390B138F66 /* Build configuration list for PBXNativeTarget "Moves Quick Look Thumbnails" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				72E4A41A8406D4ECF46EB0EE /* Release */,
+				F932C4CBA6DC589846AE89CA /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1571,11 +1899,15 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */ = {
+		9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RouteFileKit;
+		};
+		F30000013130000100000002 /* XCLocalSwiftPackageReference "ESADesignKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../ESADesignKit;
 		};
-		F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */ = {
+		F60000014000000100000011 /* XCLocalSwiftPackageReference "FogOfWorldKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/FogOfWorldKit;
 		};
@@ -1601,6 +1933,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		5F8808470F5A4588C0C4BF95 /* RouteFileKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */;
+			productName = RouteFileKit;
+		};
+		73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */;
+			productName = RoutePreviewKit;
+		};
 		A50000012FD0000100000004 /* CloudDataPresence */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */;
@@ -1613,12 +1955,12 @@
 		};
 		F30000013130000100000003 /* ESADesignKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */;
+			package = F30000013130000100000002 /* XCLocalSwiftPackageReference "ESADesignKit" */;
 			productName = ESADesignKit;
 		};
 		F60000014000000100000012 /* FogOfWorldKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */;
+			package = F60000014000000100000011 /* XCLocalSwiftPackageReference "FogOfWorldKit" */;
 			productName = FogOfWorldKit;
 		};
 /* End XCSwiftPackageProductDependency section */

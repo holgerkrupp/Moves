@@ -1,4 +1,0 @@
-module CloudKitSyncMonitor {
-header "CloudKitSyncMonitor-Swift.h"
-export *
-}

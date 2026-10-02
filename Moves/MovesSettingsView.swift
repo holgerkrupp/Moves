@@ -22,6 +22,8 @@ struct MovesSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var routeWatchFolderManager: RouteWatchFolderManager
+    @Query(sort: \DayTimeline.dayStart, order: .forward)
+    private var queriedDayTimelines: [DayTimeline]
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     @AppStorage(LandscapeLayoutSettings.controlsOnLeftKey) private var landscapeControlsOnLeft = false
     @AppStorage(DailyTimelineBackup.isEnabledKey) private var dailyBackupIsEnabled = false
@@ -73,7 +75,13 @@ struct MovesSettingsView: View {
     }
 
     private var selectedDay: DayTimeline? {
-        dayTimelines.first(where: { $0.dayKey == selectedDayKey })
+        availableDayTimelines.first(where: { $0.dayKey == selectedDayKey })
+    }
+
+    /// The timeline pager passes only its bounded launch window. Full-history data is
+    /// fetched only after this settings screen is opened, where it is needed for export.
+    private var availableDayTimelines: [DayTimeline] {
+        queriedDayTimelines.isEmpty ? dayTimelines : queriedDayTimelines
     }
 
     var body: some View {
@@ -125,7 +133,7 @@ struct MovesSettingsView: View {
 
                     NavigationLink {
                         SettingsExportDetailView(
-                            dayTimelines: dayTimelines,
+                            dayTimelines: availableDayTimelines,
                             dailyBackupIsEnabled: $dailyBackupIsEnabled,
                             dailyBackupFormat: $dailyBackupFormat,
                             dailyBackupUsesMonthlyFolders: $dailyBackupUsesMonthlyFolders,
@@ -345,7 +353,7 @@ struct MovesSettingsView: View {
 
         switch scope {
         case .allDays:
-            days = dayTimelines
+            days = availableDayTimelines
             scopeName = "all-days"
 
         case .selectedDay:
@@ -543,6 +551,7 @@ private struct SettingsTrackingDetailView: View {
         ScrollView {
             LazyVStack(spacing: 14) {
                 CloudKitSyncStatusCard()
+                MovesSyncDiagnosticsCard()
                 MultiDeviceSettingsCard()
 
                 SettingsCard(title: "Background Tracking") {

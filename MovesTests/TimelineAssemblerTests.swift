@@ -630,6 +630,111 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(moves.first?.endDate, firstDeparture.addingTimeInterval(30))
     }
 
+    func testSparseSignificantChangeMoveSchedulesMatchingWithoutPresentation() async throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let scheduler = RecordingInferredMoveRouteMatchingScheduler()
+        let assembler = DefaultTimelineAssembler(
+            repository: repository,
+            motionClassifier: StubMotionClassifier(),
+            placeNameResolver: StubPlaceNameResolver(),
+            routeMatchingScheduler: scheduler,
+            automaticallyFillsVisitGaps: { true }
+        )
+        let start = Date(timeIntervalSince1970: 1_710_100_000)
+        let departure = start.addingTimeInterval(10 * 60)
+        let arrival = start.addingTimeInterval(70 * 60)
+
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5511, longitude: 9.9937),
+            horizontalAccuracy: 20,
+            arrivalDate: start,
+            departureDate: departure
+        ))
+        await assembler.ingestLocations([
+            makeLocation(
+                latitude: 53.5660,
+                longitude: 10.0020,
+                speed: 1.2,
+                timestamp: start.addingTimeInterval(35 * 60)
+            )
+        ], source: .significantChange)
+        await assembler.ingestVisit(MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5790, longitude: 10.0180),
+            horizontalAccuracy: 20,
+            arrivalDate: arrival,
+            departureDate: .distantFuture
+        ))
+
+        let context = ModelContext(container)
+        let move = try XCTUnwrap(context.fetch(FetchDescriptor<MoveSegment>()).first)
+        XCTAssertEqual(scheduler.scheduledMoveIDs, [move.id])
+        XCTAssertEqual(scheduler.scheduledModes, [.walking])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<LocationSample>()).count, 1)
+        XCTAssertEqual(move.samples.count, 1)
+        XCTAssertEqual(move.samples.first?.source, .significantChange)
+        XCTAssertTrue(RoadRouteMatchingPolicy.shouldMatch(move.transportMode))
+    }
+
+    func testRouteMatchingPolicyIncludesTerrestrialModesAndExcludesNonRoadModes() {
+        for mode in [TransportMode.walking, .running, .cycling, .automotive, .motorcycle, .train] {
+            XCTAssertTrue(RoadRouteMatchingPolicy.shouldMatch(mode), "Expected (mode) to be routable")
+        }
+
+        for mode in [TransportMode.plane, .boat, .swimming, .stationary, .unknown] {
+            XCTAssertFalse(RoadRouteMatchingPolicy.shouldMatch(mode), "Expected (mode) to remain raw")
+        }
+    }
+
+    func testAutomaticSchedulingRespectsManualRoutesAndSignatureChanges() {
+        let scheduler = RecordingInferredMoveRouteMatchingScheduler()
+        let start = Date(timeIntervalSince1970: 1_710_100_000)
+        let move = MoveSegment(
+            dedupeKey: "manual-route-scheduling",
+            startDate: start,
+            endDate: start.addingTimeInterval(60 * 60),
+            transportMode: .automotive,
+            distanceMeters: 1_000,
+            stepCount: nil
+        )
+        let raw = [
+            CLLocationCoordinate2D(latitude: 53.5511, longitude: 9.9937),
+            CLLocationCoordinate2D(latitude: 53.5790, longitude: 10.0180)
+        ]
+        move.startPlace = VisitPlace(
+            arrivalDate: start,
+            departureDate: start,
+            latitude: raw[0].latitude,
+            longitude: raw[0].longitude,
+            horizontalAccuracy: 20
+        )
+        move.endPlace = VisitPlace(
+            arrivalDate: move.endDate,
+            departureDate: nil,
+            latitude: raw[1].latitude,
+            longitude: raw[1].longitude,
+            horizontalAccuracy: 20
+        )
+
+        scheduler.scheduleRouteMatching(for: move)
+        XCTAssertEqual(scheduler.scheduledMoveIDs, [move.id])
+
+        let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: raw)
+        move.storeCachedRouteCoordinates(raw, signature: signature)
+        move.transportMode = .cycling
+        XCTAssertNil(
+            move.cachedRouteCoordinates(
+                for: MoveRouteGeometry.cacheSignature(for: move, fallback: raw)
+            )
+        )
+        scheduler.scheduleRouteMatching(for: move)
+        XCTAssertEqual(scheduler.scheduledMoveIDs.count, 2)
+
+        move.storeManualRouteCoordinates(raw)
+        scheduler.scheduleRouteMatching(for: move)
+        XCTAssertEqual(scheduler.scheduledMoveIDs.count, 2)
+    }
+
     func testVisitGapFillingLeavesGapEmptyWhenDisabled() async throws {
         let container = try makeInMemoryContainer()
         let repository = SwiftDataTimelineRepository(modelContainer: container)
@@ -1040,6 +1145,8 @@ final class TimelineAssemblerTests: XCTestCase {
         segment.storeCachedRouteCoordinates(coordinates, signature: signature)
 
         let cached = segment.cachedRouteCoordinates(for: signature)
+        XCTAssertNil(segment.routeCacheSignature)
+        XCTAssertNil(segment.routeCacheCoordinatesData)
         XCTAssertEqual(cached?.count, 2)
         XCTAssertEqual(cached?.first?.latitude, coordinates.first?.latitude)
         XCTAssertEqual(cached?.first?.longitude, coordinates.first?.longitude)
@@ -1049,6 +1156,27 @@ final class TimelineAssemblerTests: XCTestCase {
 
         segment.clearCachedRouteCoordinates()
         XCTAssertNil(segment.cachedRouteCoordinates(for: signature))
+    }
+
+    func testLegacySyncedRouteCacheRemainsReadableAsFallback() {
+        let segment = MoveSegment(
+            dedupeKey: "legacy-cache",
+            startDate: .now,
+            endDate: .now.addingTimeInterval(60),
+            transportMode: .walking,
+            distanceMeters: 100,
+            stepCount: nil
+        )
+        let signature = "legacy-signature"
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.52, longitude: 13.40),
+            CLLocationCoordinate2D(latitude: 52.521, longitude: 13.401),
+        ]
+        segment.routeCacheSignature = signature
+        segment.routeCacheCoordinatesData = RouteCoordinateStorage.encode(coordinates)
+
+        let fallback = segment.cachedRouteCoordinates(for: signature)
+        XCTAssertEqual(fallback?.count, coordinates.count)
     }
 
     func testMatchedRouteSynchronizesMoveDistanceWithDisplayedCoordinates() async {
@@ -2857,6 +2985,19 @@ private struct StubMotionClassifier: MotionClassifier {
     func stepCount(start: Date, end: Date) async -> Int? {
         nil
     }
+}
+
+@MainActor
+private final class RecordingInferredMoveRouteMatchingScheduler: InferredMoveRouteMatchingScheduler {
+    private(set) var scheduledMoveIDs: [UUID] = []
+    private(set) var scheduledModes: [TransportMode] = []
+
+    func scheduleRouteMatching(for move: MoveSegment) {
+        scheduledMoveIDs.append(move.id)
+        scheduledModes.append(move.transportMode)
+    }
+
+    func schedulePendingRouteMatches(limit: Int) {}
 }
 
 private struct StubPlaceNameResolver: PlaceNameResolver {

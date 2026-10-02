@@ -645,4 +645,134 @@ final class ExplorationTests: XCTestCase {
         let afterResurrectionAttempt = try await cache.readBlock(id)
         XCTAssertNil(afterResurrectionAttempt)
     }
+
+    func testFlightFingerprintBoundsRouteAndResolvesMultipleNearbyAirports() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let fingerprint = FlightFingerprint(
+            moveID: UUID(),
+            start: start,
+            end: start.addingTimeInterval(7_200),
+            startCoordinate: FlightCoordinate(latitude: 53.63, longitude: 9.99),
+            endCoordinate: FlightCoordinate(latitude: 48.35, longitude: 11.79),
+            sampledRoute: (0..<200).map { FlightCoordinate(latitude: 53.63 - Double($0) * 0.026, longitude: 9.99 + Double($0) * 0.009) },
+            distanceMeters: 760_000
+        )
+
+        XCTAssertEqual(fingerprint.sampledRoute.count, 24)
+        let resolution = FlightAirportResolver.resolve(
+            fingerprint: fingerprint,
+            database: BundledAirportDatabase.make()
+        )
+        XCTAssertEqual(resolution.originCandidates.first?.iataCode, "HAM")
+        XCTAssertEqual(resolution.destinationCandidates.first?.iataCode, "MUC")
+    }
+
+    func testFlightMatchingRanksDelayedActualTimeAndCachesResponse() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let end = start.addingTimeInterval(7_200)
+        let fingerprint = FlightFingerprint(
+            moveID: UUID(),
+            start: start,
+            end: end,
+            startCoordinate: FlightCoordinate(latitude: 53.6304, longitude: 9.9882),
+            endCoordinate: FlightCoordinate(latitude: 48.3538, longitude: 11.7861),
+            sampledRoute: [
+                FlightCoordinate(latitude: 53.6304, longitude: 9.9882),
+                FlightCoordinate(latitude: 50.5, longitude: 10.8),
+                FlightCoordinate(latitude: 48.3538, longitude: 11.7861),
+            ],
+            distanceMeters: 760_000
+        )
+        let database = BundledAirportDatabase.make()
+        let resolution = FlightAirportResolver.resolve(fingerprint: fingerprint, database: database)
+        let origin = try XCTUnwrap(resolution.originCandidates.first)
+        let destination = try XCTUnwrap(resolution.destinationCandidates.first)
+
+        func candidate(id: String, scheduledDeparture: Date, actualDeparture: Date, actualArrival: Date) -> HistoricalFlightCandidate {
+            HistoricalFlightCandidate(
+                id: id,
+                airlineName: "Example Air",
+                airlineIATA: "EX",
+                airlineICAO: "EXA",
+                marketedFlightNumber: id,
+                callsign: "EXA\(id.dropFirst())",
+                origin: origin,
+                destination: destination,
+                scheduledDeparture: scheduledDeparture,
+                actualDeparture: actualDeparture,
+                scheduledArrival: scheduledDeparture.addingTimeInterval(7_200),
+                actualArrival: actualArrival,
+                aircraftRegistration: nil,
+                aircraftType: "A320",
+                historicalTrack: fingerprint.sampledRoute,
+                routeDistanceMeters: 760_000,
+                sourceIdentifier: "fixture"
+            )
+        }
+
+        let delayed = candidate(
+            id: "EX2055",
+            scheduledDeparture: start.addingTimeInterval(-3_600),
+            actualDeparture: start,
+            actualArrival: end
+        )
+        let scheduledOnly = candidate(
+            id: "EX2056",
+            scheduledDeparture: start,
+            actualDeparture: start.addingTimeInterval(3_600),
+            actualArrival: end.addingTimeInterval(3_600)
+        )
+        let service = FlightMatchingService(
+            database: database,
+            provider: InMemoryHistoricalFlightProvider(candidates: [delayed, scheduledOnly])
+        )
+
+        let first = try await service.match(fingerprint)
+        let second = try await service.match(fingerprint)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.bestMatch?.candidate.id, "EX2055")
+        XCTAssertTrue(first.bestMatch?.evidence.contains(where: { $0.signal == .trajectory }) == true)
+    }
+
+    func testProviderSuggestionCanBeConfirmedButNeverOverwritesUserMetadata() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let origin = AirportRecord(icaoCode: "EDDH", iataCode: "HAM", name: "Hamburg", coordinate: FlightCoordinate(latitude: 53.63, longitude: 9.99), municipality: "Hamburg", countryCode: "DE", airportType: .largeAirport)
+        let destination = AirportRecord(icaoCode: "EDDM", iataCode: "MUC", name: "Munich", coordinate: FlightCoordinate(latitude: 48.35, longitude: 11.79), municipality: "Munich", countryCode: "DE", airportType: .largeAirport)
+        let candidate = HistoricalFlightCandidate(
+            id: "fixture-2055",
+            airlineName: "Example Air",
+            airlineIATA: "EX",
+            airlineICAO: "EXA",
+            marketedFlightNumber: "2055",
+            callsign: "EXA2055",
+            origin: AirportCandidate(airport: origin, distanceMeters: 100),
+            destination: AirportCandidate(airport: destination, distanceMeters: 100),
+            scheduledDeparture: start,
+            actualDeparture: start,
+            scheduledArrival: start.addingTimeInterval(7_200),
+            actualArrival: start.addingTimeInterval(7_200),
+            aircraftRegistration: nil,
+            aircraftType: "A320",
+            historicalTrack: [],
+            routeDistanceMeters: 760_000,
+            sourceIdentifier: "fixture"
+        )
+        let fingerprint = FlightFingerprint(moveID: UUID(), start: start, end: start.addingTimeInterval(7_200), startCoordinate: origin.coordinate, endCoordinate: destination.coordinate, sampledRoute: [], distanceMeters: 760_000)
+        let match = FlightMatchRanker.rank(fingerprint: fingerprint, candidate: candidate)
+        let move = MoveSegment(dedupeKey: "flight", startDate: start, endDate: start.addingTimeInterval(7_200), transportMode: .plane, distanceMeters: 760_000, stepCount: nil)
+
+        XCTAssertTrue(move.storeProviderSuggestion(match))
+        XCTAssertEqual(move.flightMetadata?.provenance, .providerSuggested)
+        XCTAssertTrue(move.confirmFlightMatch(match))
+        XCTAssertEqual(move.flightMetadata?.provenance, .userConfirmed)
+
+        let manual = FlightMetadata(airlineName: "Manual Air", marketedFlightNumber: "MAN1", originIATA: "HAM", destinationIATA: "MUC", provenance: .userEntered)
+        XCTAssertTrue(move.setUserEnteredFlightMetadata(manual))
+        XCTAssertFalse(move.storeProviderSuggestion(match))
+        XCTAssertFalse(move.confirmFlightMatch(match))
+        XCTAssertEqual(move.flightMetadata?.airlineName, "Manual Air")
+
+        move.markFlightMatchStale()
+        XCTAssertFalse(move.flightMetadata?.isStale ?? true)
+    }
 }

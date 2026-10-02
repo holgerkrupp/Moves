@@ -4,10 +4,37 @@ import Foundation
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+import RouteFileKit
+import RoutePreviewKit
 
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+enum QuickLookRoutePreviewCacheWarmup {
+    static func warm(url: URL) {
+        Task { @MainActor in
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url),
+                  let tracks = try? RouteFileParser.parse(data: data, fileName: url.lastPathComponent),
+                  !tracks.isEmpty else { return }
+            do {
+                let result = try await RoutePreviewRenderer().render(RoutePreviewRequest(
+                    tracks: tracks,
+                    canvasSize: CGSize(width: 900, height: 560),
+                    scale: 1,
+                    appearance: .light,
+                    background: .map,
+                    pointBudget: 8_000
+                ))
+                try RoutePreviewCache.store(result.image, for: data, appearance: .light)
+            } catch {
+                // Preview caching is auxiliary; route opening/importing must still work.
+            }
+        }
     }
 }
 
@@ -3946,6 +3973,7 @@ struct RouteFileDropItem: Transferable, Sendable {
     }
 }
 
+#if false
 struct ImportedRouteTrack {
     let locations: [CLLocation]
     let transportMode: TransportMode
@@ -4535,6 +4563,143 @@ final class XMLRouteTrackParser: NSObject, XMLParserDelegate {
 
     private func localName(_ elementName: String) -> String {
         elementName.split(separator: ":").last.map(String.init) ?? elementName
+    }
+}
+
+#endif
+
+struct ImportedRouteTrack {
+    let locations: [CLLocation]
+    let transportMode: TransportMode
+    let hasOriginalTimestamps: Bool
+    var startsAfterVisitGap: Bool = false
+}
+
+struct RouteTrackPointDTO: Sendable, Hashable {
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let timestamp: Date
+}
+
+struct RouteTrackDTO: Sendable {
+    let points: [RouteTrackPointDTO]
+    let transportMode: TransportMode
+    let hasOriginalTimestamps: Bool
+    var startsAfterVisitGap = false
+
+    func makeImportedTrack() -> ImportedRouteTrack {
+        ImportedRouteTrack(
+            locations: points.compactMap { point in
+                let coordinate = CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+                guard CLLocationCoordinate2DIsValid(coordinate), point.altitude.isFinite,
+                      point.timestamp.timeIntervalSinceReferenceDate.isFinite else { return nil }
+                return CLLocation(coordinate: coordinate, altitude: point.altitude, horizontalAccuracy: 5,
+                                  verticalAccuracy: point.altitude == 0 ? -1 : 5, course: -1, speed: -1,
+                                  timestamp: point.timestamp)
+            }, transportMode: transportMode, hasOriginalTimestamps: hasOriginalTimestamps,
+            startsAfterVisitGap: startsAfterVisitGap
+        )
+    }
+}
+
+private enum RouteFileKitAdapter {
+    static func importedTracks(data: Data, fileName: String) throws -> [ImportedRouteTrack] {
+        try RouteFileParser.parse(data: data, fileName: fileName).map(importedTrack)
+    }
+
+    static func importedTracks(url: URL) throws -> [ImportedRouteTrack] {
+        try RouteFileParser.parse(url: url).map(importedTrack)
+    }
+
+    static func importedTrack(_ track: RouteTrack) -> ImportedRouteTrack {
+        ImportedRouteTrack(
+            locations: track.points.map { point in
+                CLLocation(coordinate: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude),
+                           altitude: point.altitude, horizontalAccuracy: 5,
+                           verticalAccuracy: point.altitude == 0 ? -1 : 5, course: -1, speed: -1,
+                           timestamp: point.timestamp)
+            },
+            transportMode: TransportMode(rawValue: track.transportMode.rawValue) ?? .unknown,
+            hasOriginalTimestamps: track.hasOriginalTimestamps,
+            startsAfterVisitGap: track.startsAfterVisitGap
+        )
+    }
+}
+
+enum XMLRouteTrackParser {
+    static func parse(data: Data, fileName: String) throws -> [ImportedRouteTrack] {
+        try RouteFileKitAdapter.importedTracks(data: data, fileName: fileName)
+    }
+
+    static func parse(url: URL, fileName: String) throws -> [ImportedRouteTrack] {
+        try RouteFileKitAdapter.importedTracks(url: url)
+    }
+}
+
+private enum GeoJSONRouteTrackParser {
+    static func parse(data: Data, fileName: String) throws -> [ImportedRouteTrack] {
+        try RouteFileKitAdapter.importedTracks(data: data, fileName: fileName)
+    }
+}
+
+enum RouteTrackParserWorker {
+    private static let pointChunkSize = 4_096
+
+    static func parse(url: URL) throws -> [RouteTrackDTO] {
+        try RouteFileParser.parse(url: url).flatMap { track in
+            let points = track.points.map { RouteTrackPointDTO(latitude: $0.latitude, longitude: $0.longitude,
+                                                               altitude: $0.altitude, timestamp: $0.timestamp) }
+            let mode = TransportMode(rawValue: track.transportMode.rawValue) ?? .unknown
+            guard points.count > pointChunkSize else {
+                return [RouteTrackDTO(points: points, transportMode: mode,
+                                      hasOriginalTimestamps: track.hasOriginalTimestamps,
+                                      startsAfterVisitGap: track.startsAfterVisitGap)]
+            }
+            return stride(from: 0, to: points.count, by: pointChunkSize).compactMap { start in
+                let end = min(start + pointChunkSize, points.count)
+                guard end - start >= 2 else { return nil }
+                return RouteTrackDTO(points: Array(points[start..<end]), transportMode: mode,
+                                     hasOriginalTimestamps: track.hasOriginalTimestamps,
+                                     startsAfterVisitGap: start == 0 && track.startsAfterVisitGap)
+            }
+        }
+    }
+}
+
+private enum ImportedRouteTrackSegmentation {
+    static func split(_ tracks: [ImportedRouteTrack]) -> [ImportedRouteTrack] {
+        var result: [ImportedRouteTrack] = []
+        for track in tracks {
+            let ordered = track.locations.sorted { $0.timestamp < $1.timestamp }
+            guard ordered.count >= 2 else { continue }
+            var current: [CLLocation] = [ordered[0]]
+            for location in ordered.dropFirst() {
+                guard let previous = current.last else { continue }
+                let duration = location.timestamp.timeIntervalSince(previous.timestamp)
+                let distance = previous.distance(from: location)
+                if duration >= 15 * 60 && distance <= 5_000 && distance / duration <= 1 {
+                    if current.count >= 2 {
+                        result.append(ImportedRouteTrack(locations: current, transportMode: track.transportMode,
+                                                         hasOriginalTimestamps: track.hasOriginalTimestamps,
+                                                         startsAfterVisitGap: result.isEmpty && track.startsAfterVisitGap))
+                    }
+                    current = [location]
+                } else { current.append(location) }
+            }
+            if current.count >= 2 {
+                result.append(ImportedRouteTrack(locations: current, transportMode: track.transportMode,
+                                                 hasOriginalTimestamps: track.hasOriginalTimestamps))
+            }
+        }
+        result.sort { ($0.locations.first?.timestamp ?? .distantFuture) < ($1.locations.first?.timestamp ?? .distantFuture) }
+        if result.count > 1 {
+            for index in result.indices.dropFirst() {
+                guard let previous = result[index - 1].locations.last, let next = result[index].locations.first else { continue }
+                result[index].startsAfterVisitGap = next.timestamp.timeIntervalSince(previous.timestamp) >= 15 * 60
+            }
+        }
+        return result
     }
 }
 

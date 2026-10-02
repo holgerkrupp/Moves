@@ -479,6 +479,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
     let routeCacheSignature: String?
     let routeCacheCoordinatesData: Data?
     let manualRouteCoordinatesData: Data?
+    let flightMetadataData: Data?
     let samples: [LocationSample]
 
     init(move: MoveSegment) {
@@ -499,6 +500,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         routeCacheSignature = move.routeCacheSignature
         routeCacheCoordinatesData = move.routeCacheCoordinatesData
         manualRouteCoordinatesData = move.manualRouteCoordinatesData
+        flightMetadataData = move.flightMetadataData
         samples = move.samples
     }
 
@@ -515,6 +517,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         move.routeCacheSignature = routeCacheSignature
         move.routeCacheCoordinatesData = routeCacheCoordinatesData
         move.manualRouteCoordinatesData = manualRouteCoordinatesData
+        move.flightMetadataData = flightMetadataData
         move.samples = samples
         samples.forEach { $0.moveSegment = move }
         context.insert(move)
@@ -542,6 +545,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         move.routeCacheSignature = routeCacheSignature
         move.routeCacheCoordinatesData = routeCacheCoordinatesData
         move.manualRouteCoordinatesData = manualRouteCoordinatesData
+        move.flightMetadataData = flightMetadataData
         move.samples = samples
         samples.forEach { $0.moveSegment = move }
     }
@@ -630,15 +634,15 @@ private struct DeletedTimelineDay: TimelineDeletionUndoPayload {
 }
 
 private struct DeletedTimelineDayPlace {
-    let id: UUID, deviceIdentifier: String, arrivalDate: Date, departureDate: Date?, latitude: Double, longitude: Double, horizontalAccuracy: Double, userLabel: String?, autoLabel: String?, comment: String?, createdAt: Date
-    init(_ place: VisitPlace) { id = place.id; deviceIdentifier = place.deviceIdentifier; arrivalDate = place.arrivalDate; departureDate = place.departureDate; latitude = place.latitude; longitude = place.longitude; horizontalAccuracy = place.horizontalAccuracy; userLabel = place.userLabel; autoLabel = place.autoLabel; comment = place.comment; createdAt = place.createdAt }
-    func makeModel(day: DayTimeline) -> VisitPlace { let p = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment); p.id = id; p.deviceIdentifier = deviceIdentifier; p.createdAt = createdAt; p.dayTimeline = day; return p }
+    let id: UUID, deviceIdentifier: String, arrivalDate: Date, departureDate: Date?, latitude: Double, longitude: Double, horizontalAccuracy: Double, userLabel: String?, autoLabel: String?, comment: String?, photoAssetIDsRawValue: String?, createdAt: Date
+    init(_ place: VisitPlace) { id = place.id; deviceIdentifier = place.deviceIdentifier; arrivalDate = place.arrivalDate; departureDate = place.departureDate; latitude = place.latitude; longitude = place.longitude; horizontalAccuracy = place.horizontalAccuracy; userLabel = place.userLabel; autoLabel = place.autoLabel; comment = place.comment; photoAssetIDsRawValue = place.photoAssetIDsRawValue; createdAt = place.createdAt }
+    func makeModel(day: DayTimeline) -> VisitPlace { let p = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment); p.id = id; p.deviceIdentifier = deviceIdentifier; p.photoAssetIDsRawValue = photoAssetIDsRawValue; p.createdAt = createdAt; p.dayTimeline = day; return p }
 }
 
 private struct DeletedTimelineDayMove {
-    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?, importedRouteData: Data?
-    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData; importedRouteData = move.importedRouteData }
-    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; m.importedRouteData = importedRouteData; return m }
+    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?, importedRouteData: Data?, flightMetadataData: Data?
+    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData; importedRouteData = move.importedRouteData; flightMetadataData = move.flightMetadataData }
+    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; m.importedRouteData = importedRouteData; m.flightMetadataData = flightMetadataData; return m }
 }
 
 private struct DeletedTimelineDaySample {
@@ -837,6 +841,9 @@ final class MoveSegment {
     /// without faulting the sample relationship.
     @Attribute(.externalStorage)
     var importedRouteData: Data? = nil
+    /// Normalized flight enrichment is kept as a small version-tolerant blob so
+    /// provider fields can evolve without making them SwiftData columns.
+    var flightMetadataData: Data? = nil
 
     @Relationship(deleteRule: .nullify, originalName: "samples", inverse: \LocationSample.moveSegment)
     var samplesStorage: [LocationSample]? = nil
@@ -868,7 +875,13 @@ final class MoveSegment {
 
     var transportMode: TransportMode {
         get { TransportMode(rawValue: transportModeRawValue) ?? .unknown }
-        set { transportModeRawValue = newValue.rawValue }
+        set {
+            let oldValue = TransportMode(rawValue: transportModeRawValue) ?? .unknown
+            transportModeRawValue = newValue.rawValue
+            if oldValue == .plane && newValue != .plane {
+                markFlightMatchStale()
+            }
+        }
     }
 
     var timelineStartDate: Date {
@@ -894,21 +907,25 @@ final class MoveSegment {
     }
 
     func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
-        guard routeCacheSignature == signature, routeCacheCoordinatesData != nil else {
-            return nil
+        let local = MoveRouteCacheStore.shared.load(moveID: id, signature: signature)
+        if let local, !local.isEmpty {
+            return local
         }
 
-        return RouteCoordinateStorage.decode(routeCacheCoordinatesData)
+        let legacy = RouteCoordinateStorage.decode(routeCacheCoordinatesData)
+        guard routeCacheSignature == signature, !legacy.isEmpty else {
+            return nil
+        }
+        MoveRouteCacheStore.shared.store(legacy, moveID: id, signature: signature)
+        return legacy
     }
 
     func storeCachedRouteCoordinates(_ coordinates: [CLLocationCoordinate2D], signature: String) {
-        routeCacheSignature = signature
-        routeCacheCoordinatesData = RouteCoordinateStorage.encode(coordinates)
+        MoveRouteCacheStore.shared.store(coordinates, moveID: id, signature: signature)
     }
 
     func clearCachedRouteCoordinates() {
-        routeCacheSignature = nil
-        routeCacheCoordinatesData = nil
+        MoveRouteCacheStore.shared.remove(moveID: id)
     }
 
     var importedRouteCoordinates: [CLLocationCoordinate2D]? {
@@ -933,6 +950,18 @@ struct ImportedRoutePayloadPoint: Codable, Sendable {
         altitude = location.altitude
         horizontalAccuracy = location.horizontalAccuracy
         speed = location.speed
+    }
+
+    var asLocation: CLLocation {
+        CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+            altitude: altitude,
+            horizontalAccuracy: horizontalAccuracy,
+            verticalAccuracy: -1,
+            course: -1,
+            speed: speed,
+            timestamp: timestamp
+        )
     }
 }
 
@@ -1101,6 +1130,7 @@ struct MoveSegmentSnapshot: Codable {
     let routeCacheSignature: String?
     let routeCacheCoordinatesData: Data?
     let manualRouteCoordinatesData: Data?
+    let flightMetadataData: Data?
 }
 
 struct LocationSampleSnapshot: Codable {
@@ -1272,7 +1302,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     dayKey: move.dayTimeline?.dayKey,
                     routeCacheSignature: move.routeCacheSignature,
                     routeCacheCoordinatesData: move.routeCacheCoordinatesData,
-                    manualRouteCoordinatesData: move.manualRouteCoordinatesData
+                    manualRouteCoordinatesData: move.manualRouteCoordinatesData,
+                    flightMetadataData: move.flightMetadataData
                 )
             },
             samples: samples.map { sample in
@@ -1359,6 +1390,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             move.routeCacheSignature = moveSnapshot.routeCacheSignature
             move.routeCacheCoordinatesData = moveSnapshot.routeCacheCoordinatesData
             move.manualRouteCoordinatesData = moveSnapshot.manualRouteCoordinatesData
+            move.flightMetadataData = moveSnapshot.flightMetadataData
             if let dayKey = moveSnapshot.dayKey {
                 move.dayTimeline = timelinesByDayKey[dayKey]
             }
@@ -1610,9 +1642,16 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             return nil
         }
 
-        // Route samples stay unsaved until they have been attached to their move. This keeps
-        // an interrupted import from leaving a list of independent timeline samples behind.
-        let samples = try insertSamples(from: orderedLocations, source: source)
+        // Dense file routes are authoritative in importedRouteData. Keeping one
+        // SwiftData entity per point would duplicate the same payload in CloudKit
+        // and can backlog unrelated live Places/Moves. Legacy and live route
+        // sources continue to use LocationSample rows.
+        let samples: [LocationSample]
+        if source == .fileRouteImport {
+            samples = []
+        } else {
+            samples = try insertSamples(from: orderedLocations, source: source)
+        }
         let distance = Self.totalDistance(for: orderedLocations)
 
         let startPlace: VisitPlace
@@ -1649,12 +1688,6 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         if source == .fileRouteImport {
             move.importedRouteData = ImportedRoutePayloadCodec.encode(orderedLocations)
         }
-
-        let importedCoordinates = MoveRouteGeometry.rawCoordinates(for: move)
-        move.storeCachedRouteCoordinates(
-            importedCoordinates,
-            signature: MoveRouteGeometry.cacheSignature(for: move, fallback: importedCoordinates)
-        )
 
         if saveImmediately {
             try saveIfNeeded()
@@ -1843,6 +1876,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     func saveIfNeeded() throws {
         guard modelContext.hasChanges else { return }
         try modelContext.save()
+        NotificationCenter.default.post(name: .movesTimelineDidChange, object: nil)
     }
 
     private func timeline(for date: Date) throws -> DayTimeline {
@@ -2376,6 +2410,11 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         }
         if destination.dayTimeline == nil {
             destination.dayTimeline = source.dayTimeline
+        }
+
+        if destination.flightMetadataData == nil ||
+            (destination.flightMetadata?.provenance == .providerSuggested && source.hasAuthoritativeFlightMetadata) {
+            destination.flightMetadataData = source.flightMetadataData
         }
 
         if destination.routeCacheCoordinatesData == nil,

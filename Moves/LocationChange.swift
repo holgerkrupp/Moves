@@ -92,6 +92,12 @@ protocol TimelineAssembler {
     func flushPendingChanges()
 }
 
+@MainActor
+protocol InferredMoveRouteMatchingScheduler: AnyObject {
+    func scheduleRouteMatching(for move: MoveSegment)
+    func schedulePendingRouteMatches(limit: Int)
+}
+
 enum VisitGapFillingSettings {
     static let isEnabledKey = "Moves.visitGapFilling.isEnabled"
     static let defaultIsEnabled = true
@@ -377,6 +383,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
     private let motionClassifier: MotionClassifier
     private let placeNameResolver: PlaceNameResolver
     private let automaticallyFillsVisitGaps: () -> Bool
+    private let routeMatchingScheduler: InferredMoveRouteMatchingScheduler?
     private var pendingLiveSampleCount = 0
     private var pendingLiveDayKeys = Set<String>()
     private var pendingLiveSampleSaveTask: Task<Void, Never>?
@@ -385,6 +392,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         repository: TimelineRepository,
         motionClassifier: MotionClassifier,
         placeNameResolver: PlaceNameResolver,
+        routeMatchingScheduler: InferredMoveRouteMatchingScheduler? = nil,
         automaticallyFillsVisitGaps: @escaping () -> Bool = {
             VisitGapFillingSettings.isEnabled()
         }
@@ -392,6 +400,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         self.repository = repository
         self.motionClassifier = motionClassifier
         self.placeNameResolver = placeNameResolver
+        self.routeMatchingScheduler = routeMatchingScheduler
         self.automaticallyFillsVisitGaps = automaticallyFillsVisitGaps
     }
 
@@ -524,7 +533,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
         let totalDistance = Self.totalDistance(for: movementLocations)
 
-        _ = try repository.upsertMove(
+        let move = try repository.upsertMove(
             startPlace: previousPlace,
             endPlace: visitPlace,
             startDate: startDate,
@@ -534,6 +543,11 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             stepCount: steps,
             samples: betweenSamples
         )
+
+        // Route matching is a lifecycle concern, not a presentation concern. The
+        // scheduler snapshots the move synchronously and performs all network work
+        // independently, so sparse location ingestion is never held up by MapKit.
+        routeMatchingScheduler?.scheduleRouteMatching(for: move)
 
         return true
     }
@@ -672,6 +686,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     let isDemoMode = false
     #endif
     private let assembler: TimelineAssembler
+    private let routeMatchingScheduler: AutomaticInferredMoveRouteMatchingScheduler
     private let routeTrackingLiveActivity = RouteTrackingLiveActivityCoordinator()
     private var pendingOneShotLocationSource: LocationSampleSource?
     private var pendingTemporaryRouteTrackingDuration: TemporaryRouteTrackingDuration?
@@ -728,10 +743,15 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     init(modelContainer: ModelContainer, userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         let repository = SwiftDataTimelineRepository(modelContainer: modelContainer)
+        let routeMatchingScheduler = AutomaticInferredMoveRouteMatchingScheduler(
+            modelContainer: modelContainer
+        )
+        self.routeMatchingScheduler = routeMatchingScheduler
         self.assembler = DefaultTimelineAssembler(
             repository: repository,
             motionClassifier: CoreMotionTransportClassifier(),
             placeNameResolver: CLGeocoderPlaceNameResolver(),
+            routeMatchingScheduler: routeMatchingScheduler,
             automaticallyFillsVisitGaps: {
                 VisitGapFillingSettings.isEnabled(userDefaults: userDefaults)
             }
@@ -766,6 +786,12 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     @discardableResult
     func fillVisitGaps(onDayWithKey dayKey: String) async -> Int {
         await assembler.fillVisitGaps(onDayWithKey: dayKey)
+    }
+
+    /// Retries only moves whose current route signature has no persisted result.
+    /// The scheduler applies its own small batch limit and request limiter.
+    func retryPendingRouteMatches(limit: Int = 4) {
+        routeMatchingScheduler.schedulePendingRouteMatches(limit: limit)
     }
 
     var trackingStatusText: String {

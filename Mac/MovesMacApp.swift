@@ -4,6 +4,7 @@ import MapKit
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+import CloudKitSyncMonitor
 
 #if os(macOS)
 import AppKit
@@ -58,13 +59,13 @@ private final class MovesMacAppDelegate: NSObject, NSApplicationDelegate {
 struct MovesMacApp: App {
     private static let mainWindowID = "moves.main-window"
     private static let aboutWindowID = "moves.about-window"
+    private static let helpWindowID = "moves.help-window"
 #if DEBUG
     private static let explorationDebugWindowID = "moves.exploration-debug-window"
 #endif
 
     @NSApplicationDelegateAdaptor(MovesMacAppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
-    private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
     private let modelContainer: ModelContainer
 #if DEBUG
     private let demoModelContainer: ModelContainer
@@ -73,10 +74,13 @@ struct MovesMacApp: App {
     @StateObject private var importCoordinator: ImportCoordinator
     @StateObject private var routeFileImporter: RouteFileImporter
     @StateObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
+    @StateObject private var cloudDataPresencePublisher: MovesCloudDataPresencePublisher
+    @StateObject private var syncDiagnostics: MovesSyncDiagnostics
     @AppStorage(RouteFileImportPreferenceKey.showsMacMenuBarStatus)
     private var showsImportStatusInMenuBar = true
 
     init() {
+        SyncMonitor.default.startMonitoring()
         do {
             let container = try Self.makeModelContainer()
             let coordinator = ImportCoordinator()
@@ -97,15 +101,19 @@ struct MovesMacApp: App {
             _importedRouteDataSummary = StateObject(
                 wrappedValue: ImportedRouteDataSummaryStore(modelContainer: container)
             )
+            _cloudDataPresencePublisher = StateObject(
+                wrappedValue: MovesCloudDataPresencePublisher(modelContainer: container)
+            )
+            _syncDiagnostics = StateObject(
+                wrappedValue: MovesSyncDiagnostics(modelContainer: container)
+            )
         } catch {
             fatalError("Could not create the Moves macOS model container: \(error)")
         }
     }
 
     static func makeModelContainer() throws -> ModelContainer {
-        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self, MovesDeviceProfile.self])
-        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .private(cloudKitContainerIdentifier))
-        return try ModelContainer(for: schema, configurations: [configuration])
+        try MovesTimelineStore.makeContainer()
     }
 
     var body: some Scene {
@@ -124,6 +132,8 @@ struct MovesMacApp: App {
 #endif
             .environmentObject(importCoordinator)
             .environmentObject(routeFileImporter)
+            .environmentObject(cloudDataPresencePublisher)
+            .environmentObject(syncDiagnostics)
             .defaultSize(width: 1_180, height: 760)
             .commands {
                 CommandGroup(after: .windowList) {
@@ -136,6 +146,12 @@ struct MovesMacApp: App {
                 CommandGroup(replacing: .appInfo) {
                     Button("About Moves") {
                         openWindow(id: Self.aboutWindowID)
+                    }
+                }
+
+                CommandGroup(after: .help) {
+                    Button("Moves Help") {
+                        openWindow(id: Self.helpWindowID)
                     }
                 }
 
@@ -152,6 +168,8 @@ struct MovesMacApp: App {
             MovesMacSettingsView()
                 .modelContainer(modelContainer)
                 .environmentObject(importCoordinator)
+                .environmentObject(cloudDataPresencePublisher)
+                .environmentObject(syncDiagnostics)
         }
         .defaultSize(width: 880, height: 620)
 
@@ -160,6 +178,11 @@ struct MovesMacApp: App {
         }
         .defaultSize(width: 420, height: 390)
         .windowResizability(.contentSize)
+
+        Window("Moves Help", id: Self.helpWindowID) {
+            MovesMacHelpView()
+        }
+        .defaultSize(width: 980, height: 680)
 
 #if DEBUG
         Window("Exploration Debug", id: Self.explorationDebugWindowID) {
@@ -850,6 +873,7 @@ private struct MovesMacSettingsView: View {
         switch section {
         case .general:
             settingsForm(title: section.title) {
+                MovesSyncDiagnosticsCard()
                 Section("Workspace") {
                     Toggle("Show inspector", isOn: $showsInspector)
                     Toggle("Select the latest recorded day when opening a window", isOn: $selectsLatestDay)
@@ -1044,6 +1068,382 @@ private struct MovesMacAboutView: View {
         }
         .padding(28)
         .frame(width: 420)
+    }
+}
+
+private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
+    case overview
+    case timeline
+    case importRoutes
+    case importQueue
+    case export
+    case settings
+    case shortcuts
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .overview: "Overview"
+        case .timeline: "Browse your timeline"
+        case .importRoutes: "Import route files"
+        case .importQueue: "Manage imports"
+        case .export: "Export timeline data"
+        case .settings: "Settings and privacy"
+        case .shortcuts: "Keyboard shortcuts"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .overview: "What Moves does and how the Mac app fits in."
+        case .timeline: "Find days, inspect activities, and edit records."
+        case .importRoutes: "Bring route history in from other apps and services."
+        case .importQueue: "Track progress, pause work, and resolve failures."
+        case .export: "Save selected days or your complete history."
+        case .settings: "Configure the workspace, data handling, and storage."
+        case .shortcuts: "Navigate and work quickly from the keyboard."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview: "mappin.and.ellipse"
+        case .timeline: "calendar.day.timeline.left"
+        case .importRoutes: "square.and.arrow.down"
+        case .importQueue: "list.bullet.rectangle.portrait"
+        case .export: "square.and.arrow.up"
+        case .settings: "gearshape"
+        case .shortcuts: "command"
+        }
+    }
+
+    var searchTerms: String {
+        "\(title) \(subtitle)"
+    }
+
+    var sections: [MovesMacHelpSection] {
+        switch self {
+        case .overview:
+            [
+                MovesMacHelpSection(
+                    title: "A private travel timeline",
+                    paragraphs: [
+                        "Moves records the places you visit and the trips between them. The Mac app turns that history into a searchable library of days, maps, activities, and route details.",
+                        "Your iPhone is the primary recording device. Keep Moves running in the background on iPhone, and the timeline can appear on your Mac through your private iCloud container."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "A typical workflow",
+                    bullets: [
+                        "Select a day in the sidebar to see its map and activity table.",
+                        "Select a place or move to inspect its metadata in the inspector.",
+                        "Import route files when another app has a more detailed track.",
+                        "Export a day or your complete history when you need to use the data elsewhere."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Getting started",
+                    paragraphs: [
+                        "Use Welcome to Moves from the Help menu to revisit the short introduction. It explains iPhone recording and the Mac route-file workflow."
+                    ]
+                )
+            ]
+
+        case .timeline:
+            [
+                MovesMacHelpSection(
+                    title: "Find a day",
+                    paragraphs: [
+                        "The sidebar groups recorded days by year and month, with recent days near the top. Use the search field to find a date, place name, or transport mode. The date button in the toolbar jumps to the closest recorded day."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Read a day",
+                    bullets: [
+                        "The map shows places, location samples, and route lines for the selected day.",
+                        "The activity table lists places and moves with their times, distance, duration, and metadata.",
+                        "The inspector shows detailed coordinates, source information, comments, and record identifiers.",
+                        "Use the inspector or an activity context menu to change a move's transport mode."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Edit carefully",
+                    paragraphs: [
+                        "Move context menus include Duplicate Activity, Simplify Route, and Reset Route Edits. You can delete an entry or an entire day from the inspector or context menu; deletions can be undone with the standard macOS Undo command."
+                    ]
+                )
+            ]
+
+        case .importRoutes:
+            [
+                MovesMacHelpSection(
+                    title: "Three ways to import",
+                    paragraphs: [
+                        "Moves accepts folders, ZIP archives, JSON, GPX, TCX, KML, and GeoJSON files. A batch can contain more than one file."
+                    ],
+                    bullets: [
+                        "Choose File > Import Route Files…",
+                        "Drag files or folders onto a Moves window.",
+                        "Open supported route files in Finder with Moves."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Route mapping",
+                    bullets: [
+                        "Automatic uses the filename and route metadata to choose a mode; detailed flight tracks keep their recorded path.",
+                        "Use a dedicated transport mode when every route in the import represents the same kind of travel.",
+                        "Raw data stores the original GPS points without road or flight map matching."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "When imported times overlap",
+                    bullets: [
+                        "Keep existing data and prefer imported route keeps phone samples while using the imported geometry for display.",
+                        "Skip dates that already contain data leaves those dates unchanged.",
+                        "Expand around existing time ranges imports points outside existing moves as separate route chunks.",
+                        "Overwrite existing time ranges removes overlapping moves and samples before importing."
+                    ]
+                )
+            ]
+
+        case .importQueue:
+            [
+                MovesMacHelpSection(
+                    title: "Follow progress",
+                    paragraphs: [
+                        "After you start an import, the Import Queue shows the current file, completed work, remaining files, and an estimated completion time. The queue is also available from the menu bar when Show import status in the menu bar is enabled."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Pause or stop",
+                    bullets: [
+                        "Pause keeps the import and its staged files available so you can resume later.",
+                        "Stop cancels the active import. Files that have already been committed remain in the timeline.",
+                        "The menu bar item lets you monitor and control an import without keeping the main window in front."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "If something fails",
+                    paragraphs: [
+                        "Open Failed Imports in the sidebar or from the History menu. Moves keeps recovery information for unresolved files so you can provide missing details or retry the affected import without starting the whole batch again."
+                    ]
+                )
+            ]
+
+        case .export:
+            [
+                MovesMacHelpSection(
+                    title: "Available exports",
+                    paragraphs: [
+                        "GPX contains places and route tracks, GeoJSON contains point and line features, and CSV contains a table of places and moves."
+                    ],
+                    bullets: [
+                        "Export Selected Day creates a GPX or GeoJSON file for the selected day.",
+                        "Export All History creates GPX, GeoJSON, or CSV for all recorded days.",
+                        "You can also export an individual place or move from its context menu."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Choose what is included",
+                    paragraphs: [
+                        "Settings > Export controls whether saved places and comments are included. Exports are created through the standard macOS save panel, so you choose the destination and filename each time."
+                    ]
+                )
+            ]
+
+        case .settings:
+            [
+                MovesMacHelpSection(
+                    title: "Workspace and appearance",
+                    bullets: [
+                        "General controls the inspector and whether the latest recorded day is selected when a window opens.",
+                        "Appearance controls map markers, map elevation, and route line width.",
+                        "Import controls menu bar progress plus the default mapping and overlap choices for new imports.",
+                        "Export controls whether places and comments are included in exported files."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Data",
+                    paragraphs: [
+                        "The Data section reports recorded days, moves, samples, imported records, active jobs, and unresolved imports. It is a quick way to understand what Moves currently has stored."
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Privacy",
+                    paragraphs: [
+                        "Location history stays in your private app data and private iCloud container unless you explicitly import, export, or configure an external service. Imported-route recovery information is kept locally so interrupted imports can be resumed or repaired."
+                    ]
+                )
+            ]
+
+        case .shortcuts:
+            [
+                MovesMacHelpSection(
+                    title: "Commands",
+                    shortcuts: [
+                        ("⌘O", "Import route files"),
+                        ("⇧⌘I", "Show the import queue"),
+                        ("⇧⌘T", "Select today"),
+                        ("⌘[", "Select the previous day"),
+                        ("⌘]", "Select the next day"),
+                        ("⌥⌘I", "Show or hide the inspector"),
+                        ("⌘0", "Open Moves")
+                    ]
+                ),
+                MovesMacHelpSection(
+                    title: "Standard macOS commands",
+                    paragraphs: [
+                        "Moves supports the standard macOS Undo, Redo, Copy, and Delete commands where they apply. Right-click a day or activity to see the actions available for that selection."
+                    ]
+                )
+            ]
+        }
+    }
+}
+
+private struct MovesMacHelpSection: Identifiable {
+    let title: String
+    let paragraphs: [String]
+    let bullets: [String]
+    let shortcuts: [(String, String)]
+
+    init(
+        title: String,
+        paragraphs: [String] = [],
+        bullets: [String] = [],
+        shortcuts: [(String, String)] = []
+    ) {
+        self.title = title
+        self.paragraphs = paragraphs
+        self.bullets = bullets
+        self.shortcuts = shortcuts
+    }
+
+    var id: String { title }
+}
+
+private struct MovesMacHelpView: View {
+    @State private var selection: MovesMacHelpTopic? = .overview
+    @State private var searchText = ""
+
+    private var filteredTopics: [MovesMacHelpTopic] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return MovesMacHelpTopic.allCases }
+        return MovesMacHelpTopic.allCases.filter {
+            $0.searchTerms.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var selectedTopic: MovesMacHelpTopic {
+        selection ?? filteredTopics.first ?? .overview
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selection) {
+                Section("Moves Help") {
+                    ForEach(filteredTopics) { topic in
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(topic.title)
+                                Text(topic.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        } icon: {
+                            Image(systemName: topic.systemImage)
+                                .foregroundStyle(.tint)
+                        }
+                        .padding(.vertical, 3)
+                        .tag(topic)
+                    }
+                }
+            }
+            .searchable(text: $searchText, placement: .sidebar, prompt: "Search help")
+            .navigationSplitViewColumnWidth(min: 230, ideal: 285, max: 350)
+            .overlay {
+                if filteredTopics.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                }
+            }
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(selectedTopic.title, systemImage: selectedTopic.systemImage)
+                            .font(.largeTitle.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text(selectedTopic.subtitle)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(selectedTopic.sections) { section in
+                        MovesMacHelpSectionView(section: section)
+                    }
+                }
+                .frame(maxWidth: 720, alignment: .leading)
+                .padding(34)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 760, minHeight: 520)
+    }
+}
+
+private struct MovesMacHelpSectionView: View {
+    let section: MovesMacHelpSection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(section.title)
+                .font(.title2.weight(.semibold))
+
+            ForEach(section.paragraphs, id: \.self) { paragraph in
+                Text(paragraph)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !section.bullets.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(section.bullets, id: \.self) { bullet in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 5, height: 5)
+                            Text(bullet)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+
+            if !section.shortcuts.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(section.shortcuts.enumerated()), id: \.offset) { _, shortcut in
+                        HStack {
+                            Text(shortcut.0)
+                                .font(.body.monospaced().weight(.semibold))
+                                .frame(width: 72, alignment: .leading)
+                            Text(shortcut.1)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 7)
+                        Divider()
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
     }
 }
 
@@ -1940,9 +2340,7 @@ private struct MacDayWorkspace: View {
         let changedMoves = moves.filter { $0.transportMode != mode }
         guard !changedMoves.isEmpty else { return }
 
-        let previousValues = changedMoves.map {
-            ($0, $0.transportMode, $0.routeCacheSignature, $0.routeCacheCoordinatesData)
-        }
+        let previousValues = changedMoves.map { ($0, $0.transportMode) }
         changedMoves.forEach {
             $0.transportMode = mode
             $0.clearCachedRouteCoordinates()
@@ -1951,10 +2349,8 @@ private struct MacDayWorkspace: View {
         do {
             try modelContext.save()
         } catch {
-            previousValues.forEach { move, transportMode, cacheSignature, cacheCoordinates in
+            previousValues.forEach { move, transportMode in
                 move.transportMode = transportMode
-                move.routeCacheSignature = cacheSignature
-                move.routeCacheCoordinatesData = cacheCoordinates
             }
             transportModeSaveError = error.localizedDescription
         }
@@ -2440,8 +2836,6 @@ private struct MacInspector: View {
         guard move.transportMode != mode else { return }
 
         let previousMode = move.transportMode
-        let previousCacheSignature = move.routeCacheSignature
-        let previousCacheCoordinates = move.routeCacheCoordinatesData
         let previousManualCoordinates = move.manualRouteCoordinatesData
 
         move.transportMode = mode
@@ -2452,8 +2846,6 @@ private struct MacInspector: View {
             try modelContext.save()
         } catch {
             move.transportMode = previousMode
-            move.routeCacheSignature = previousCacheSignature
-            move.routeCacheCoordinatesData = previousCacheCoordinates
             move.manualRouteCoordinatesData = previousManualCoordinates
             transportModeSaveError = error.localizedDescription
         }
@@ -2746,6 +3138,18 @@ private enum MacTimelineExporter {
     }
 
     private static func routePoints(for move: MoveSegment) -> [MacTimelineTrackPoint] {
+        if let importedPoints = ImportedRoutePayloadCodec.decode(move.importedRouteData),
+           importedPoints.count > 1 {
+            return importedPoints.map {
+                MacTimelineTrackPoint(
+                    latitude: $0.latitude,
+                    longitude: $0.longitude,
+                    elevation: $0.altitude,
+                    timestamp: $0.timestamp
+                )
+            }
+        }
+
         let samples = move.samples.sorted { $0.timestamp < $1.timestamp }
         if samples.count > 1 {
             return samples.map {

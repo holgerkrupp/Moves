@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/Tests/RouteFileKitTests/RouteFileKitTests.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.dia",
+    "index-unit-output-path" : "/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.bc",
+    "object" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/Moves/Packages/RouteFileKit/.build/out/Intermediates.noindex/RouteFileKit.build/Debug/RouteFileKitTests-p.build/Objects-normal/arm64/RouteFileKitTests~partial.swiftmodule"
+  }
+}

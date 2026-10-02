@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import MapKit
+import SwiftData
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -744,6 +745,205 @@ enum MoveRouteGeometry {
     }
 }
 
+enum RoadRouteMatchingPolicy {
+    static func shouldMatch(_ transportMode: TransportMode) -> Bool {
+        switch transportMode {
+        case .walking, .running, .cycling, .automotive, .motorcycle, .train:
+            return true
+        case .plane, .boat, .swimming, .stationary, .unknown:
+            return false
+        }
+    }
+}
+
+struct InferredMoveRouteMatchRequest: Sendable, Hashable {
+    let moveID: UUID
+    let cacheSignature: String
+    let transportMode: TransportMode
+    let fallback: [RouteCoordinateStoragePoint]
+
+    var coordinates: [CLLocationCoordinate2D] {
+        fallback.map(\.coordinate)
+    }
+}
+
+@ModelActor
+actor InferredMoveRouteMatchingWorker {
+    func pendingRequests(limit: Int) -> [InferredMoveRouteMatchRequest] {
+        guard limit > 0 else { return [] }
+
+        let descriptor = FetchDescriptor<MoveSegment>(
+            sortBy: [SortDescriptor(\MoveSegment.endDate, order: .reverse)]
+        )
+
+        guard let moves = try? modelContext.fetch(descriptor) else { return [] }
+        return moves.compactMap(Self.makeRequest(for:)).filter {
+            $0.fallback.count > 1
+        }.prefix(limit).map { $0 }
+    }
+
+    func match(_ request: InferredMoveRouteMatchRequest) async {
+        let result = await RoadRouteMatcher.matchingResult(
+            fallback: request.coordinates,
+            transportMode: request.transportMode
+        )
+
+        guard !Task.isCancelled, result.cacheable else { return }
+
+        let moveID = request.moveID
+        let descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.id == moveID
+            }
+        )
+        guard let move = try? modelContext.fetch(descriptor).first,
+              !move.hasManualRouteCoordinates,
+              !move.usesImportedRoute,
+              !move.usesHighAccuracyRouteTracking,
+              move.transportMode == request.transportMode,
+              RoadRouteMatchingPolicy.shouldMatch(move.transportMode),
+              let currentFallback = Self.rawCoordinates(for: move),
+              MoveRouteGeometry.cacheSignature(for: move, fallback: currentFallback) == request.cacheSignature
+        else {
+            return
+        }
+
+        // A successful result is stored against the signature, while a transient
+        // failure deliberately leaves no persisted entry and remains retryable.
+        move.storeCachedRouteCoordinates(result.coordinates, signature: request.cacheSignature)
+        let matchedDistance = routeDistance(for: result.coordinates)
+        if matchedDistance.isFinite, matchedDistance > 0 {
+            move.distanceMeters = matchedDistance
+        }
+
+        do {
+            try modelContext.save()
+            NotificationCenter.default.post(name: .movesTimelineDidChange, object: nil)
+            NotificationCenter.default.post(name: .movesMoveDataDidChange, object: nil)
+        } catch {
+            // The raw samples remain authoritative. A later lifecycle pass can
+            // safely retry the cache write and matching work.
+        }
+    }
+
+    private static func makeRequest(for move: MoveSegment) -> InferredMoveRouteMatchRequest? {
+        guard RoadRouteMatchingPolicy.shouldMatch(move.transportMode),
+              !move.hasManualRouteCoordinates,
+              !move.usesImportedRoute,
+              !move.usesHighAccuracyRouteTracking
+        else {
+            return nil
+        }
+
+        let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+        guard fallback.count > 1 else { return nil }
+
+        let cacheSignature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+        guard move.cachedRouteCoordinates(for: cacheSignature) == nil else { return nil }
+
+        return InferredMoveRouteMatchRequest(
+            moveID: move.id,
+            cacheSignature: cacheSignature,
+            transportMode: move.transportMode,
+            fallback: fallback.map(RouteCoordinateStoragePoint.init)
+        )
+    }
+
+    private static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D]? {
+        let coordinates = MoveRouteGeometry.rawCoordinates(for: move)
+        return coordinates.count > 1 ? coordinates : nil
+    }
+}
+
+@MainActor
+final class AutomaticInferredMoveRouteMatchingScheduler: InferredMoveRouteMatchingScheduler {
+    private static let maximumConcurrentMatches = 2
+    private let modelContainer: ModelContainer
+    private var tasks: [InferredMoveRouteMatchRequest: Task<Void, Never>] = [:]
+    private var queuedRequests: [InferredMoveRouteMatchRequest] = []
+    private var scheduledRequests = Set<InferredMoveRouteMatchRequest>()
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
+    func scheduleRouteMatching(for move: MoveSegment) {
+        guard !ProcessInfo.processInfo.isRunningUnitTests else { return }
+        guard let request = makeRequest(for: move) else { return }
+        enqueue(request)
+    }
+
+    func schedulePendingRouteMatches(limit: Int) {
+        guard !ProcessInfo.processInfo.isRunningUnitTests else { return }
+        guard limit > 0 else { return }
+        let container = modelContainer
+        Task { @MainActor [weak self] in
+            let worker = await Task.detached(priority: .utility) {
+                InferredMoveRouteMatchingWorker(modelContainer: container)
+            }.value
+            let requests = await worker.pendingRequests(limit: limit)
+            guard let self else { return }
+            requests.forEach { self.enqueue($0) }
+        }
+    }
+
+    private func enqueue(_ request: InferredMoveRouteMatchRequest) {
+        guard scheduledRequests.insert(request).inserted else { return }
+
+        guard tasks.count < Self.maximumConcurrentMatches else {
+            queuedRequests.append(request)
+            return
+        }
+
+        start(request)
+    }
+
+    private func start(_ request: InferredMoveRouteMatchRequest) {
+        let container = modelContainer
+        let task = Task { @MainActor [weak self] in
+            let worker = await Task.detached(priority: .utility) {
+                InferredMoveRouteMatchingWorker(modelContainer: container)
+            }.value
+            await worker.match(request)
+            self?.finish(request)
+        }
+        tasks[request] = task
+    }
+
+    private func finish(_ request: InferredMoveRouteMatchRequest) {
+        tasks.removeValue(forKey: request)
+        scheduledRequests.remove(request)
+        guard tasks.count < Self.maximumConcurrentMatches,
+              !queuedRequests.isEmpty else {
+            return
+        }
+
+        start(queuedRequests.removeFirst())
+    }
+
+    private func makeRequest(for move: MoveSegment) -> InferredMoveRouteMatchRequest? {
+        guard RoadRouteMatchingPolicy.shouldMatch(move.transportMode),
+              !move.hasManualRouteCoordinates,
+              !move.usesImportedRoute,
+              !move.usesHighAccuracyRouteTracking
+        else {
+            return nil
+        }
+
+        let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+        guard fallback.count > 1 else { return nil }
+
+        let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+        guard move.cachedRouteCoordinates(for: signature) == nil else { return nil }
+        return InferredMoveRouteMatchRequest(
+            moveID: move.id,
+            cacheSignature: signature,
+            transportMode: move.transportMode,
+            fallback: fallback.map(RouteCoordinateStoragePoint.init)
+        )
+    }
+}
+
 extension MoveSegment {
     var hasManualRouteCoordinates: Bool {
         manualRouteCoordinatesData != nil
@@ -1329,7 +1529,14 @@ enum RoadRouteMatcher {
         fallback: [CLLocationCoordinate2D],
         transportMode: TransportMode
     ) async -> [CLLocationCoordinate2D] {
-        await resolveCoordinates(fallback: fallback, transportMode: transportMode).coordinates
+        await matchingResult(fallback: fallback, transportMode: transportMode).coordinates
+    }
+
+    static func matchingResult(
+        fallback: [CLLocationCoordinate2D],
+        transportMode: TransportMode
+    ) async -> (coordinates: [CLLocationCoordinate2D], cacheable: Bool) {
+        await resolveCoordinates(fallback: fallback, transportMode: transportMode)
     }
 
     private static func resolveDisplayedCoordinates(

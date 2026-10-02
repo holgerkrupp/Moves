@@ -349,7 +349,264 @@ private struct VisibleTimelinePage: Identifiable {
     let index: Int
     let day: DayTimeline
 
-    var id: String { "\(day.dayKey)|\(index)" }
+    var id: String { day.dayKey }
+}
+
+/// Keeps the launch pager independent of the number of DayTimeline records in the store.
+/// SwiftData's unbounded @Query used to fetch every day before the first page could scroll.
+@MainActor
+final class TimelineDayWindowStore: ObservableObject {
+    static let pagerWindowSize = 5
+    static let recentSidebarWindowSize = 60
+
+    @Published private(set) var pagerDays: [DayTimeline] = []
+    @Published private(set) var recentDays: [DayTimeline] = []
+    @Published private(set) var hasOlderDays = false
+    @Published private(set) var hasNewerDays = false
+
+    private var modelContext: ModelContext?
+
+    func loadInitial(using modelContext: ModelContext) {
+        self.modelContext = modelContext
+        guard pagerDays.isEmpty else { return }
+        reloadLatest()
+    }
+
+    func reloadLatest() {
+        guard let modelContext else { return }
+
+        do {
+            var descriptor = FetchDescriptor<DayTimeline>(
+                sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
+            )
+            descriptor.fetchLimit = Self.recentSidebarWindowSize
+            let newestDays = try modelContext.fetch(descriptor)
+            recentDays = newestDays
+            pagerDays = Array(newestDays.prefix(Self.pagerWindowSize).reversed())
+            updateBoundaries()
+        } catch {
+            pagerDays = []
+            recentDays = []
+            hasOlderDays = false
+            hasNewerDays = false
+        }
+    }
+
+    func reloadPreserving(dayKey: String?) {
+        if let dayKey,
+           let day = fetchDay(withKey: dayKey) {
+            loadWindow(around: day.dayStart, refreshRecentDays: false)
+        } else {
+            reloadLatest()
+        }
+    }
+
+    /// Loads a bounded window around the nearest stored day to the requested date.
+    /// This is used by date jumps and never scans the complete DayTimeline collection.
+    @discardableResult
+    func loadWindow(around date: Date, refreshRecentDays: Bool = false) -> Bool {
+        guard let modelContext else { return false }
+
+        do {
+            let center = try nearestDay(to: date, in: modelContext)
+            guard let center else { return false }
+            pagerDays = try fetchWindow(around: center.dayStart, in: modelContext)
+            if refreshRecentDays {
+                recentDays = try fetchRecentDays(in: modelContext)
+            }
+            updateBoundaries()
+            return !pagerDays.isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    /// Adds one older day while preserving the bounded pager window.
+    @discardableResult
+    func loadOlderDay() -> DayTimeline? {
+        guard let modelContext, let firstDay = pagerDays.first else { return nil }
+        let boundary = firstDay.dayStart
+
+        do {
+            var descriptor = FetchDescriptor<DayTimeline>(
+                predicate: #Predicate { day in
+                    day.dayStart < boundary
+                },
+                sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
+            )
+            descriptor.fetchLimit = 1
+            guard let olderDay = try modelContext.fetch(descriptor).first else {
+                updateBoundaries()
+                return nil
+            }
+
+            pagerDays.insert(olderDay, at: 0)
+            if pagerDays.count > Self.pagerWindowSize {
+                pagerDays.removeLast()
+            }
+            updateBoundaries()
+            return olderDay
+        } catch {
+            return nil
+        }
+    }
+
+    /// Adds one newer day while preserving the bounded pager window.
+    @discardableResult
+    func loadNewerDay() -> DayTimeline? {
+        guard let modelContext, let lastDay = pagerDays.last else { return nil }
+        let boundary = lastDay.dayStart
+
+        do {
+            var descriptor = FetchDescriptor<DayTimeline>(
+                predicate: #Predicate { day in
+                    day.dayStart > boundary
+                },
+                sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
+            )
+            descriptor.fetchLimit = 1
+            guard let newerDay = try modelContext.fetch(descriptor).first else {
+                updateBoundaries()
+                return nil
+            }
+
+            pagerDays.append(newerDay)
+            if pagerDays.count > Self.pagerWindowSize {
+                pagerDays.removeFirst()
+            }
+            updateBoundaries()
+            return newerDay
+        } catch {
+            return nil
+        }
+    }
+
+    /// Prefetches beyond the selected page, keeping the selected day stable if the
+    /// bounded window has to slide.
+    func prefetch(around index: Int) -> Int? {
+        guard pagerDays.indices.contains(index) else { return nil }
+        let selectedKey = pagerDays[index].dayKey
+
+        if index <= 1, hasOlderDays {
+            _ = loadOlderDay()
+        }
+        if let selectedIndex = pagerDays.firstIndex(where: { $0.dayKey == selectedKey }) {
+            if selectedIndex >= pagerDays.count - 2, hasNewerDays {
+                _ = loadNewerDay()
+            }
+        }
+
+        return pagerDays.firstIndex(where: { $0.dayKey == selectedKey })
+    }
+
+    private func fetchRecentDays(in modelContext: ModelContext) throws -> [DayTimeline] {
+        var descriptor = FetchDescriptor<DayTimeline>(
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
+        )
+        descriptor.fetchLimit = Self.recentSidebarWindowSize
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func nearestDay(to date: Date, in modelContext: ModelContext) throws -> DayTimeline? {
+        var beforeDescriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayStart <= date
+            },
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
+        )
+        beforeDescriptor.fetchLimit = 1
+
+        var afterDescriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayStart > date
+            },
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
+        )
+        afterDescriptor.fetchLimit = 1
+
+        let candidates = try modelContext.fetch(beforeDescriptor) + modelContext.fetch(afterDescriptor)
+        return candidates.min {
+            abs($0.dayStart.timeIntervalSince(date)) < abs($1.dayStart.timeIntervalSince(date))
+        }
+    }
+
+    private func fetchWindow(around date: Date, in modelContext: ModelContext) throws -> [DayTimeline] {
+        let olderCount = Self.pagerWindowSize / 2
+        let newerCount = Self.pagerWindowSize - olderCount - 1
+
+        var olderDescriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayStart < date
+            },
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
+        )
+        olderDescriptor.fetchLimit = olderCount
+
+        var newerDescriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayStart > date
+            },
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
+        )
+        newerDescriptor.fetchLimit = newerCount
+
+        let older = try modelContext.fetch(olderDescriptor).reversed()
+        var centerDescriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayStart == date
+            },
+            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
+        )
+        centerDescriptor.fetchLimit = 1
+        let center = try modelContext.fetch(centerDescriptor)
+        let newer = try modelContext.fetch(newerDescriptor)
+        return Array(older) + center + newer
+    }
+
+    private func fetchDay(withKey dayKey: String) -> DayTimeline? {
+        guard let modelContext else { return nil }
+        var descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayKey == dayKey
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func updateBoundaries() {
+        guard let modelContext,
+              let firstDay = pagerDays.first,
+              let lastDay = pagerDays.last else {
+            hasOlderDays = false
+            hasNewerDays = false
+            return
+        }
+
+        do {
+            let olderBoundary = firstDay.dayStart
+            let newerBoundary = lastDay.dayStart
+            var olderDescriptor = FetchDescriptor<DayTimeline>(
+                predicate: #Predicate { day in
+                    day.dayStart < olderBoundary
+                }
+            )
+            olderDescriptor.fetchLimit = 1
+
+            var newerDescriptor = FetchDescriptor<DayTimeline>(
+                predicate: #Predicate { day in
+                    day.dayStart > newerBoundary
+                }
+            )
+            newerDescriptor.fetchLimit = 1
+
+            hasOlderDays = try !modelContext.fetch(olderDescriptor).isEmpty
+            hasNewerDays = try !modelContext.fetch(newerDescriptor).isEmpty
+        } catch {
+            hasOlderDays = false
+            hasNewerDays = false
+        }
+    }
 }
 
 struct ContentView: View {
@@ -365,13 +622,9 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @Query(sort: \DayTimeline.dayStart, order: .forward)
-    private var dayTimelines: [DayTimeline]
-
     @State private var selectedDayKey = ""
     @State private var selectedPageIndex = 0
-    @State private var pagerWindowCenterIndex: Int?
-    @State private var pagerWindowRecenterTask: Task<Void, Never>?
+    @StateObject private var timelineWindow = TimelineDayWindowStore()
     @State private var isShowingSettings = false
     @State private var isShowingStatistics = false
     @State private var isShowingRouteTrackingSettings = false
@@ -395,11 +648,11 @@ struct ContentView: View {
     /// Keep this projection relationship-free. Checking `hasRecordedActivity` here would
     /// materialize every imported place/move/sample collection before the first map frame.
     private var recordedDayTimelines: [DayTimeline] {
-        dayTimelines
+        timelineWindow.pagerDays
     }
 
     private var recordedDaySignature: [String] {
-        dayTimelines.map(\.dayKey)
+        recordedDayTimelines.map(\.dayKey)
     }
 
     private var selectedDay: DayTimeline? {
@@ -420,26 +673,31 @@ struct ContentView: View {
         return min(max(selectedPageIndex, 0), recordedDayTimelines.count - 1)
     }
 
-    private var pagerSelection: Binding<Int> {
+    private var pagerSelection: Binding<String> {
         Binding(
-            get: { displayedPageIndex },
-            set: { selectedPageIndex = $0 }
+            get: { selectedDayKey.isEmpty ? recordedDayTimelines.last?.dayKey ?? "" : selectedDayKey },
+            set: { newKey in
+                guard !newKey.isEmpty else { return }
+                selectedDayKey = newKey
+            }
         )
     }
 
     private var canGoOlder: Bool {
-        recordedDayTimelines.indices.contains(displayedPageIndex) && displayedPageIndex > 0
+        recordedDayTimelines.indices.contains(displayedPageIndex)
+            && (displayedPageIndex > 0 || timelineWindow.hasOlderDays)
     }
 
     private var canGoNewer: Bool {
-        recordedDayTimelines.indices.contains(displayedPageIndex) && displayedPageIndex < recordedDayTimelines.count - 1
+        recordedDayTimelines.indices.contains(displayedPageIndex)
+            && (displayedPageIndex < recordedDayTimelines.count - 1 || timelineWindow.hasNewerDays)
     }
 
     @MainActor
     private func measureTimelineWindow() {
         let state = TimelinePerformanceInstrumentation.signposter.beginInterval(
             "DayTimeline root query/window",
-            "days=\(dayTimelines.count)"
+            "days=\(recordedDayTimelines.count)"
         )
         _ = visibleTimelinePages.count
         TimelinePerformanceInstrumentation.signposter.endInterval(
@@ -474,7 +732,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingSettings) {
             MovesSettingsView(
-                dayTimelines: dayTimelines,
+                dayTimelines: recordedDayTimelines,
                 selectedDayKey: selectedDayKey,
                 captureManager: captureManager,
                 routeFileImporter: routeFileImporter,
@@ -576,6 +834,7 @@ struct ContentView: View {
             ) {
                 guard !Task.isCancelled else { return }
                 TimelinePresentationCacheInvalidator.invalidateAll()
+                timelineWindow.reloadPreserving(dayKey: selectedDayKey)
                 cloudDataPresencePublisher.publishSoon()
             }
         }
@@ -588,6 +847,7 @@ struct ContentView: View {
             ) {
                 guard !Task.isCancelled else { return }
                 TimelinePresentationCacheInvalidator.invalidateAll()
+                timelineWindow.reloadPreserving(dayKey: selectedDayKey)
                 cloudDataPresencePublisher.publishSoon()
                 refreshSpotlightIndex()
             }
@@ -598,18 +858,25 @@ struct ContentView: View {
             ) {
                 guard !Task.isCancelled else { return }
                 TimelinePresentationCacheInvalidator.invalidateAll()
+                timelineWindow.reloadPreserving(dayKey: selectedDayKey)
                 cloudDataPresencePublisher.publishSoon()
             }
         }
         .onAppear {
+            timelineWindow.loadInitial(using: modelContext)
             openCurrentDay()
-            repairDuplicateDayTimelinesIfNeeded()
             modelContext.undoManager = undoController.manager
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
         }
-        .onChange(of: recordedDaySignature) { _, _ in
+        .task {
+            // Historical cleanup is maintenance, not a launch prerequisite. Defer its
+            // unbounded day-key check until the pager has had time to become interactive.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
             repairDuplicateDayTimelinesIfNeeded()
+        }
+        .onChange(of: recordedDaySignature) { _, _ in
             syncSelectedDayIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -625,16 +892,19 @@ struct ContentView: View {
         .dropDestination(for: RouteFileDropItem.self) { items, _ in
             enqueueRouteImport(items.map(\.url))
         }
-        .onChange(of: selectedPageIndex) { _, newIndex in
-            guard recordedDayTimelines.indices.contains(newIndex) else { return }
-            selectedDayKey = recordedDayTimelines[newIndex].dayKey
-            recenterPagerWindow(afterTransitionAround: newIndex)
-        }
         .onChange(of: selectedDayKey) { _, newKey in
             timelineMapSelection = nil
-            guard let index = recordedDayTimelines.firstIndex(where: { $0.dayKey == newKey }),
-                  index != selectedPageIndex else { return }
-            selectedPageIndex = index
+            if let index = recordedDayTimelines.firstIndex(where: { $0.dayKey == newKey }) {
+                selectedPageIndex = index
+                _ = timelineWindow.prefetch(around: index)
+                return
+            }
+
+            if let day = timelineWindow.recentDays.first(where: { $0.dayKey == newKey }),
+               timelineWindow.loadWindow(around: day.dayStart),
+               let index = recordedDayTimelines.firstIndex(where: { $0.dayKey == newKey }) {
+                selectedPageIndex = index
+            }
         }
         .overlay {
             ShakeToUndoDetector(undoManager: undoController.manager) {
@@ -698,7 +968,7 @@ struct ContentView: View {
     }
 
     private var recentDayTimelines: [DayTimeline] {
-        Array(recordedDayTimelines.suffix(60).reversed())
+        timelineWindow.recentDays
     }
 
     private var daySidebarSelection: Binding<String?> {
@@ -748,7 +1018,7 @@ struct ContentView: View {
                                 isActive: page.day.dayKey == selectedDay?.dayKey,
                                 mapSelection: $timelineMapSelection
                             )
-                            .tag(page.index)
+                            .tag(page.day.dayKey)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
@@ -810,37 +1080,12 @@ struct ContentView: View {
         }
     }
 
-    /// A page-style `TabView` eagerly builds its children. Keeping the complete history in
-    /// the pager created hundreds (or thousands after imports) of page tasks whenever the
-    /// selected day changed. Two neighbours on either side preserve fluid swiping without
-    /// making navigation cost grow with the size of the database.
+    /// The window store already bounds the pager. Keeping this projection separate makes the
+    /// eager page construction explicit and prevents a future root query from reintroducing
+    /// an all-history launch cost.
     private var visibleTimelinePages: [VisibleTimelinePage] {
-        let timelines = recordedDayTimelines
-        guard !timelines.isEmpty else { return [] }
-        let lastIndex = timelines.index(before: timelines.endIndex)
-        let selectedIndex = min(max(displayedPageIndex, timelines.startIndex), lastIndex)
-        var centerIndex = min(
-            max(pagerWindowCenterIndex ?? selectedIndex, timelines.startIndex),
-            lastIndex
-        )
-        let proposedLowerBound = max(timelines.startIndex, centerIndex - 2)
-        let proposedUpperBound = min(lastIndex, centerIndex + 2)
-        if !(proposedLowerBound...proposedUpperBound).contains(selectedIndex) {
-            centerIndex = selectedIndex
-        }
-        let lowerBound = max(timelines.startIndex, centerIndex - 2)
-        let upperBound = min(lastIndex, centerIndex + 2)
-        return (lowerBound...upperBound).map { index in
-            VisibleTimelinePage(index: index, day: timelines[index])
-        }
-    }
-
-    private func recenterPagerWindow(afterTransitionAround index: Int) {
-        pagerWindowRecenterTask?.cancel()
-        pagerWindowRecenterTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(320))
-            guard !Task.isCancelled else { return }
-            pagerWindowCenterIndex = index
+        recordedDayTimelines.enumerated().map { index, day in
+            VisibleTimelinePage(index: index, day: day)
         }
     }
 
@@ -1100,6 +1345,7 @@ struct ContentView: View {
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
 
         ensureCurrentDayExists()
+        _ = timelineWindow.loadWindow(around: todayStart, refreshRecentDays: true)
 
         #if targetEnvironment(macCatalyst)
         // Catalyst is a review/import client. Never manufacture placeholder records while
@@ -1134,7 +1380,13 @@ struct ContentView: View {
         #else
         let todayStart = Calendar.current.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
-        guard !dayTimelines.contains(where: { $0.dayKey == todayKey }) else { return }
+        var descriptor = FetchDescriptor<DayTimeline>(
+            predicate: #Predicate { day in
+                day.dayKey == todayKey
+            }
+        )
+        descriptor.fetchLimit = 1
+        guard (try? modelContext.fetch(descriptor).isEmpty) == true else { return }
 
         modelContext.insert(DayTimeline(dayStart: todayStart))
         do {
@@ -1146,7 +1398,14 @@ struct ContentView: View {
     }
 
     private func repairDuplicateDayTimelinesIfNeeded() {
-        let hasDuplicates = Dictionary(grouping: dayTimelines, by: \.dayKey)
+        let allDays: [DayTimeline]
+        do {
+            allDays = try modelContext.fetch(FetchDescriptor<DayTimeline>())
+        } catch {
+            return
+        }
+
+        let hasDuplicates = Dictionary(grouping: allDays, by: \.dayKey)
             .contains { $0.value.count > 1 }
         guard hasDuplicates else { return }
 
@@ -1159,7 +1418,7 @@ struct ContentView: View {
     }
 
     private func publishWidgetSnapshot() {
-        guard let dayTimeline = selectedDay ?? dayTimelines.last else { return }
+        guard let dayTimeline = selectedDay ?? recordedDayTimelines.last else { return }
         TimelineWidgetSnapshotStore.save(.make(from: dayTimeline))
     }
 
@@ -1212,6 +1471,7 @@ struct ContentView: View {
 
     private func handleDeepLink(_ url: URL) {
         if url.isFileURL {
+            QuickLookRoutePreviewCacheWarmup.warm(url: url)
             if let stagedURL = RouteFileImporter.copyDroppedItem(at: url) {
                 enqueueRouteImport([stagedURL])
             } else {
@@ -1231,12 +1491,22 @@ struct ContentView: View {
             }
         case "place":
             guard let identifier = url.pathComponents.dropFirst().first,
-                  let placeID = UUID(uuidString: identifier),
-                  let dayIndex = recordedDayTimelines.firstIndex(where: { day in
-                      day.places.contains(where: { $0.id == placeID })
-                  }) else { return }
+                  let placeID = UUID(uuidString: identifier) else { return }
+
+            var descriptor = FetchDescriptor<VisitPlace>(
+                predicate: #Predicate { place in
+                    place.id == placeID
+                }
+            )
+            descriptor.fetchLimit = 1
+            guard let place = (try? modelContext.fetch(descriptor))?.first,
+                  let day = place.dayTimeline,
+                  timelineWindow.loadWindow(around: day.dayStart),
+                  let dayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == day.dayKey }) else {
+                return
+            }
             selectedPageIndex = dayIndex
-            selectedDayKey = recordedDayTimelines[dayIndex].dayKey
+            selectedDayKey = day.dayKey
         default:
             break
         }
@@ -1286,25 +1556,44 @@ struct ContentView: View {
 
     private func selectOlderDay() {
         let nextIndex = displayedPageIndex - 1
-        guard recordedDayTimelines.indices.contains(nextIndex) else { return }
+        if recordedDayTimelines.indices.contains(nextIndex) {
+            withAnimation(.easeOut(duration: 0.22)) {
+                selectedDayKey = recordedDayTimelines[nextIndex].dayKey
+                selectedPageIndex = nextIndex
+            }
+            return
+        }
+
+        guard displayedPageIndex == 0,
+              let olderDay = timelineWindow.loadOlderDay() else { return }
         withAnimation(.easeOut(duration: 0.22)) {
-            selectedPageIndex = nextIndex
+            selectedDayKey = olderDay.dayKey
+            selectedPageIndex = 0
         }
     }
 
     private func selectNewerDay() {
         let nextIndex = displayedPageIndex + 1
-        guard recordedDayTimelines.indices.contains(nextIndex) else { return }
+        if recordedDayTimelines.indices.contains(nextIndex) {
+            withAnimation(.easeOut(duration: 0.22)) {
+                selectedDayKey = recordedDayTimelines[nextIndex].dayKey
+                selectedPageIndex = nextIndex
+            }
+            return
+        }
+
+        guard displayedPageIndex == recordedDayTimelines.count - 1,
+              let newerDay = timelineWindow.loadNewerDay() else { return }
         withAnimation(.easeOut(duration: 0.22)) {
-            selectedPageIndex = nextIndex
+            selectedDayKey = newerDay.dayKey
+            selectedPageIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == newerDay.dayKey }) ?? 0
         }
     }
 
     private func jumpToDate(_ date: Date) {
-        guard !recordedDayTimelines.isEmpty else { return }
-
         let calendar = Calendar.autoupdatingCurrent
         let targetStart = calendar.startOfDay(for: date)
+        guard timelineWindow.loadWindow(around: targetStart, refreshRecentDays: false) else { return }
 
         let closest = recordedDayTimelines.enumerated().min { lhs, rhs in
             let lhsStart = calendar.startOfDay(for: lhs.element.dayStart)
@@ -1939,6 +2228,18 @@ enum TimelineExporter {
             )
         }
 
+        if let importedPoints = ImportedRoutePayloadCodec.decode(move.importedRouteData),
+           importedPoints.count > 1 {
+            return importedPoints.map {
+                TimelineTrackPoint(
+                    latitude: $0.latitude,
+                    longitude: $0.longitude,
+                    elevation: $0.altitude,
+                    timestamp: $0.timestamp
+                )
+            }
+        }
+
         var points: [TimelineTrackPoint] = []
         points.reserveCapacity(move.samples.count + 2)
 
@@ -2286,6 +2587,7 @@ struct ContentView_Previews: PreviewProvider {
             .environmentObject(MovesLocationCaptureManager(modelContainer: container))
             .environmentObject(AppUndoController())
             .environmentObject(MovesCloudDataPresencePublisher(modelContainer: container))
+            .environmentObject(MovesSyncDiagnostics(modelContainer: container))
             .environmentObject(MultiDevicePresenceManager(modelContainer: container))
             .environmentObject(ImportedRouteDataSummaryStore(modelContainer: container))
     }

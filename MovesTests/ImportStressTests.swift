@@ -97,7 +97,7 @@ final class ImportStressTests: XCTestCase {
         XCTAssertEqual(first?.importedRouteCoordinates?.count, locations.count)
         let context = ModelContext(container)
         let samples = try context.fetch(FetchDescriptor<LocationSample>())
-        XCTAssertLessThanOrEqual(samples.count, locations.count)
+        XCTAssertEqual(samples.count, 0, "Dense file imports should use importedRouteData instead of per-point CloudKit rows")
     }
 
     @MainActor

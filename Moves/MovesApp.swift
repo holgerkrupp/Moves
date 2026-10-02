@@ -110,8 +110,6 @@ struct MovesCommands: Commands {
 struct MovesApp: App {
     @UIApplicationDelegateAdaptor(MovesAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
-    private static let cloudKitContainerIdentifier = "iCloud.de.holgerkrupp.Moves"
-
     @StateObject private var runtime = MovesAppRuntime()
 
     init() {
@@ -119,26 +117,8 @@ struct MovesApp: App {
     }
 
     nonisolated static func makeModelContainer() throws -> ModelContainer {
-        let timelineSchema = Schema([
-            DayTimeline.self,
-            VisitPlace.self,
-            KnownLocation.self,
-            MoveSegment.self,
-            LocationSample.self,
-            MovesDeviceProfile.self,
-            CrossDeviceWorkLease.self,
-        ])
         let cacheSchema = Schema([ShareMapAggregate.self])
-        let schema = Schema([
-            DayTimeline.self,
-            VisitPlace.self,
-            KnownLocation.self,
-            MoveSegment.self,
-            LocationSample.self,
-            MovesDeviceProfile.self,
-            CrossDeviceWorkLease.self,
-            ShareMapAggregate.self,
-        ])
+        let schema = Schema(MovesTimelineStore.authoritativeModelTypes + [ShareMapAggregate.self])
 
         let modelConfiguration: ModelConfiguration
         let cacheConfiguration: ModelConfiguration
@@ -147,11 +127,7 @@ struct MovesApp: App {
             // store before the test process connects. Keeping this switch
             // environment-driven leaves production storage unchanged while
             // making background/indexing tests isolated and repeatable.
-            modelConfiguration = ModelConfiguration(
-                schema: timelineSchema,
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            )
+            modelConfiguration = MovesTimelineStore.makeConfiguration(isStoredInMemoryOnly: true)
             cacheConfiguration = ModelConfiguration(
                 "ShareMapCache",
                 schema: cacheSchema,
@@ -160,11 +136,7 @@ struct MovesApp: App {
             )
         } else {
             #if targetEnvironment(simulator)
-            modelConfiguration = ModelConfiguration(
-                schema: timelineSchema,
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            )
+            modelConfiguration = MovesTimelineStore.makeConfiguration(isStoredInMemoryOnly: true)
             cacheConfiguration = ModelConfiguration(
                 "ShareMapCache",
                 schema: cacheSchema,
@@ -172,10 +144,7 @@ struct MovesApp: App {
                 cloudKitDatabase: .none
             )
             #else
-            modelConfiguration = ModelConfiguration(
-                schema: timelineSchema,
-                cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
-            )
+            modelConfiguration = MovesTimelineStore.makeConfiguration()
             cacheConfiguration = ModelConfiguration(
                 "ShareMapCache",
                 schema: cacheSchema,
@@ -254,6 +223,7 @@ struct MovesApp: App {
         .environmentObject(runtime.undoController)
         .environmentObject(runtime.healthWorkoutRouteAutoImporter!)
         .environmentObject(runtime.cloudDataPresencePublisher!)
+        .environmentObject(runtime.syncDiagnostics!)
         .environmentObject(runtime.locationServiceSyncManager!)
         .environmentObject(runtime.multiDevicePresenceManager!)
         .environmentObject(runtime.importCoordinator!)
@@ -266,7 +236,11 @@ struct MovesApp: App {
     }
 
     private func startActiveServices() {
-        guard scenePhase == .active, runtime.isReady, !runtime.didStartActiveServices else { return }
+        guard scenePhase == .active, runtime.isReady else { return }
+        if runtime.didStartActiveServices {
+            runtime.captureManager?.retryPendingRouteMatches()
+            return
+        }
         runtime.didStartActiveServices = true
 
         DailyTimelineBackup.scheduleNextRun()
@@ -288,6 +262,7 @@ struct MovesApp: App {
                 multiDevicePresenceManager.refreshPresence()
                 await captureManager.start()
                 await captureManager.refreshHistoricalBackfill()
+                captureManager.retryPendingRouteMatches()
             }
             healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()
             await healthWorkoutRouteAutoImporter.startIfNeeded()
@@ -327,6 +302,7 @@ final class MovesAppRuntime: ObservableObject {
     private(set) var watchRouteInbox: WatchRouteInbox?
     private(set) var healthWorkoutRouteAutoImporter: HealthWorkoutRouteAutoImportManager?
     private(set) var cloudDataPresencePublisher: MovesCloudDataPresencePublisher?
+    private(set) var syncDiagnostics: MovesSyncDiagnostics?
     private(set) var locationServiceSyncManager: LocationServiceSyncManager?
     private(set) var multiDevicePresenceManager: MultiDevicePresenceManager?
     private(set) var importCoordinator: ImportCoordinator?
@@ -364,6 +340,7 @@ final class MovesAppRuntime: ObservableObject {
                 let watchRouteInbox = WatchRouteInbox(modelContainer: container)
                 let healthWorkoutRouteAutoImporter = HealthWorkoutRouteAutoImportManager(modelContainer: container)
                 let cloudDataPresencePublisher = MovesCloudDataPresencePublisher(modelContainer: container)
+                let syncDiagnostics = MovesSyncDiagnostics(modelContainer: container)
                 let locationServiceSyncManager = LocationServiceSyncManager(modelContainer: container)
                 let multiDevicePresenceManager = MultiDevicePresenceManager(modelContainer: container)
                 let importCoordinator = ImportCoordinator()
@@ -378,6 +355,7 @@ final class MovesAppRuntime: ObservableObject {
                 self.watchRouteInbox = watchRouteInbox
                 self.healthWorkoutRouteAutoImporter = healthWorkoutRouteAutoImporter
                 self.cloudDataPresencePublisher = cloudDataPresencePublisher
+                self.syncDiagnostics = syncDiagnostics
                 self.locationServiceSyncManager = locationServiceSyncManager
                 self.multiDevicePresenceManager = multiDevicePresenceManager
                 self.importCoordinator = importCoordinator
