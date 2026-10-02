@@ -139,7 +139,7 @@ actor ImportedTransportModeInferenceWorker {
                 duration: move.endDate.timeIntervalSince(move.startDate)
             )
             guard let inferred else { continue }
-            move.transportMode = inferred
+            move.setTransportMode(inferred, provenance: .imported)
             move.clearCachedRouteCoordinates()
             changedCount += 1
 
@@ -159,7 +159,10 @@ actor ImportedTransportModeInferenceWorker {
 
 enum ImportedTransportModeRefinement {
     static func run(in modelContainer: ModelContainer) async {
-        let coordinator = CrossDeviceWorkCoordinator(modelContainer: modelContainer)
+        let coordinator = CrossDeviceWorkCoordinator(
+            modelContainer: modelContainer,
+            backend: .cloudKit
+        )
         let workKey = BackgroundWorkKey(
             kind: "transportInference",
             partition: "algorithm-v2",

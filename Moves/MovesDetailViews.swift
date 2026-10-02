@@ -210,6 +210,7 @@ struct PlaceMapDetailView: View {
 
         do {
             try modelContext.save()
+            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
         } catch {
             print("Failed to save place label: \(error.localizedDescription)")
         }
@@ -221,6 +222,7 @@ struct PlaceMapDetailView: View {
 
         do {
             try modelContext.save()
+            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
         } catch {
             modelContext.rollback()
             draftComment = place.comment ?? ""
@@ -322,6 +324,7 @@ struct MoveMapDetailView: View {
     @State private var splitErrorMessage = ""
     @State private var isShowingSplitError = false
     @State private var isShowingFlightMatching = false
+    @State private var isShowingFlightMerge = false
 
     private var activeRenderedRoute: RenderedRoute {
         RenderedRoute(
@@ -428,6 +431,13 @@ struct MoveMapDetailView: View {
 
                     moveShareButton
 
+                    Button {
+                        isShowingFlightMerge = true
+                    } label: {
+                        Image(systemName: "arrow.triangle.merge")
+                    }
+                    .help("Merge into Flight")
+
 #if DEBUG
                     if segment.transportMode == .plane {
                         NavigationLink {
@@ -523,6 +533,9 @@ struct MoveMapDetailView: View {
         .sheet(isPresented: $isShowingFlightMatching) {
             FlightMatchingView(segment: segment, routeCoordinates: routeCoordinates)
         }
+        .sheet(isPresented: $isShowingFlightMerge) {
+            FlightMergeView(anchor: segment)
+        }
         .task(id: routeRefreshKey) {
             await refreshRouteCoordinates()
         }
@@ -552,6 +565,14 @@ struct MoveMapDetailView: View {
                         ForEach(Array(activeRenderedRoute.coordinateSegments.enumerated()), id: \.offset) { _, coordinates in
                             MapPolyline(coordinates: coordinates)
                                 .stroke(activeRenderedRoute.tint, lineWidth: activeRenderedRoute.lineWidth)
+                        }
+
+                        ForEach(Array(activeRenderedRoute.inferredCoordinateSegments.enumerated()), id: \.offset) { _, coordinates in
+                            MapPolyline(coordinates: coordinates)
+                                .stroke(
+                                    activeRenderedRoute.shadowTint,
+                                    style: StrokeStyle(lineWidth: activeRenderedRoute.shadowLineWidth, dash: [8, 6])
+                                )
                         }
 
                         if let end = segment.endPlace?.coordinate {
@@ -998,7 +1019,7 @@ struct MoveMapDetailView: View {
 
         let previousMode = segment.transportMode
         let previousManualRouteCoordinatesData = segment.manualRouteCoordinatesData
-        segment.transportMode = newMode
+        segment.setTransportMode(newMode, provenance: .manual)
         segment.clearCachedRouteCoordinates()
         segment.clearManualRouteCoordinates()
         routeCoordinates = MoveRouteGeometry.rawCoordinates(for: segment)
@@ -1022,7 +1043,7 @@ struct MoveMapDetailView: View {
                 await refreshRouteCoordinates()
             }
         } catch {
-            segment.transportMode = previousMode
+            segment.setTransportMode(previousMode, provenance: .manual)
             segment.manualRouteCoordinatesData = previousManualRouteCoordinatesData
             routeCoordinates = segment.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: segment)
             refreshMoveGPXShareFile()
@@ -1278,6 +1299,145 @@ struct MoveMapDetailView: View {
             modelContext.rollback()
             deleteErrorMessage = error.localizedDescription
             isShowingDeleteError = true
+        }
+    }
+}
+
+struct FlightMergeView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    let anchor: MoveSegment
+    @State private var candidates: [MoveSegment] = []
+    @State private var selectedIDs: Set<UUID>
+    @State private var errorMessage: String?
+    @State private var plan: FlightMergePlan?
+    @State private var isMerging = false
+
+    init(anchor: MoveSegment) {
+        self.anchor = anchor
+        _selectedIDs = State(initialValue: [anchor.id])
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Select fragments from the nearby absolute time window. The merge keeps one canonical flight and preserves recorded samples.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Nearby moves") {
+                    ForEach(candidates) { move in
+                        Button {
+                            toggle(move.id)
+                    } label: {
+                            let isSelected = selectedIDs.contains(move.id)
+                            let selectionImage = isSelected ? "checkmark.circle.fill" : "circle"
+                            HStack(spacing: 12) {
+                                Image(systemName: selectionImage)
+                                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                                Image(systemName: move.transportMode.symbolName)
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("\(move.startPlace?.displayTitle ?? "Unknown") → \(move.endPlace?.displayTitle ?? "Unknown")")
+                                        .lineLimit(1)
+                                    Text("\(move.timelineStartDate.formatted(date: .abbreviated, time: .shortened))  •  \(DurationFormatter.extendedText(for: move.timelineDuration))  •  \(Measurement(value: max(move.distanceMeters, 0), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road)))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if let plan {
+                    Section("Preview") {
+                        LabeledContent("Fragments", value: "\(plan.orderedSourceMoveIDs.count)")
+                        LabeledContent("Elapsed", value: DurationFormatter.extendedText(for: plan.endDate.timeIntervalSince(plan.startDate)))
+                        if !plan.removableIntermediatePlaceIDs.isEmpty {
+                            Text("\(plan.removableIntermediatePlaceIDs.count) transient intermediate place(s) will be removed.")
+                                .font(.footnote)
+                        }
+                        if !plan.preservedIntermediatePlaceIDs.isEmpty {
+                            Text("Meaningful intermediate places will be kept.")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Merge into Flight")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Merge") { merge() }
+                        .disabled(selectedIDs.count < 2 || isMerging)
+                }
+            }
+            .task {
+                loadCandidates()
+                refreshPlan()
+            }
+            .onChange(of: selectedIDs) { _, _ in
+                refreshPlan()
+            }
+            .alert("Could Not Merge Flight", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "Unknown error")
+            }
+        }
+    }
+
+    private func loadCandidates() {
+        let lower = anchor.startDate.addingTimeInterval(-36 * 60 * 60)
+        let upper = anchor.endDate.addingTimeInterval(36 * 60 * 60)
+        let predicate = #Predicate<MoveSegment> { move in
+            move.startDate < upper && move.endDate >= lower
+        }
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: predicate,
+            sortBy: [SortDescriptor(\MoveSegment.startDate, order: .forward)]
+        )
+        descriptor.fetchLimit = 64
+        candidates = (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private func toggle(_ id: UUID) {
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func refreshPlan() {
+        guard selectedIDs.count >= 2 else {
+            plan = nil
+            return
+        }
+        plan = try? FlightMergeService(modelContext: modelContext).validate(moveIDs: Array(selectedIDs))
+    }
+
+    private func merge() {
+        guard let plan else { return }
+        isMerging = true
+        defer { isMerging = false }
+        do {
+            _ = try FlightMergeService(modelContext: modelContext).merge(plan)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

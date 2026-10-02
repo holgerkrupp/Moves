@@ -81,7 +81,281 @@ enum TemporaryRouteTrackingStopNotificationPermissionResult: Equatable {
 
 protocol MotionClassifier {
     func classifyTransport(start: Date, end: Date, locations: [CLLocation]) async -> TransportMode
+    func classifyEvidence(
+        start: Date,
+        end: Date,
+        locations: [CLLocation],
+        timingConfidence: TransportTimingConfidence
+    ) async -> MotionClassificationEvidence?
     func stepCount(start: Date, end: Date) async -> Int?
+}
+
+extension MotionClassifier {
+    func classifyEvidence(
+        start: Date,
+        end: Date,
+        locations: [CLLocation],
+        timingConfidence: TransportTimingConfidence
+    ) async -> MotionClassificationEvidence? {
+        nil
+    }
+}
+
+struct InferredDeparture: Equatable, Sendable {
+    enum Basis: String, Codable, CaseIterable, Sendable {
+        case visitDeparture
+        case firstObservedMovement
+        case interpolatedSparseSamples
+        case weakFallback
+    }
+
+    let date: Date
+    let confidence: TransportTimingConfidence
+    let basis: Basis
+}
+
+/// Confidence attached to the movement interval, rather than to any one GPS fix.
+/// Significant-location callbacks are observations of a trip and are not exact
+/// departure timestamps, so their confidence must be carried into flight inference.
+enum TransportTimingConfidence: String, Codable, CaseIterable, Sendable {
+    case authoritative
+    case high
+    case medium
+    case low
+    case unavailable
+
+    var permitsSpeedOnlyFlightInference: Bool {
+        self == .authoritative || self == .high
+    }
+}
+
+enum TerrestrialRouteEvidence: Equatable, Sendable {
+    case routeFound(mode: TransportMode, distance: CLLocationDistance, expectedTravelTime: TimeInterval?)
+    case confirmedNoRoute
+    case unavailableOrTransientFailure
+    case notChecked
+
+    var routeMode: TransportMode? {
+        guard case .routeFound(let mode, _, _) = self else { return nil }
+        return mode
+    }
+}
+
+struct MotionClassificationEvidence: Sendable, Equatable {
+    let motionCandidate: TransportMode
+    let observedSpeeds: [CLLocationSpeed]
+    let directDistance: CLLocationDistance
+    let elapsedTime: TimeInterval
+    let timingConfidence: TransportTimingConfidence
+
+    init(
+        motionCandidate: TransportMode,
+        observedSpeeds: [CLLocationSpeed],
+        directDistance: CLLocationDistance,
+        elapsedTime: TimeInterval,
+        timingConfidence: TransportTimingConfidence
+    ) {
+        self.motionCandidate = motionCandidate
+        self.observedSpeeds = observedSpeeds.filter { $0.isFinite && $0 >= 0 }
+        self.directDistance = max(directDistance, 0)
+        self.elapsedTime = max(elapsedTime, 0)
+        self.timingConfidence = timingConfidence
+    }
+}
+
+struct FlightInferenceEvidence: Sendable, Equatable {
+    let directDistance: CLLocationDistance
+    let elapsedTime: TimeInterval
+    let observedSpeeds: [CLLocationSpeed]
+    let motionCandidate: TransportMode
+    let timingConfidence: TransportTimingConfidence
+    let terrestrialRouteEvidence: TerrestrialRouteEvidence
+
+    init(
+        motion: MotionClassificationEvidence,
+        terrestrialRouteEvidence: TerrestrialRouteEvidence = .notChecked
+    ) {
+        directDistance = motion.directDistance
+        elapsedTime = motion.elapsedTime
+        observedSpeeds = motion.observedSpeeds
+        motionCandidate = motion.motionCandidate
+        timingConfidence = motion.timingConfidence
+        self.terrestrialRouteEvidence = terrestrialRouteEvidence
+    }
+}
+
+/// The only automatic Plane policy. Generic speed bucketing produces a candidate;
+/// this resolver decides whether the candidate is sufficiently supported.
+enum AutomaticPlaneResolver {
+    static let longDistanceThreshold: CLLocationDistance = 1_000_000
+
+    static func resolve(_ evidence: FlightInferenceEvidence) -> TransportMode {
+        let route = evidence.terrestrialRouteEvidence
+
+        if evidence.directDistance > longDistanceThreshold {
+            return .plane
+        }
+
+        if let routeMode = route.routeMode {
+            if routeFits(route, elapsedTime: evidence.elapsedTime) {
+                return routeMode
+            }
+            if !speedOnlyEvidenceIsStrongEnough(evidence) {
+                return terrestrialFallback(for: evidence.motionCandidate, routeMode: routeMode)
+            }
+        }
+
+        if route == .confirmedNoRoute,
+           evidence.directDistance > 10_000,
+           evidence.timingConfidence.permitsSpeedOnlyFlightInference,
+           evidence.motionCandidate != .walking,
+           evidence.motionCandidate != .cycling,
+           evidence.motionCandidate != .running {
+            return .plane
+        }
+
+        if evidence.motionCandidate != .plane,
+           speedOnlyEvidenceIsStrongEnough(evidence) {
+            return .plane
+        }
+
+        guard evidence.motionCandidate == .plane else {
+            return evidence.motionCandidate
+        }
+
+        // A local route with a weak/sparse interval is exactly the false-flight
+        // failure this policy is designed to reject.
+        if evidence.directDistance <= 10_000,
+           !evidence.timingConfidence.permitsSpeedOnlyFlightInference {
+            return route.routeMode ?? .unknown
+        }
+
+        if route == .confirmedNoRoute {
+            return evidence.timingConfidence == .unavailable ? .unknown : .plane
+        }
+
+        guard speedOnlyEvidenceIsStrongEnough(evidence) else {
+            return route.routeMode ?? .unknown
+        }
+
+        return .plane
+    }
+
+    private static func routeFits(
+        _ route: TerrestrialRouteEvidence,
+        elapsedTime: TimeInterval
+    ) -> Bool {
+        guard case .routeFound(_, _, let expectedTravelTime) = route,
+              let expectedTravelTime,
+              expectedTravelTime > 0 else {
+            return route.routeMode != nil
+        }
+
+        // MapKit ETAs include normal stops and traffic. A route that fits with a
+        // generous margin is positive terrestrial evidence, not flight evidence.
+        return elapsedTime >= expectedTravelTime * 0.55
+    }
+
+    private static func speedOnlyEvidenceIsStrongEnough(_ evidence: FlightInferenceEvidence) -> Bool {
+        guard evidence.timingConfidence.permitsSpeedOnlyFlightInference,
+              evidence.elapsedTime > 0,
+              evidence.directDistance > 10_000 else { return false }
+
+        let medianSpeed = median(evidence.observedSpeeds)
+        let derivedSpeed = evidence.directDistance / evidence.elapsedTime
+        let robustSpeed = max(medianSpeed, derivedSpeed)
+        let terrestrialMaximum = maximumPlausibleTerrestrialSpeed(for: evidence.directDistance)
+
+        // Require both a meaningful geographic scale and a clear gap above the
+        // fastest plausible surface journey. One outlier cannot satisfy this.
+        return evidence.directDistance >= 25_000
+            && robustSpeed > terrestrialMaximum * 1.35
+            && (
+                evidence.observedSpeeds.count >= 2
+                    || medianSpeed >= 80
+                    || (derivedSpeed > terrestrialMaximum * 1.8 && evidence.motionCandidate != .plane)
+            )
+    }
+
+    private static func maximumPlausibleTerrestrialSpeed(for distance: CLLocationDistance) -> CLLocationSpeed {
+        switch distance {
+        case ..<50_000: return 45 / 3.6
+        case ..<250_000: return 180 / 3.6
+        case ..<700_000: return 320 / 3.6
+        default: return 380 / 3.6
+        }
+    }
+
+    private static func terrestrialFallback(
+        for candidate: TransportMode,
+        routeMode: TransportMode
+    ) -> TransportMode {
+        if routeMode != .plane { return routeMode }
+        return candidate == .plane ? .unknown : candidate
+    }
+
+    private static func median(_ values: [CLLocationSpeed]) -> CLLocationSpeed {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        return sorted.count.isMultiple(of: 2)
+            ? (sorted[middle - 1] + sorted[middle]) / 2
+            : sorted[middle]
+    }
+}
+
+protocol TerrestrialRouteFeasibilityProber: Sendable {
+    func probe(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, directDistance: CLLocationDistance) async -> TerrestrialRouteEvidence
+}
+
+struct MapKitTerrestrialRouteProbe: TerrestrialRouteFeasibilityProber, Sendable {
+    func probe(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, directDistance: CLLocationDistance) async -> TerrestrialRouteEvidence {
+        let modes: [MKDirectionsTransportType]
+        if directDistance <= 10_000 {
+            modes = [.walking, .automobile]
+        } else if directDistance <= 80_000 {
+            modes = [.automobile, .walking]
+        } else {
+            modes = [.automobile, .transit]
+        }
+
+        var sawConfirmedNoRoute = false
+        for mode in modes {
+            let request = MKDirections.Request()
+            request.source = MKMapItem(placemark: MKPlacemark(coordinate: from))
+            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: to))
+            request.transportType = mode
+            request.requestsAlternateRoutes = false
+
+            do {
+                let response = try await MKDirections(request: request).calculate()
+                if let route = response.routes.first {
+                    return .routeFound(
+                        mode: Self.transportMode(for: mode),
+                        distance: route.distance,
+                        expectedTravelTime: route.expectedTravelTime
+                    )
+                }
+                sawConfirmedNoRoute = true
+            } catch let error as MKError {
+                if error.code == .directionsNotFound {
+                    sawConfirmedNoRoute = true
+                    continue
+                }
+                return .unavailableOrTransientFailure
+            } catch {
+                return .unavailableOrTransientFailure
+            }
+        }
+
+        return sawConfirmedNoRoute ? .confirmedNoRoute : .unavailableOrTransientFailure
+    }
+
+    private static func transportMode(for type: MKDirectionsTransportType) -> TransportMode {
+        if type == .walking { return .walking }
+        if type == .transit { return .train }
+        return .automotive
+    }
 }
 
 @MainActor
@@ -117,8 +391,26 @@ final class CoreMotionTransportClassifier: MotionClassifier {
     private static let minimumWalkingEvidenceDuration: TimeInterval = 8 * 60
 
     func classifyTransport(start: Date, end: Date, locations: [CLLocation]) async -> TransportMode {
-        guard end > start else { return .stationary }
+        guard let evidence = await classifyEvidence(
+            start: start,
+            end: end,
+            locations: locations,
+            timingConfidence: .high
+        ) else {
+            return .unknown
+        }
+        return AutomaticPlaneResolver.resolve(FlightInferenceEvidence(motion: evidence))
+    }
+
+    func classifyEvidence(
+        start: Date,
+        end: Date,
+        locations: [CLLocation],
+        timingConfidence: TransportTimingConfidence
+    ) async -> MotionClassificationEvidence? {
+        guard end > start else { return nil }
         let fallback = inferFromSpeed(locations)
+        let candidate: TransportMode
 
         if CMMotionActivityManager.isActivityAvailable(),
            let activities = await queryActivities(from: start, to: end),
@@ -136,12 +428,26 @@ final class CoreMotionTransportClassifier: MotionClassifier {
 
             if let best = scores.max(by: { $0.value < $1.value })?.key {
                 let corrected = correctedModeIfNeeded(best, fallback: fallback, locations: locations)
-                return refinedLongDistanceMode(for: corrected, fallback: fallback, locations: locations)
+                candidate = refinedLongDistanceCandidate(for: corrected, fallback: fallback, locations: locations)
+                return makeEvidence(
+                    candidate: candidate,
+                    start: start,
+                    end: end,
+                    locations: locations,
+                    timingConfidence: timingConfidence
+                )
             }
         }
 
         let corrected = correctedModeIfNeeded(fallback, fallback: fallback, locations: locations)
-        return refinedLongDistanceMode(for: corrected, fallback: fallback, locations: locations)
+        candidate = refinedLongDistanceCandidate(for: corrected, fallback: fallback, locations: locations)
+        return makeEvidence(
+            candidate: candidate,
+            start: start,
+            end: end,
+            locations: locations,
+            timingConfidence: timingConfidence
+        )
     }
 
     func stepCount(start: Date, end: Date) async -> Int? {
@@ -303,7 +609,7 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         return (0.7...2.2).contains(medianSpeed)
     }
 
-    private func refinedLongDistanceMode(
+    private func refinedLongDistanceCandidate(
         for candidate: TransportMode,
         fallback: TransportMode,
         locations: [CLLocation]
@@ -335,6 +641,22 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         }
 
         return candidate
+    }
+
+    private func makeEvidence(
+        candidate: TransportMode,
+        start: Date,
+        end: Date,
+        locations: [CLLocation],
+        timingConfidence: TransportTimingConfidence
+    ) -> MotionClassificationEvidence {
+        MotionClassificationEvidence(
+            motionCandidate: candidate,
+            observedSpeeds: locations.map(\.speed),
+            directDistance: Self.straightLineDistance(for: locations),
+            elapsedTime: end.timeIntervalSince(start),
+            timingConfidence: timingConfidence
+        )
     }
 
     private static func totalDistance(for locations: [CLLocation]) -> CLLocationDistance {
@@ -384,6 +706,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
     private let placeNameResolver: PlaceNameResolver
     private let automaticallyFillsVisitGaps: () -> Bool
     private let routeMatchingScheduler: InferredMoveRouteMatchingScheduler?
+    private let terrestrialRouteProber: TerrestrialRouteFeasibilityProber
     private var pendingLiveSampleCount = 0
     private var pendingLiveDayKeys = Set<String>()
     private var pendingLiveSampleSaveTask: Task<Void, Never>?
@@ -393,6 +716,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         motionClassifier: MotionClassifier,
         placeNameResolver: PlaceNameResolver,
         routeMatchingScheduler: InferredMoveRouteMatchingScheduler? = nil,
+        terrestrialRouteProber: TerrestrialRouteFeasibilityProber = MapKitTerrestrialRouteProbe(),
         automaticallyFillsVisitGaps: @escaping () -> Bool = {
             VisitGapFillingSettings.isEnabled()
         }
@@ -401,6 +725,7 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         self.motionClassifier = motionClassifier
         self.placeNameResolver = placeNameResolver
         self.routeMatchingScheduler = routeMatchingScheduler
+        self.terrestrialRouteProber = terrestrialRouteProber
         self.automaticallyFillsVisitGaps = automaticallyFillsVisitGaps
     }
 
@@ -502,16 +827,24 @@ final class DefaultTimelineAssembler: TimelineAssembler {
 
         let endDate = visitPlace.arrivalDate
 
-        if previousPlace.departureDate == nil {
+        let departureInference: InferredDeparture
+        if let knownDeparture = previousPlace.departureDate {
+            departureInference = InferredDeparture(
+                date: knownDeparture,
+                confidence: .authoritative,
+                basis: .visitDeparture
+            )
+        } else {
             let candidateSamples = try repository.samples(from: previousPlace.arrivalDate, to: endDate)
-            previousPlace.departureDate = inferredDepartureDate(
+            departureInference = inferredDepartureDate(
                 for: previousPlace,
                 endDate: endDate,
                 samples: candidateSamples
             )
+            previousPlace.departureDate = departureInference.date
         }
 
-        let candidateStartDate = previousPlace.departureDate ?? previousPlace.arrivalDate
+        let candidateStartDate = departureInference.date
         let startDate = min(max(candidateStartDate, previousPlace.arrivalDate), endDate)
 
         guard endDate > startDate else { return false }
@@ -525,11 +858,40 @@ final class DefaultTimelineAssembler: TimelineAssembler {
             samples: betweenSamples
         )
 
-        let transportMode = await motionClassifier.classifyTransport(
+        let classifierEvidence = await motionClassifier.classifyEvidence(
             start: startDate,
             end: endDate,
-            locations: movementLocations
+            locations: movementLocations,
+            timingConfidence: departureInference.confidence
         )
+        let transportMode: TransportMode
+        if let classifierEvidence {
+            let directDistance = classifierEvidence.directDistance
+            let routeEvidence: TerrestrialRouteEvidence
+            if classifierEvidence.motionCandidate == .plane,
+               directDistance <= AutomaticPlaneResolver.longDistanceThreshold {
+                routeEvidence = await terrestrialRouteProber.probe(
+                    from: previousPlace.coordinate,
+                    to: visitPlace.coordinate,
+                    directDistance: directDistance
+                )
+            } else {
+                routeEvidence = .notChecked
+            }
+
+            transportMode = AutomaticPlaneResolver.resolve(
+                FlightInferenceEvidence(
+                    motion: classifierEvidence,
+                    terrestrialRouteEvidence: routeEvidence
+                )
+            )
+        } else {
+            transportMode = await motionClassifier.classifyTransport(
+                start: startDate,
+                end: endDate,
+                locations: movementLocations
+            )
+        }
         let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
         let totalDistance = Self.totalDistance(for: movementLocations)
 
@@ -630,20 +992,67 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         for place: VisitPlace,
         endDate: Date,
         samples: [LocationSample]
-    ) -> Date {
+    ) -> InferredDeparture {
         let sortedSamples = samples.sorted(by: { $0.timestamp < $1.timestamp })
         let departureRadius = max(place.horizontalAccuracy * 1.8, 80)
-
-        if let firstAwaySample = sortedSamples.first(where: { sample in
-            guard sample.timestamp >= place.arrivalDate else { return false }
-            let sampleLocation = sample.asLocation
-            let placeLocation = CLLocation(latitude: place.latitude, longitude: place.longitude)
-            return sampleLocation.distance(from: placeLocation) >= departureRadius
-        }) {
-            return min(firstAwaySample.timestamp, endDate)
+        let placeLocation = CLLocation(latitude: place.latitude, longitude: place.longitude)
+        let validSamples = sortedSamples.filter {
+            $0.timestamp >= place.arrivalDate
+                && $0.timestamp <= endDate
+                && $0.horizontalAccuracy >= 0
+                && $0.horizontalAccuracy <= 250
         }
 
-        return endDate
+        if let firstAwaySample = validSamples.first(where: { sample in
+            let sampleLocation = sample.asLocation
+            return sampleLocation.distance(from: placeLocation) >= departureRadius
+        }) {
+            let prior = validSamples.last(where: { $0.timestamp < firstAwaySample.timestamp })
+            let hasReliableBracket = prior != nil
+                && firstAwaySample.horizontalAccuracy <= 80
+                && abs(firstAwaySample.speed) >= 0
+
+            if let prior, hasReliableBracket {
+                // Interpolate only when two nearby observations bracket the
+                // radius crossing. This preserves genuine short moves while
+                // avoiding the old “late callback == departure” assumption.
+                let interval = firstAwaySample.timestamp.timeIntervalSince(prior.timestamp)
+                let distance = prior.asLocation.distance(from: firstAwaySample.asLocation)
+                let priorDistance = prior.asLocation.distance(from: placeLocation)
+                let fraction = distance > 0
+                    ? min(max((departureRadius - priorDistance) / distance, 0), 1)
+                    : 0
+                return InferredDeparture(
+                    date: max(place.arrivalDate, min(prior.timestamp.addingTimeInterval(interval * fraction), endDate)),
+                    confidence: .medium,
+                    basis: .interpolatedSparseSamples
+                )
+            }
+
+            if firstAwaySample.horizontalAccuracy <= 30,
+               firstAwaySample.speed >= 0,
+               firstAwaySample.speed <= 20 {
+                return InferredDeparture(
+                    date: firstAwaySample.timestamp,
+                    confidence: .medium,
+                    basis: .firstObservedMovement
+                )
+            }
+
+            let boundedLead = min(max(endDate.timeIntervalSince(firstAwaySample.timestamp), 5 * 60), 30 * 60)
+            let estimate = max(place.arrivalDate, firstAwaySample.timestamp.addingTimeInterval(-boundedLead))
+            return InferredDeparture(
+                date: min(estimate, endDate),
+                confidence: .low,
+                basis: .firstObservedMovement
+            )
+        }
+
+        if validSamples.isEmpty {
+            return InferredDeparture(date: place.arrivalDate, confidence: .unavailable, basis: .weakFallback)
+        }
+
+        return InferredDeparture(date: place.arrivalDate, confidence: .low, basis: .weakFallback)
     }
 
     private func fillAutomaticPlaceLabelIfNeeded(for place: VisitPlace) async {

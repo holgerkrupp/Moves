@@ -644,6 +644,7 @@ struct ContentView: View {
     @State private var dayDeletionErrorMessage = ""
     @State private var isShowingDayDeletionError = false
     @StateObject private var timelineScreenshotService = TimelineScreenshotServiceCoordinator()
+    @State private var spotlightTask: Task<Void, Never>?
 
     /// Keep this projection relationship-free. Checking `hasRecordedActivity` here would
     /// materialize every imported place/move/sample collection before the first map frame.
@@ -725,7 +726,11 @@ struct ContentView: View {
             )
         }
         .task {
-            importedRouteDataSummary.refresh()
+            // Auxiliary reconciliation starts only after the first Timeline state has
+            // had time to become interactive.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, scenePhase == .active else { return }
+            importedRouteDataSummary.setProcessingEnabled(true)
         }
         .onAppear {
             measureTimelineWindow()
@@ -849,6 +854,16 @@ struct ContentView: View {
                 TimelinePresentationCacheInvalidator.invalidateAll()
                 timelineWindow.reloadPreserving(dayKey: selectedDayKey)
                 cloudDataPresencePublisher.publishSoon()
+            }
+        }
+        .task {
+            for await notification in NotificationCenter.default.notifications(
+                named: .movesVisitedPlaceDidChange
+            ) {
+                guard !Task.isCancelled else { return }
+                if let id = notification.object as? UUID {
+                    VisitedPlaceSpotlightStateStore.enqueue(id)
+                }
                 refreshSpotlightIndex()
             }
         }
@@ -880,7 +895,13 @@ struct ContentView: View {
             syncSelectedDayIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
+            if newPhase != .active {
+                importedRouteDataSummary.setProcessingEnabled(false)
+                spotlightTask?.cancel()
+                spotlightTask = nil
+                return
+            }
+            importedRouteDataSummary.setProcessingEnabled(true)
             if captureManager.isLocationTrackingAvailable {
                 multiDevicePresenceManager.refreshPresence()
             }
@@ -1453,19 +1474,45 @@ struct ContentView: View {
     }
 
     private func refreshSpotlightIndex() {
+        guard scenePhase == .active, spotlightTask == nil else { return }
         let container = modelContext.container
-        Task(priority: .utility) {
-            // Search indexing is auxiliary and can contend with SwiftData while the first
-            // day's map is being assembled. Give the launch UI a short head start.
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
+        spotlightTask = Task(priority: .utility) { @MainActor in
             do {
+                // Search indexing is auxiliary and can contend with SwiftData while the
+                // first day's map is being assembled. Give the launch UI a head start.
+                try await Task.sleep(for: .seconds(2))
+                try Task.checkCancellation()
+                while importedRouteDataSummary.isRefreshing {
+                    try await Task.sleep(for: .milliseconds(250))
+                    try Task.checkCancellation()
+                }
                 let worker = VisitedPlaceSpotlightWorker(modelContainer: container)
-                let entities = try await worker.entities()
-                try await VisitedPlaceSpotlightIndexer.replaceIndex(with: entities)
+                if VisitedPlaceSpotlightStateStore.needsBootstrap {
+                    try await VisitedPlaceSpotlightIndexer.beginFullRebuild()
+                    var cursor: Date?
+                    repeat {
+                        try Task.checkCancellation()
+                        let page = try await worker.entitiesPage(afterArrivalDate: cursor, limit: 250)
+                        try await VisitedPlaceSpotlightIndexer.index(page.entities)
+                        cursor = page.nextArrivalDate
+                        if !page.hasMore { break }
+                    } while cursor != nil
+                    VisitedPlaceSpotlightStateStore.completeBootstrap()
+                } else {
+                    let dirtyIDs = VisitedPlaceSpotlightStateStore.pendingIDs(limit: 250)
+                    guard !dirtyIDs.isEmpty else {
+                        self.spotlightTask = nil
+                        return
+                    }
+                    let entities = try await worker.entities(ids: dirtyIDs)
+                    try await VisitedPlaceSpotlightIndexer.delete(ids: dirtyIDs)
+                    try await VisitedPlaceSpotlightIndexer.index(entities)
+                    VisitedPlaceSpotlightStateStore.remove(dirtyIDs)
+                }
             } catch {
                 // Spotlight is auxiliary; timeline rendering must not depend on it.
             }
+            self.spotlightTask = nil
         }
     }
 

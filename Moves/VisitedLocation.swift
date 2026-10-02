@@ -103,6 +103,13 @@ enum TransportMode: String, Codable, CaseIterable, Identifiable, Hashable, Senda
     }
 }
 
+enum TransportModeProvenance: String, Codable, CaseIterable, Sendable {
+    case automatic
+    case manual
+    case imported
+    case healthWorkout
+}
+
 enum LocationSampleSource: String, Codable, CaseIterable {
     case visit
     case significantChange
@@ -260,6 +267,319 @@ extension DayTimeline {
     }
 }
 
+struct FlightMergePlan: Sendable, Equatable {
+    let sourceMoveIDs: [UUID]
+    let orderedSourceMoveIDs: [UUID]
+    let startDate: Date
+    let endDate: Date
+    let departureDayKey: String
+    let removableIntermediatePlaceIDs: [UUID]
+    let preservedIntermediatePlaceIDs: [UUID]
+
+    var gapCount: Int { max(orderedSourceMoveIDs.count - 1, 0) }
+}
+
+enum FlightMergeError: LocalizedError, Equatable {
+    case requiresAtLeastTwoMoves
+    case missingMove(UUID)
+    case moveHasInvalidInterval(UUID)
+    case movesBelongToDifferentDevices
+    case planDoesNotMatchCurrentStore
+
+    var errorDescription: String? {
+        switch self {
+        case .requiresAtLeastTwoMoves:
+            return "Select at least two move fragments."
+        case .missingMove(let id):
+            return "Move \(id.uuidString) is no longer available."
+        case .moveHasInvalidInterval(let id):
+            return "Move \(id.uuidString) has an invalid time interval."
+        case .movesBelongToDifferentDevices:
+            return "Flight fragments from different devices cannot be merged."
+        case .planDoesNotMatchCurrentStore:
+            return "The selected flight fragments changed before the merge was committed."
+        }
+    }
+}
+
+/// Flight-specific merge semantics live beside the model/repository layer. The
+/// generic same-day place deletion rules remain intentionally unchanged.
+@MainActor
+final class FlightMergeService {
+    private let modelContext: ModelContext
+
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
+
+    func validate(moveIDs: [UUID]) throws -> FlightMergePlan {
+        let uniqueIDs = Array(Set(moveIDs))
+        guard uniqueIDs.count >= 2 else { throw FlightMergeError.requiresAtLeastTwoMoves }
+
+        let moves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+            .filter { uniqueIDs.contains($0.id) }
+        guard moves.count == uniqueIDs.count else {
+            let missing = uniqueIDs.first { id in !moves.contains { $0.id == id } } ?? uniqueIDs[0]
+            throw FlightMergeError.missingMove(missing)
+        }
+
+        guard moves.allSatisfy({ $0.endDate >= $0.startDate }) else {
+            let invalid = moves.first(where: { $0.endDate < $0.startDate })!
+            throw FlightMergeError.moveHasInvalidInterval(invalid.id)
+        }
+
+        let deviceIDs = Set(moves.map(\.deviceIdentifier).filter { !$0.isEmpty })
+        guard deviceIDs.count <= 1 else { throw FlightMergeError.movesBelongToDifferentDevices }
+
+        let ordered = moves.sorted {
+            if $0.timelineStartDate != $1.timelineStartDate {
+                return $0.timelineStartDate < $1.timelineStartDate
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        let startDate = ordered.map(\.timelineStartDate).min() ?? ordered[0].startDate
+        let endDate = ordered.map(\.endDate).max() ?? ordered[0].endDate
+
+        var removable: [UUID] = []
+        var preserved: [UUID] = []
+        for pair in zip(ordered, ordered.dropFirst()) {
+            guard let place = pair.0.endPlace,
+                  pair.1.startPlace?.id == place.id else { continue }
+
+            if Self.canConsumeIntermediatePlace(place, selectedMoves: ordered) {
+                removable.append(place.id)
+            } else {
+                preserved.append(place.id)
+            }
+        }
+
+        return FlightMergePlan(
+            sourceMoveIDs: uniqueIDs.sorted { $0.uuidString < $1.uuidString },
+            orderedSourceMoveIDs: ordered.map(\.id),
+            startDate: startDate,
+            endDate: endDate,
+            departureDayKey: DayTimeline.makeDayKey(for: startDate),
+            removableIntermediatePlaceIDs: removable,
+            preservedIntermediatePlaceIDs: preserved
+        )
+    }
+
+    @discardableResult
+    func merge(moveIDs: [UUID]) throws -> UUID {
+        let plan = try validate(moveIDs: moveIDs)
+        return try merge(plan)
+    }
+
+    @discardableResult
+    func merge(_ plan: FlightMergePlan) throws -> UUID {
+        do {
+            let allMoves = try modelContext.fetch(FetchDescriptor<MoveSegment>())
+            let selected = allMoves.filter { plan.orderedSourceMoveIDs.contains($0.id) }
+            guard selected.count == plan.orderedSourceMoveIDs.count else {
+                throw FlightMergeError.planDoesNotMatchCurrentStore
+            }
+
+            let ordered = plan.orderedSourceMoveIDs.compactMap { id in selected.first { $0.id == id } }
+            guard ordered.count >= 2,
+                  let first = ordered.first,
+                  let last = ordered.last else {
+                throw FlightMergeError.planDoesNotMatchCurrentStore
+            }
+
+            let startDate = ordered.map(\.timelineStartDate).min() ?? plan.startDate
+            let endDate = ordered.map(\.endDate).max() ?? plan.endDate
+            guard endDate >= startDate else { throw FlightMergeError.planDoesNotMatchCurrentStore }
+
+            var recordedRoute: [CLLocationCoordinate2D] = []
+            var allImportedLocations: [CLLocation] = []
+            var comments: [String] = []
+            var totalDistance = 0.0
+
+            for move in ordered {
+                let route = move.manualRouteCoordinates
+                    ?? move.importedRouteCoordinates
+                    ?? MoveRouteGeometry.rawCoordinates(for: move)
+                let validRoute = RouteCoordinateOps.validCoordinates(route)
+                RouteCoordinateOps.append(validRoute, to: &recordedRoute)
+                totalDistance += Self.routeDistance(validRoute)
+
+                if let imported = ImportedRoutePayloadCodec.decode(move.importedRouteData) {
+                    allImportedLocations.append(contentsOf: imported.map(\.asLocation))
+                }
+                if let comment = move.comment?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !comment.isEmpty,
+                   !comments.contains(comment) {
+                    comments.append(comment)
+                }
+
+                for sample in move.samples {
+                    sample.moveSegment = first
+                }
+            }
+
+            first.startDate = startDate
+            first.endDate = endDate
+            first.setTransportMode(.plane, provenance: .manual)
+            first.startPlace = ordered.first?.startPlace
+            first.endPlace = last.endPlace
+            first.dayTimeline = try timeline(for: startDate)
+            first.stepCount = nil
+            first.comment = comments.isEmpty ? nil : comments.joined(separator: "\n\n")
+            first.dedupeKey = "flight-merge|\(first.startPlace?.id.uuidString ?? "unknown")|\(first.endPlace?.id.uuidString ?? "unknown")|\(startDate.timeIntervalSince1970)|\(endDate.timeIntervalSince1970)"
+            first.clearCachedRouteCoordinates()
+            first.routeCacheSignature = nil
+            first.routeCacheCoordinatesData = nil
+            let endpointDistance: CLLocationDistance
+            if let startCoordinate = first.startPlace?.coordinate,
+               let endCoordinate = first.endPlace?.coordinate {
+                endpointDistance = RouteCoordinateOps.distanceMeters(from: startCoordinate, to: endCoordinate)
+            } else {
+                endpointDistance = 0
+            }
+            first.distanceMeters = max(totalDistance, endpointDistance)
+
+            if recordedRoute.count > 1, ordered.contains(where: { $0.hasManualRouteCoordinates }) {
+                first.storeManualRouteCoordinates(recordedRoute)
+            } else {
+                first.clearManualRouteCoordinates()
+            }
+            if !allImportedLocations.isEmpty {
+                first.importedRouteData = ImportedRoutePayloadCodec.encode(allImportedLocations.sorted { $0.timestamp < $1.timestamp })
+            }
+
+            for source in ordered.dropFirst() {
+                modelContext.delete(source)
+            }
+
+            let removableIDs = Set(plan.removableIntermediatePlaceIDs)
+            let places = try modelContext.fetch(FetchDescriptor<VisitPlace>())
+            for place in places where removableIDs.contains(place.id) {
+                place.incomingMoves = place.incomingMoves.filter { $0.id == first.id }
+                place.outgoingMoves = place.outgoingMoves.filter { $0.id == first.id }
+                modelContext.delete(place)
+            }
+
+            try modelContext.save()
+            NotificationCenter.default.post(name: .movesMoveDataDidChange, object: first.id)
+            return first.id
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func timeline(for date: Date) throws -> DayTimeline {
+        let dayKey = DayTimeline.makeDayKey(for: date)
+        var descriptor = FetchDescriptor<DayTimeline>(predicate: #Predicate { $0.dayKey == dayKey })
+        descriptor.fetchLimit = 1
+        if let existing = try modelContext.fetch(descriptor).first {
+            return existing
+        }
+        let timeline = DayTimeline(dayStart: date)
+        modelContext.insert(timeline)
+        return timeline
+    }
+
+    private static func canConsumeIntermediatePlace(_ place: VisitPlace, selectedMoves: [MoveSegment]) -> Bool {
+        let selectedIDs = Set(selectedMoves.map(\.id))
+        let hasMeaningfulContent = [place.userLabel, place.comment]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains { !$0.isEmpty }
+            || !place.photoAssetIDs.isEmpty
+            || place.provenance != .moves
+        guard !hasMeaningfulContent else { return false }
+
+        let incoming = place.incomingMoves.filter { selectedIDs.contains($0.id) }
+        let outgoing = place.outgoingMoves.filter { selectedIDs.contains($0.id) }
+        return incoming.count == 1 && outgoing.count == 1
+            && place.incomingMoves.allSatisfy { selectedIDs.contains($0.id) }
+            && place.outgoingMoves.allSatisfy { selectedIDs.contains($0.id) }
+    }
+
+    private static func routeDistance(_ coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {
+        zip(coordinates, coordinates.dropFirst()).reduce(0) { partial, pair in
+            partial + RouteCoordinateOps.distanceMeters(from: pair.0, to: pair.1)
+        }
+    }
+}
+
+struct AutomaticPlaneMaintenanceReport: Sendable, Equatable {
+    let inspectedCount: Int
+    let changedMoveIDs: [UUID]
+    let checkpoint: String
+}
+
+/// A bounded, idempotent repair pass for planes created by the old sparse-speed
+/// heuristic. It deliberately skips every move with explicit provenance.
+@MainActor
+final class AutomaticPlaneMaintenance {
+    static let version = "automatic-plane-repair-v1"
+
+    private let modelContext: ModelContext
+    private let routeProber: TerrestrialRouteFeasibilityProber
+
+    init(
+        modelContext: ModelContext,
+        routeProber: TerrestrialRouteFeasibilityProber = MapKitTerrestrialRouteProbe()
+    ) {
+        self.modelContext = modelContext
+        self.routeProber = routeProber
+    }
+
+    func reEvaluateSuspiciousMoves(limit: Int = 64) async throws -> AutomaticPlaneMaintenanceReport {
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in move.transportModeRawValue == "plane" },
+            sortBy: [SortDescriptor(\MoveSegment.startDate, order: .forward)]
+        )
+        descriptor.fetchLimit = max(limit, 1)
+        let candidates = try modelContext.fetch(descriptor).filter { move in
+            move.transportModeProvenance == .automatic
+                && !move.usesImportedRoute
+                && !move.usesHealthWorkoutRoute
+                && (move.timelineDuration < 60 || Self.directDistance(for: move) < 50_000)
+        }
+
+        var changed: [UUID] = []
+        for move in candidates {
+            guard let start = move.startPlace?.coordinate,
+                  let end = move.endPlace?.coordinate else {
+                move.setTransportMode(.unknown, provenance: .automatic)
+                changed.append(move.id)
+                continue
+            }
+
+            let distance = Self.directDistance(for: move)
+            let evidence = await routeProber.probe(from: start, to: end, directDistance: distance)
+            switch evidence {
+            case .routeFound(let mode, _, _):
+                move.setTransportMode(mode, provenance: .automatic)
+                changed.append(move.id)
+            case .confirmedNoRoute:
+                break
+            case .unavailableOrTransientFailure, .notChecked:
+                move.setTransportMode(.unknown, provenance: .automatic)
+                changed.append(move.id)
+            }
+        }
+
+        if !changed.isEmpty {
+            try modelContext.save()
+            NotificationCenter.default.post(name: .movesMoveDataDidChange, object: nil)
+        }
+        return AutomaticPlaneMaintenanceReport(
+            inspectedCount: candidates.count,
+            changedMoveIDs: changed,
+            checkpoint: Self.version
+        )
+    }
+
+    private static func directDistance(for move: MoveSegment) -> CLLocationDistance {
+        guard let start = move.startPlace?.coordinate,
+              let end = move.endPlace?.coordinate else { return 0 }
+        return RouteCoordinateOps.distanceMeters(from: start, to: end)
+    }
+}
+
 @MainActor
 enum TimelineDeletion {
     static func delete(place: VisitPlace, in context: ModelContext, undoManager: UndoManager?) throws {
@@ -323,6 +643,7 @@ enum TimelineDeletion {
 
             context.delete(place)
             try context.save()
+            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
             notifyImportedSummaryChanged()
             registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Place and Merge Routes")
             return
@@ -331,6 +652,7 @@ enum TimelineDeletion {
         let payload = DeletedTimelinePlace(place: place)
         context.delete(place)
         try context.save()
+        NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
         notifyImportedSummaryChanged()
         registerUndo(payload, in: context, undoManager: undoManager, actionName: "Delete Place")
     }
@@ -468,6 +790,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
     let startDate: Date
     let endDate: Date
     let transportMode: TransportMode
+    let transportModeProvenanceRawValue: String
     let distanceMeters: Double
     let stepCount: Int?
     let comment: String?
@@ -489,6 +812,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         startDate = move.startDate
         endDate = move.endDate
         transportMode = move.transportMode
+        transportModeProvenanceRawValue = move.transportModeProvenanceRawValue
         distanceMeters = move.distanceMeters
         stepCount = move.stepCount
         comment = move.comment
@@ -509,6 +833,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         let move = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment)
         move.id = id
         move.deviceIdentifier = deviceIdentifier
+        move.transportModeProvenanceRawValue = transportModeProvenanceRawValue
         move.isExcludedFromConnectionStatistics = isExcluded
         move.createdAt = createdAt
         move.startPlace = startPlace
@@ -534,6 +859,7 @@ private struct DeletedTimelineMove: TimelineDeletionUndoPayload {
         move.startDate = startDate
         move.endDate = endDate
         move.transportMode = transportMode
+        move.transportModeProvenanceRawValue = transportModeProvenanceRawValue
         move.distanceMeters = distanceMeters
         move.stepCount = stepCount
         move.comment = comment
@@ -640,9 +966,9 @@ private struct DeletedTimelineDayPlace {
 }
 
 private struct DeletedTimelineDayMove {
-    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?, importedRouteData: Data?, flightMetadataData: Data?
-    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData; importedRouteData = move.importedRouteData; flightMetadataData = move.flightMetadataData }
-    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; m.importedRouteData = importedRouteData; m.flightMetadataData = flightMetadataData; return m }
+    let id: UUID, deviceIdentifier: String, dedupeKey: String, startDate: Date, endDate: Date, transportMode: TransportMode, transportModeProvenanceRawValue: String, distanceMeters: Double, stepCount: Int?, comment: String?, isExcluded: Bool, createdAt: Date, startPlaceID: UUID?, endPlaceID: UUID?, startPlace: VisitPlace?, endPlace: VisitPlace?, routeCacheSignature: String?, routeCacheCoordinatesData: Data?, manualRouteCoordinatesData: Data?, importedRouteData: Data?, flightMetadataData: Data?
+    init(_ move: MoveSegment) { id = move.id; deviceIdentifier = move.deviceIdentifier; dedupeKey = move.dedupeKey; startDate = move.startDate; endDate = move.endDate; transportMode = move.transportMode; transportModeProvenanceRawValue = move.transportModeProvenanceRawValue; distanceMeters = move.distanceMeters; stepCount = move.stepCount; comment = move.comment; isExcluded = move.isExcludedFromConnectionStatistics; createdAt = move.createdAt; startPlaceID = move.startPlace?.id; endPlaceID = move.endPlace?.id; startPlace = move.startPlace; endPlace = move.endPlace; routeCacheSignature = move.routeCacheSignature; routeCacheCoordinatesData = move.routeCacheCoordinatesData; manualRouteCoordinatesData = move.manualRouteCoordinatesData; importedRouteData = move.importedRouteData; flightMetadataData = move.flightMetadataData }
+    func makeModel(day: DayTimeline, places: [UUID: VisitPlace]) -> MoveSegment { let m = MoveSegment(dedupeKey: dedupeKey, startDate: startDate, endDate: endDate, transportMode: transportMode, distanceMeters: distanceMeters, stepCount: stepCount, comment: comment); m.id = id; m.deviceIdentifier = deviceIdentifier; m.transportModeProvenanceRawValue = transportModeProvenanceRawValue; m.isExcludedFromConnectionStatistics = isExcluded; m.createdAt = createdAt; m.startPlace = startPlaceID.flatMap { places[$0] } ?? startPlace; m.endPlace = endPlaceID.flatMap { places[$0] } ?? endPlace; m.dayTimeline = day; m.routeCacheSignature = routeCacheSignature; m.routeCacheCoordinatesData = routeCacheCoordinatesData; m.manualRouteCoordinatesData = manualRouteCoordinatesData; m.importedRouteData = importedRouteData; m.flightMetadataData = flightMetadataData; return m }
 }
 
 private struct DeletedTimelineDaySample {
@@ -824,6 +1150,7 @@ final class MoveSegment {
     var startDate: Date = Date.now
     var endDate: Date = Date.now
     var transportModeRawValue: String = TransportMode.unknown.rawValue
+    var transportModeProvenanceRawValue: String = TransportModeProvenance.automatic.rawValue
     var distanceMeters: Double = 0
     var stepCount: Int? = nil
     var comment: String? = nil
@@ -882,6 +1209,16 @@ final class MoveSegment {
                 markFlightMatchStale()
             }
         }
+    }
+
+    var transportModeProvenance: TransportModeProvenance {
+        get { TransportModeProvenance(rawValue: transportModeProvenanceRawValue) ?? .automatic }
+        set { transportModeProvenanceRawValue = newValue.rawValue }
+    }
+
+    func setTransportMode(_ mode: TransportMode, provenance: TransportModeProvenance) {
+        transportMode = mode
+        transportModeProvenance = provenance
     }
 
     var timelineStartDate: Date {
@@ -1119,6 +1456,7 @@ struct MoveSegmentSnapshot: Codable {
     let startDate: Date
     let endDate: Date
     let transportModeRawValue: String
+    let transportModeProvenanceRawValue: String?
     let distanceMeters: Double
     let stepCount: Int?
     let comment: String?
@@ -1292,6 +1630,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                     startDate: move.startDate,
                     endDate: move.endDate,
                     transportModeRawValue: move.transportModeRawValue,
+                    transportModeProvenanceRawValue: move.transportModeProvenanceRawValue,
                     distanceMeters: move.distanceMeters,
                     stepCount: move.stepCount,
                     comment: move.comment,
@@ -1387,6 +1726,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             move.createdAt = moveSnapshot.createdAt
             move.isExcludedFromConnectionStatistics = moveSnapshot.isExcludedFromConnectionStatistics ?? false
             move.transportModeRawValue = moveSnapshot.transportModeRawValue
+            move.transportModeProvenanceRawValue = moveSnapshot.transportModeProvenanceRawValue ?? TransportModeProvenance.automatic.rawValue
             move.routeCacheSignature = moveSnapshot.routeCacheSignature
             move.routeCacheCoordinatesData = moveSnapshot.routeCacheCoordinatesData
             move.manualRouteCoordinatesData = moveSnapshot.manualRouteCoordinatesData
@@ -1538,6 +1878,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             existing.dayTimeline = try timeline(for: arrival)
             let canonical = try collapseDuplicatePlaces(around: existing)
             try saveIfNeeded()
+            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: canonical.id)
             return canonical
         }
 
@@ -1556,6 +1897,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         modelContext.insert(place)
         let canonical = try collapseDuplicatePlaces(around: place)
         try saveIfNeeded()
+        NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: canonical.id)
         return canonical
     }
 
@@ -1687,6 +2029,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         if source == .fileRouteImport {
             move.importedRouteData = ImportedRoutePayloadCodec.encode(orderedLocations)
+            move.transportModeProvenance = .imported
+        } else if source == .healthWorkoutRoute {
+            move.transportModeProvenance = .healthWorkout
         }
 
         if saveImmediately {
@@ -1911,7 +2256,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 existing.departureDate = departureDate
             }
             existing.dayTimeline = try timeline(for: arrivalDate)
-            return try collapseDuplicatePlaces(around: existing)
+            let canonical = try collapseDuplicatePlaces(around: existing)
+            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: canonical.id)
+            return canonical
         }
 
         let place = VisitPlace(
@@ -1925,7 +2272,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         place.deviceIdentifier = deviceIdentifier
         place.dayTimeline = try timeline(for: arrivalDate)
         modelContext.insert(place)
-        return try collapseDuplicatePlaces(around: place)
+        let canonical = try collapseDuplicatePlaces(around: place)
+        NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: canonical.id)
+        return canonical
     }
 
     private func existingVisit(near arrivalDate: Date, coordinate: CLLocationCoordinate2D) throws -> VisitPlace? {

@@ -17,6 +17,9 @@ import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct MovesSettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -847,6 +850,8 @@ private extension View {
 
 private struct CloudKitSyncStatusCard: View {
     @StateObject private var syncMonitor = SyncMonitor.default
+    @EnvironmentObject private var diagnostics: MovesSyncDiagnostics
+    @State private var copiedDiagnostics = false
 
     private var isSetupInProgress: Bool {
         if case .inProgress = syncMonitor.setupState { return true }
@@ -880,7 +885,43 @@ private struct CloudKitSyncStatusCard: View {
         if isExportInProgress {
             return "Uploading to iCloud"
         }
-        return syncMonitor.syncStateSummary.description
+        switch syncMonitor.syncStateSummary {
+        case .error:
+            return "iCloud sync needs attention"
+        case .unknown:
+            return "iCloud sync status unavailable"
+        default:
+            return syncMonitor.syncStateSummary.description
+        }
+    }
+
+    private var errors: [(String, MovesSyncDiagnostics.ErrorDetails)] {
+        [
+            ("Setup", syncMonitor.setupError.map {
+                MovesSyncDiagnostics.errorDetails(for: $0, stage: .cloudKitSetup)
+            }),
+            ("Import", syncMonitor.importError.map {
+                MovesSyncDiagnostics.errorDetails(for: $0, stage: .cloudKitImport)
+            }),
+            ("Export", syncMonitor.exportError.map {
+                MovesSyncDiagnostics.errorDetails(for: $0, stage: .cloudKitExport)
+            })
+        ].compactMap { name, details in
+            details.map { (name, $0) }
+        }
+    }
+
+    private var storeFailure: MovesSyncDiagnostics.ErrorDetails? {
+        guard let failure = diagnostics.storeOpenFailure else { return nil }
+        return MovesSyncDiagnostics.ErrorDetails(
+            stage: .cloudKitSetup,
+            disposition: MovesSyncDiagnostics.ErrorDisposition(rawValue: failure.disposition.rawValue) ?? .unknown,
+            domain: failure.domain,
+            code: failure.code,
+            message: failure.message,
+            recoverySuggestion: "Your local timeline was kept. Retry after fixing the iCloud account or app update.",
+            occurredAt: failure.occurredAt
+        )
     }
 
     var body: some View {
@@ -903,9 +944,81 @@ private struct CloudKitSyncStatusCard: View {
                 }
             }
 
+            if errors.isEmpty, let storeFailure {
+                syncErrorRow(title: "Store setup", details: storeFailure)
+            } else if errors.isEmpty, let lastError = diagnostics.lastErrorDetails {
+                syncErrorRow(title: lastError.stage.displayName, details: lastError)
+            } else {
+                ForEach(errors, id: \.0) { name, details in
+                    syncErrorRow(title: name, details: details)
+                }
+            }
+
+            if !errors.isEmpty || diagnostics.lastErrorDetails != nil || storeFailure != nil {
+                HStack(spacing: 10) {
+                    Button("Retry") {
+                        NotificationCenter.default.post(name: .movesCloudKitRetryRequested, object: nil)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(copiedDiagnostics ? "Copied" : "Copy Diagnostics") {
+                        copyDiagnostics()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
             Text("Shows iCloud activity for this copy of Moves. Other devices sync independently.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func syncErrorRow(
+        title: String,
+        details: MovesSyncDiagnostics.ErrorDetails
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(title): \(details.disposition.title)")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(details.disposition == .retryable ? .orange : .red)
+            Text(details.message)
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let suggestion = details.recoverySuggestion {
+                Text(suggestion)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func copyDiagnostics() {
+        let report = diagnostics.copyableReport(syncMonitor: syncMonitor)
+#if canImport(UIKit)
+        UIPasteboard.general.string = report
+#elseif canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+#endif
+        copiedDiagnostics = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            copiedDiagnostics = false
+        }
+    }
+}
+
+private extension MovesSyncDiagnostics.Stage {
+    var displayName: String {
+        switch self {
+        case .cloudKitSetup: return "Setup"
+        case .cloudKitImport: return "Import"
+        case .cloudKitExport: return "Export"
+        case .localSave: return "Local save"
+        case .localTimelineObservedChange: return "Timeline"
         }
     }
 }

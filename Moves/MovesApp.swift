@@ -117,48 +117,19 @@ struct MovesApp: App {
     }
 
     nonisolated static func makeModelContainer() throws -> ModelContainer {
-        let cacheSchema = Schema([ShareMapAggregate.self])
-        let schema = Schema(MovesTimelineStore.authoritativeModelTypes + [ShareMapAggregate.self])
-
-        let modelConfiguration: ModelConfiguration
-        let cacheConfiguration: ModelConfiguration
         if ProcessInfo.processInfo.environment["MOVES_TEST_IN_MEMORY"] == "1" {
             // The macOS test host otherwise opens the user's real SwiftData
             // store before the test process connects. Keeping this switch
             // environment-driven leaves production storage unchanged while
             // making background/indexing tests isolated and repeatable.
-            modelConfiguration = MovesTimelineStore.makeConfiguration(isStoredInMemoryOnly: true)
-            cacheConfiguration = ModelConfiguration(
-                "ShareMapCache",
-                schema: cacheSchema,
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            )
+            return try MovesTimelineStore.makeApplicationContainer(isStoredInMemoryOnly: true)
         } else {
             #if targetEnvironment(simulator)
-            modelConfiguration = MovesTimelineStore.makeConfiguration(isStoredInMemoryOnly: true)
-            cacheConfiguration = ModelConfiguration(
-                "ShareMapCache",
-                schema: cacheSchema,
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            )
+            return try MovesTimelineStore.makeApplicationContainer(isStoredInMemoryOnly: true)
             #else
-            modelConfiguration = MovesTimelineStore.makeConfiguration()
-            cacheConfiguration = ModelConfiguration(
-                "ShareMapCache",
-                schema: cacheSchema,
-                cloudKitDatabase: .none
-            )
+            return try MovesTimelineStore.makeApplicationContainer()
             #endif
         }
-
-        let container = try ModelContainer(
-            for: schema,
-            configurations: [modelConfiguration, cacheConfiguration]
-        )
-
-        return container
     }
 
     nonisolated static func ensureCurrentDayExists(in container: ModelContainer) throws {
@@ -296,6 +267,7 @@ final class MovesAppRuntime: ObservableObject {
 
     @Published private(set) var container: ModelContainer?
     @Published private(set) var isReady = false
+    @Published private(set) var storeOpenFailure: MovesStoreOpenFailure?
     var didStartActiveServices = false
 
     private(set) var captureManager: MovesLocationCaptureManager?
@@ -311,6 +283,48 @@ final class MovesAppRuntime: ObservableObject {
     private(set) var importedRouteDataSummary: ImportedRouteDataSummaryStore?
 
     private var prepareTask: Task<Void, Never>?
+    private var retryObserver: NSObjectProtocol?
+
+    init() {
+        storeOpenFailure = MovesStoreRecovery.lastFailure
+        retryObserver = NotificationCenter.default.addObserver(
+            forName: .movesCloudKitRetryRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.retryPreparation()
+            }
+        }
+    }
+
+    deinit {
+        if let retryObserver {
+            NotificationCenter.default.removeObserver(retryObserver)
+        }
+    }
+
+    func retryPreparation() async {
+        SyncMonitor.default.startMonitoring()
+        if isReady, storeOpenFailure != nil {
+            container = nil
+            captureManager = nil
+            watchRouteInbox = nil
+            healthWorkoutRouteAutoImporter = nil
+            cloudDataPresencePublisher = nil
+            syncDiagnostics = nil
+            locationServiceSyncManager = nil
+            multiDevicePresenceManager = nil
+            importCoordinator = nil
+            routeFileImporter = nil
+            routeWatchFolderManager = nil
+            importedRouteDataSummary = nil
+            didStartActiveServices = false
+            isReady = false
+        }
+        guard !isReady else { return }
+        await prepare()
+    }
 
     func prepare() async {
         guard !isReady else { return }
@@ -322,9 +336,24 @@ final class MovesAppRuntime: ObservableObject {
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let container = try await Task.detached(priority: .userInitiated) {
-                    try MovesApp.makeModelContainer()
-                }.value
+                let container: ModelContainer
+                do {
+                    container = try await Task.detached(priority: .userInitiated) {
+                        try MovesApp.makeModelContainer()
+                    }.value
+                    MovesStoreRecovery.clear()
+                    self.storeOpenFailure = nil
+                } catch {
+                    self.storeOpenFailure = MovesStoreRecovery.record(error)
+                    // Open the same store without the CloudKit integration as a
+                    // non-destructive fallback. No file is deleted or replaced;
+                    // local edits remain available while sync is repaired.
+                    container = try await Task.detached(priority: .utility) {
+                        try MovesTimelineStore.makeApplicationContainer(
+                            cloudKitDatabase: ModelConfiguration.CloudKitDatabase.none
+                        )
+                    }.value
+                }
 
                 #if !targetEnvironment(macCatalyst)
                 try await Task.detached(priority: .utility) {
@@ -370,8 +399,10 @@ final class MovesAppRuntime: ObservableObject {
                 MovesAppShortcuts.updateAppShortcutParameters()
                 isReady = true
             } catch {
-                // Keep the loading UI alive. A transient iCloud/SQLite open failure should
-                // not turn into a launch crash; a future scene activation can retry.
+                storeOpenFailure = MovesStoreRecovery.record(error)
+                // Keep the loading UI alive. The local store is never deleted or replaced;
+                // the user can retry after fixing the account/network or inspect the
+                // recorded domain/code in Settings once the app is able to open.
                 prepareTask = nil
             }
         }

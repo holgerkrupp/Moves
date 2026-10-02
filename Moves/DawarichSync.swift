@@ -679,7 +679,10 @@ final class LocationServiceSyncManager: ObservableObject {
         self.modelContainer = modelContainer
         self.defaults = defaults
         self.client = client
-        self.crossDeviceWorkCoordinator = CrossDeviceWorkCoordinator(modelContainer: modelContainer)
+        self.crossDeviceWorkCoordinator = CrossDeviceWorkCoordinator(
+            modelContainer: modelContainer,
+            backend: .cloudKit
+        )
         migrateLegacyDawarichDefaultsIfNeeded()
         reloadSettings()
 
@@ -862,7 +865,8 @@ final class LocationServiceSyncManager: ObservableObject {
             )
             let claim = try await crossDeviceWorkCoordinator.acquire(
                 key: workKey,
-                scope: .accountShared
+                scope: .accountShared,
+                completionMarker: upperBound.timeIntervalSince1970.description
             )
             guard case .acquired(let lease) = claim else {
                 updateState(for: service) {

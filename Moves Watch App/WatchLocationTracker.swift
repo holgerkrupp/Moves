@@ -11,6 +11,123 @@ private struct WatchRoutePayload: Codable {
     let samples: [WatchLocationSamplePayload]
 }
 
+private struct WatchRoutePoint: Codable, Sendable {
+    let latitude: Double
+    let longitude: Double
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+private struct WatchRouteSnapshot: Sendable {
+    let points: [WatchRoutePoint]
+}
+
+/// Owns all Watch route filesystem and JSON work. WatchLocationTracker is a
+/// MainActor object because it publishes SwiftUI state, but route persistence
+/// and backlog inspection must never run on that actor.
+private actor WatchRouteStore {
+    private static let manifestFilename = "manifest.json"
+    private static let maxPresentationPoints = 1_200
+
+    private let directory: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private var queuedFiles: [URL]?
+    private var todayDayKey: String?
+    private var todayPoints: [WatchRoutePoint] = []
+
+    init(directory: URL) {
+        self.directory = directory
+    }
+
+    func persist(_ payload: WatchRoutePayload) throws {
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+
+        let dayKey = Self.dayKey(for: payload.startedAt)
+        let filename = "\(dayKey)-\(payload.id.uuidString).json"
+        let fileURL = directory.appendingPathComponent(filename)
+        let data = try encoder.encode(payload)
+        try data.write(to: fileURL, options: .atomic)
+
+        queuedFiles = nil
+        if todayDayKey == dayKey {
+            todayPoints.append(contentsOf: payload.samples.map {
+                WatchRoutePoint(latitude: $0.latitude, longitude: $0.longitude)
+            })
+            todayPoints = Self.downsample(todayPoints, maximumCount: Self.maxPresentationPoints)
+        }
+    }
+
+    func todaySnapshot(for date: Date) throws -> WatchRouteSnapshot {
+        let dayKey = Self.dayKey(for: date)
+        if todayDayKey != dayKey {
+            todayDayKey = dayKey
+            todayPoints = try loadTodayPoints(dayKey: dayKey)
+        }
+        return WatchRouteSnapshot(points: todayPoints)
+    }
+
+    func nextTransferFile() throws -> URL? {
+        if queuedFiles == nil {
+            let files = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+            queuedFiles = files
+                .filter { $0.pathExtension.lowercased() == "json" && $0.lastPathComponent != Self.manifestFilename }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        }
+        return queuedFiles?.first
+    }
+
+    func markTransferred(_ url: URL) throws {
+        try FileManager.default.removeItem(at: url)
+        queuedFiles?.removeAll { $0 == url }
+    }
+
+    private func loadTodayPoints(dayKey: String) throws -> [WatchRoutePoint] {
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        var points: [WatchRoutePoint] = []
+        for fileURL in files where fileURL.pathExtension.lowercased() == "json" {
+            try Task.checkCancellation()
+            let name = fileURL.deletingPathExtension().lastPathComponent
+            // New files carry their day in the filename, so normal launches
+            // do not need to open old route payloads merely to classify them.
+            guard name.hasPrefix("\(dayKey)-") else { continue }
+            let data = try Data(contentsOf: fileURL)
+            let payload = try decoder.decode(WatchRoutePayload.self, from: data)
+            points.append(contentsOf: payload.samples.map {
+                WatchRoutePoint(latitude: $0.latitude, longitude: $0.longitude)
+            })
+        }
+        return Self.downsample(points, maximumCount: Self.maxPresentationPoints)
+    }
+
+    private static func dayKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
+    }
+
+    private static func downsample(_ points: [WatchRoutePoint], maximumCount: Int) -> [WatchRoutePoint] {
+        guard points.count > maximumCount, maximumCount > 1 else { return points }
+        let step = Double(points.count - 1) / Double(maximumCount - 1)
+        return (0..<maximumCount).map { points[Int((Double($0) * step).rounded())] }
+    }
+}
+
 private struct WatchLocationSamplePayload: Codable {
     let timestamp: Date
     let latitude: Double
@@ -75,14 +192,16 @@ final class WatchLocationTracker: NSObject, ObservableObject {
     @Published private(set) var todayRouteCoordinates: [CLLocationCoordinate2D] = []
 
     private let manager = CLLocationManager()
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
+    private let routeStore: WatchRouteStore
     private var activeSamples: [CLLocation] = []
     private var activeStartedAt: Date?
     private var syncedRouteCoordinates: [CLLocationCoordinate2D] = []
     private var routeTransferInProgress = false
 
     override init() {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        routeStore = WatchRouteStore(directory: base.appendingPathComponent("WatchRoutes", isDirectory: true))
         super.init()
         manager.delegate = self
         manager.activityType = .fitness
@@ -104,19 +223,22 @@ final class WatchLocationTracker: NSObject, ObservableObject {
         manager.startUpdatingLocation()
         statusText = "Lower-power changes"
         refreshDaySummary()
-        refreshTodayRouteCoordinates()
+        loadTodayRouteSnapshot()
     }
 
     func flushStoredRoutes() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated, !routeTransferInProgress else { return }
-        guard let fileURL = storedRouteFileURLs().sorted(by: { $0.path < $1.path }).first else { return }
-
-        // WatchConnectivity delivers this app as a short-lived background task.
-        // Queue only one file so a backlog cannot exhaust the 2-second watchdog.
-        routeTransferInProgress = true
-        session.transferFile(fileURL, metadata: nil)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let fileURL = try? await routeStore.nextTransferFile() else { return }
+            await MainActor.run {
+                guard !self.routeTransferInProgress else { return }
+                self.routeTransferInProgress = true
+                session.transferFile(fileURL, metadata: nil)
+            }
+        }
     }
 
     private func startHighAccuracyTracking() {
@@ -129,7 +251,7 @@ final class WatchLocationTracker: NSObject, ObservableObject {
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = 8
         manager.startUpdatingLocation()
-        refreshTodayRouteCoordinates()
+        loadTodayRouteSnapshot()
     }
 
     private func stopHighAccuracyTracking() {
@@ -174,7 +296,7 @@ final class WatchLocationTracker: NSObject, ObservableObject {
         }
 
         lastHorizontalAccuracy = usableLocations.last?.horizontalAccuracy
-        refreshTodayRouteCoordinates()
+        appendToTodayRouteCache(usableLocations.map { WatchRoutePoint(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) })
     }
 
     private func persistActiveRoute(sourceRawValue: String) {
@@ -191,20 +313,18 @@ final class WatchLocationTracker: NSObject, ObservableObject {
             samples: activeSamples.map(WatchLocationSamplePayload.init)
         )
 
-        do {
-            let data = try encoder.encode(payload)
-            let fileURL = routesDirectory
-                .appendingPathComponent(payload.id.uuidString)
-                .appendingPathExtension("json")
-            try FileManager.default.createDirectory(
-                at: routesDirectory,
-                withIntermediateDirectories: true
-            )
-            try data.write(to: fileURL, options: .atomic)
-            flushStoredRoutes()
-            refreshTodayRouteCoordinates()
-        } catch {
-            statusText = "Could not save route"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await routeStore.persist(payload)
+                await MainActor.run {
+                    self.flushStoredRoutes()
+                }
+            } catch is CancellationError {
+                // The payload remains in memory and will be retried by the next event.
+            } catch {
+                await MainActor.run { self.statusText = "Could not save route" }
+            }
         }
     }
 
@@ -215,20 +335,8 @@ final class WatchLocationTracker: NSObject, ObservableObject {
         session.activate()
     }
 
-    private var routesDirectory: URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("WatchRoutes", isDirectory: true)
-    }
-
-    private func storedRouteFileURLs() -> [URL] {
-        (try? FileManager.default.contentsOfDirectory(
-            at: routesDirectory,
-            includingPropertiesForKeys: nil
-        )) ?? []
-    }
-
     private func refreshDaySummary() {
+        let decoder = JSONDecoder()
         guard let data = WatchWidgetSharedStore.userDefaults.data(forKey: WatchWidgetSharedStore.snapshotKey),
               let snapshot = try? decoder.decode(WatchTimelineWidgetSnapshot.self, from: data) else {
             daySummary = .placeholder
@@ -247,29 +355,35 @@ final class WatchLocationTracker: NSObject, ObservableObject {
         }
     }
 
-    private func refreshTodayRouteCoordinates() {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: .now)
-        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
-            todayRouteCoordinates = activeSamples.map(\.coordinate)
-            return
-        }
-
-        var coordinates: [CLLocationCoordinate2D] = syncedRouteCoordinates
-        for fileURL in storedRouteFileURLs() {
-            guard let data = try? Data(contentsOf: fileURL),
-                  let payload = try? decoder.decode(WatchRoutePayload.self, from: data),
-                  payload.endedAt >= startOfDay,
-                  payload.startedAt < endOfDay else {
-                continue
+    private func loadTodayRouteSnapshot() {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let snapshot = try? await routeStore.todaySnapshot(for: .now) else { return }
+            await MainActor.run {
+                let persisted = self.syncedRouteCoordinates + snapshot.points.map(\.coordinate)
+                let current = self.todayRouteCoordinates
+                let refreshed = persisted + self.activeSamples.map(\.coordinate)
+                // A snapshot can race a just-finished fallback write. Never
+                // replace a newer in-memory presentation with that older read.
+                self.todayRouteCoordinates = Self.downsample(
+                    current.count > refreshed.count ? current : refreshed,
+                    maximumCount: 1_200
+                )
             }
-            coordinates.append(contentsOf: payload.samples.map {
-                CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
-            })
         }
+    }
 
-        coordinates.append(contentsOf: activeSamples.map(\.coordinate))
-        todayRouteCoordinates = coordinates
+    private func appendToTodayRouteCache(_ points: [WatchRoutePoint]) {
+        guard !points.isEmpty else { return }
+        var coordinates = todayRouteCoordinates
+        coordinates.append(contentsOf: points.map(\.coordinate))
+        todayRouteCoordinates = Self.downsample(coordinates, maximumCount: 1_200)
+    }
+
+    private static func downsample(_ points: [CLLocationCoordinate2D], maximumCount: Int) -> [CLLocationCoordinate2D] {
+        guard points.count > maximumCount, maximumCount > 1 else { return points }
+        let step = Double(points.count - 1) / Double(maximumCount - 1)
+        return (0..<maximumCount).map { points[Int((Double($0) * step).rounded())] }
     }
 }
 
@@ -312,7 +426,7 @@ extension WatchLocationTracker: WCSessionDelegate {
         Task { @MainActor in
             self.routeTransferInProgress = false
             guard error == nil else { return }
-            try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+            try? await self.routeStore.markTransferred(fileTransfer.file.fileURL)
             self.flushStoredRoutes()
         }
     }

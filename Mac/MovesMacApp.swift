@@ -113,7 +113,7 @@ struct MovesMacApp: App {
     }
 
     static func makeModelContainer() throws -> ModelContainer {
-        try MovesTimelineStore.makeContainer()
+        try MovesTimelineStore.makeApplicationContainer()
     }
 
     var body: some Scene {

@@ -104,7 +104,10 @@ enum DailyTimelineBackup {
         let destination = destinationDirectory.appendingPathComponent(
             "Moves-\(dayKey).\(format.timelineExportFormat.fileExtension)"
         )
-        let coordinator = CrossDeviceWorkCoordinator(modelContainer: modelContainer)
+        let coordinator = CrossDeviceWorkCoordinator(
+            modelContainer: modelContainer,
+            backend: .cloudKit
+        )
         let workKey = BackgroundWorkKey(
             kind: "dailyBackup",
             partition: "\(dayKey)-\(format.rawValue)",

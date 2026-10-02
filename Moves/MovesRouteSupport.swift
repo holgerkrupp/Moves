@@ -211,6 +211,19 @@ struct RenderedRoute: Identifiable {
         RouteCoordinateOps.mapPolylineSegments(coordinates)
     }
 
+    /// Plane connectors are presentation-only geometry. They are intentionally
+    /// kept separate from recorded coordinates and never written to samples.
+    var inferredCoordinateSegments: [[CLLocationCoordinate2D]] {
+        guard transportMode == .plane,
+              let start = coordinates.first,
+              let end = coordinates.last else { return [] }
+        return FlightRenderedGeometry.build(
+            fragments: [FlightRouteFragment(coordinates: coordinates)],
+            startCoordinate: start,
+            endCoordinate: end
+        ).inferredSegments
+    }
+
     var shadowCoordinates: [CLLocationCoordinate2D] {
         guard transportMode == .plane,
               !usesHighAccuracyRouteTracking,
@@ -992,8 +1005,10 @@ enum RouteCoordinateOps {
 
         for coordinate in coordinates.dropFirst() {
             if let previous = current.last, crossesAntimeridian(from: previous, to: coordinate) {
+                let split = antimeridianSplit(from: previous, to: coordinate)
+                current.append(split.edgeCoordinate)
                 if current.count > 1 { segments.append(current) }
-                current = [coordinate]
+                current = [split.oppositeEdgeCoordinate, coordinate]
             } else {
                 current.append(coordinate)
             }
@@ -1008,6 +1023,28 @@ enum RouteCoordinateOps {
         to end: CLLocationCoordinate2D
     ) -> Bool {
         abs(end.longitude - start.longitude) > 180
+    }
+
+    private static func antimeridianSplit(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D
+    ) -> (edgeCoordinate: CLLocationCoordinate2D, oppositeEdgeCoordinate: CLLocationCoordinate2D) {
+        var unwrappedEnd = end.longitude
+        if unwrappedEnd - start.longitude > 180 {
+            unwrappedEnd -= 360
+        } else if unwrappedEnd - start.longitude < -180 {
+            unwrappedEnd += 360
+        }
+
+        let boundary = unwrappedEnd > 180 ? 180.0 : -180.0
+        let denominator = unwrappedEnd - start.longitude
+        let fraction = denominator == 0
+            ? 0.5
+            : min(max((boundary - start.longitude) / denominator, 0), 1)
+        let latitude = start.latitude + ((end.latitude - start.latitude) * fraction)
+        let edge = CLLocationCoordinate2D(latitude: latitude, longitude: boundary)
+        let opposite = CLLocationCoordinate2D(latitude: latitude, longitude: -boundary)
+        return (edge, opposite)
     }
 
     static func dedupeSequentialCoordinates(
@@ -1273,7 +1310,57 @@ enum PlaneRouteGeometry {
             return [start, end]
         }
 
+        if RouteCoordinateOps.crossesAntimeridian(from: start, to: end) {
+            return greatCircleCoordinates(from: start, to: end)
+        }
+
         return arcCoordinates(from: start, to: end)
+    }
+
+    static func greatCircleCoordinates(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        maximumPointCount: Int = 72
+    ) -> [CLLocationCoordinate2D] {
+        let startLatitude = start.latitude * .pi / 180
+        let endLatitude = end.latitude * .pi / 180
+        let startLongitude = start.longitude * .pi / 180
+        var longitudeDelta = (end.longitude - start.longitude) * .pi / 180
+        if longitudeDelta > .pi { longitudeDelta -= 2 * .pi }
+        if longitudeDelta < -.pi { longitudeDelta += 2 * .pi }
+        let endLongitude = startLongitude + longitudeDelta
+
+        let startVector = (
+            cos(startLatitude) * cos(startLongitude),
+            cos(startLatitude) * sin(startLongitude),
+            sin(startLatitude)
+        )
+        let endVector = (
+            cos(endLatitude) * cos(endLongitude),
+            cos(endLatitude) * sin(endLongitude),
+            sin(endLatitude)
+        )
+        let dot = min(max(
+            (startVector.0 * endVector.0)
+                + (startVector.1 * endVector.1)
+                + (startVector.2 * endVector.2),
+            -1
+        ), 1)
+        let angularDistance = acos(dot)
+        let pointCount = min(max(Int(angularDistance * 180 / .pi / 3), 8), maximumPointCount)
+        guard angularDistance > 0.000001 else { return [start, end] }
+
+        return (0...pointCount).map { index in
+            let fraction = Double(index) / Double(pointCount)
+            let scaleStart = sin((1 - fraction) * angularDistance) / sin(angularDistance)
+            let scaleEnd = sin(fraction * angularDistance) / sin(angularDistance)
+            let x = (scaleStart * startVector.0) + (scaleEnd * endVector.0)
+            let y = (scaleStart * startVector.1) + (scaleEnd * endVector.1)
+            let z = (scaleStart * startVector.2) + (scaleEnd * endVector.2)
+            let latitude = atan2(z, hypot(x, y)) * 180 / .pi
+            let longitude = atan2(y, x) * 180 / .pi
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
     }
 
     private static func arcCoordinates(
@@ -1331,6 +1418,88 @@ enum PlaneRouteGeometry {
 
             return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
         }
+    }
+}
+
+struct FlightRouteFragment: Sendable {
+    let coordinates: [CLLocationCoordinate2D]
+    let startDate: Date?
+    let endDate: Date?
+
+    init(
+        coordinates: [CLLocationCoordinate2D],
+        startDate: Date? = nil,
+        endDate: Date? = nil
+    ) {
+        self.coordinates = RouteCoordinateOps.validCoordinates(coordinates)
+        self.startDate = startDate
+        self.endDate = endDate
+    }
+}
+
+struct FlightRenderedGeometry: Sendable {
+    let recordedSegments: [[CLLocationCoordinate2D]]
+    let inferredSegments: [[CLLocationCoordinate2D]]
+
+    static func build(
+        fragments: [FlightRouteFragment],
+        startCoordinate: CLLocationCoordinate2D?,
+        endCoordinate: CLLocationCoordinate2D?,
+        maximumGap: TimeInterval = 20 * 60
+    ) -> FlightRenderedGeometry {
+        let ordered = fragments
+            .filter { !$0.coordinates.isEmpty }
+            .sorted { lhs, rhs in
+                switch (lhs.startDate, rhs.startDate) {
+                case let (.some(lhsDate), .some(rhsDate)): return lhsDate < rhsDate
+                default: return false
+                }
+            }
+
+        var recorded: [[CLLocationCoordinate2D]] = []
+        var inferred: [[CLLocationCoordinate2D]] = []
+        var previousEnd = startCoordinate
+        var previousEndDate: Date?
+
+        for fragment in ordered {
+            let coordinates = RouteCoordinateOps.mapPolylineSegments(fragment.coordinates)
+            recorded.append(contentsOf: coordinates)
+            guard let first = fragment.coordinates.first,
+                  let priorEnd = previousEnd else {
+                previousEnd = fragment.coordinates.last
+                previousEndDate = fragment.endDate
+                continue
+            }
+
+            let hasLargeTimeGap: Bool
+            if let previousEndDate, let fragmentStart = fragment.startDate {
+                hasLargeTimeGap = fragmentStart.timeIntervalSince(previousEndDate) > maximumGap
+            } else {
+                hasLargeTimeGap = true
+            }
+
+            if RouteCoordinateOps.distanceMeters(from: priorEnd, to: first) > 100
+                || hasLargeTimeGap {
+                inferred.append(contentsOf: RouteCoordinateOps.mapPolylineSegments(
+                    PlaneRouteGeometry.greatCircleCoordinates(from: priorEnd, to: first)
+                ))
+            }
+            previousEnd = fragment.coordinates.last
+            previousEndDate = fragment.endDate
+        }
+
+        if let previousEnd, let endCoordinate,
+           RouteCoordinateOps.distanceMeters(from: previousEnd, to: endCoordinate) > 100 {
+            inferred.append(contentsOf: RouteCoordinateOps.mapPolylineSegments(
+                PlaneRouteGeometry.greatCircleCoordinates(from: previousEnd, to: endCoordinate)
+            ))
+        } else if ordered.isEmpty, let startCoordinate, let endCoordinate {
+            inferred.append(contentsOf: RouteCoordinateOps.mapPolylineSegments(
+                PlaneRouteGeometry.greatCircleCoordinates(from: startCoordinate, to: endCoordinate)
+            ))
+        }
+
+        return FlightRenderedGeometry(recordedSegments: recorded, inferredSegments: inferred)
     }
 }
 

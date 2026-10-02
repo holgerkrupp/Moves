@@ -1,18 +1,48 @@
 import CoreData
+import CloudKit
 import Foundation
 import OSLog
+import CloudKitSyncMonitor
 import SwiftData
 import SwiftUI
 
 /// Device-local, privacy-safe CloudKit/SwiftData timing telemetry.
 @MainActor
 final class MovesSyncDiagnostics: ObservableObject {
-    enum Stage: String, Codable {
+    enum Stage: String, Codable, Sendable {
         case cloudKitSetup
         case cloudKitImport
         case cloudKitExport
         case localSave
         case localTimelineObservedChange
+    }
+
+    enum ErrorDisposition: String, Codable, CaseIterable, Sendable {
+        case retryable
+        case persistent
+        case unknown
+
+        var title: String {
+            switch self {
+            case .retryable: return "Retryable"
+            case .persistent: return "Needs attention"
+            case .unknown: return "Unknown"
+            }
+        }
+    }
+
+    struct ErrorDetails: Codable, Equatable, Sendable {
+        let stage: Stage
+        let disposition: ErrorDisposition
+        let domain: String?
+        let code: Int?
+        let message: String
+        let recoverySuggestion: String?
+        let occurredAt: Date
+
+        var shortDescription: String {
+            "\(disposition.title): \(message)"
+        }
     }
 
     struct Event: Codable, Identifiable {
@@ -22,6 +52,7 @@ final class MovesSyncDiagnostics: ObservableObject {
         let endedAt: Date?
         let succeeded: Bool?
         let errorSummary: String?
+        let errorDetails: ErrorDetails?
         let placeCount: Int?
         let moveCount: Int?
         let newestCreatedAt: Date?
@@ -29,6 +60,49 @@ final class MovesSyncDiagnostics: ObservableObject {
         var duration: TimeInterval? {
             guard let endedAt else { return nil }
             return endedAt.timeIntervalSince(startedAt)
+        }
+
+        init(
+            id: UUID,
+            stage: Stage,
+            startedAt: Date,
+            endedAt: Date?,
+            succeeded: Bool?,
+            errorSummary: String?,
+            placeCount: Int?,
+            moveCount: Int?,
+            newestCreatedAt: Date?,
+            errorDetails: ErrorDetails? = nil
+        ) {
+            self.id = id
+            self.stage = stage
+            self.startedAt = startedAt
+            self.endedAt = endedAt
+            self.succeeded = succeeded
+            self.errorSummary = errorSummary
+            self.errorDetails = errorDetails
+            self.placeCount = placeCount
+            self.moveCount = moveCount
+            self.newestCreatedAt = newestCreatedAt
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, stage, startedAt, endedAt, succeeded, errorSummary, errorDetails
+            case placeCount, moveCount, newestCreatedAt
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            stage = try container.decode(Stage.self, forKey: .stage)
+            startedAt = try container.decode(Date.self, forKey: .startedAt)
+            endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+            succeeded = try container.decodeIfPresent(Bool.self, forKey: .succeeded)
+            errorSummary = try container.decodeIfPresent(String.self, forKey: .errorSummary)
+            errorDetails = try container.decodeIfPresent(ErrorDetails.self, forKey: .errorDetails)
+            placeCount = try container.decodeIfPresent(Int.self, forKey: .placeCount)
+            moveCount = try container.decodeIfPresent(Int.self, forKey: .moveCount)
+            newestCreatedAt = try container.decodeIfPresent(Date.self, forKey: .newestCreatedAt)
         }
     }
 
@@ -72,6 +146,133 @@ final class MovesSyncDiagnostics: ObservableObject {
 
     var lastError: Event? {
         events.reversed().first { $0.errorSummary != nil }
+    }
+
+    var lastErrorDetails: ErrorDetails? {
+        events.reversed().compactMap(\.errorDetails).first
+    }
+
+    var storeOpenFailure: MovesStoreOpenFailure? {
+        MovesStoreRecovery.lastFailure
+    }
+
+    static func errorDetails(
+        for error: Error,
+        stage: Stage,
+        occurredAt: Date = .now
+    ) -> ErrorDetails {
+        let nsError = error as NSError
+        let disposition = classify(error)
+        return ErrorDetails(
+            stage: stage,
+            disposition: disposition,
+            domain: nsError.domain.isEmpty ? nil : nsError.domain,
+            code: nsError.code == 0 ? nil : nsError.code,
+            message: privacySafeMessage(error.localizedDescription),
+            recoverySuggestion: nsError.localizedRecoverySuggestion.map(privacySafeMessage),
+            occurredAt: occurredAt
+        )
+    }
+
+    static func classify(_ error: Error) -> ErrorDisposition {
+        var current: NSError? = error as NSError
+        var visited = Set<String>()
+
+        while let candidate = current {
+            let identity = "\(candidate.domain):\(candidate.code)"
+            guard visited.insert(identity).inserted else { break }
+
+            let urlCode = URLError.Code(rawValue: candidate.code)
+            switch urlCode {
+            case .cancelled, .timedOut, .cannotConnectToHost, .networkConnectionLost,
+                 .notConnectedToInternet, .dnsLookupFailed, .resourceUnavailable:
+                return .retryable
+            default:
+                break
+            }
+
+            if let cloudKitCode = CKError.Code(rawValue: candidate.code) {
+                switch cloudKitCode {
+                case .networkUnavailable, .networkFailure, .serviceUnavailable,
+                     .requestRateLimited, .zoneBusy, .resultsTruncated, .notAuthenticated:
+                    return .retryable
+                case .permissionFailure, .constraintViolation,
+                     .incompatibleVersion, .badContainer, .badDatabase,
+                     .invalidArguments, .quotaExceeded:
+                    return .persistent
+                default:
+                    break
+                }
+            }
+
+            current = candidate.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+
+        return .unknown
+    }
+
+    static func privacySafeMessage(_ message: String) -> String {
+        var result = message
+        let patterns = [
+            #"https?://[^\s]+"#,
+            #"/(?:Users|private|var|tmp)/[^\s]+"#
+        ]
+        for pattern in patterns {
+            if let expression = try? NSRegularExpression(pattern: pattern) {
+                let range = NSRange(result.startIndex..<result.endIndex, in: result)
+                result = expression.stringByReplacingMatches(
+                    in: result,
+                    range: range,
+                    withTemplate: "<redacted>"
+                )
+            }
+        }
+        return result
+    }
+
+    func copyableReport(syncMonitor: SyncMonitor) -> String {
+        var lines = [
+            "Moves iCloud diagnostics",
+            "Generated: \(Date().ISO8601Format())",
+            "Container: \(MovesTimelineStore.cloudKitContainerIdentifier)",
+            ""
+        ]
+
+        let monitorErrors: [(String, Error?)] = [
+            ("Setup", syncMonitor.setupError),
+            ("Import", syncMonitor.importError),
+            ("Export", syncMonitor.exportError)
+        ]
+        for (name, error) in monitorErrors {
+            guard let error else { continue }
+            let details = Self.errorDetails(for: error, stage: stage(for: name))
+            lines.append("\(name): \(details.disposition.title) — \(details.message) [\(details.domain ?? "unknown")\(details.code.map { ":\($0)" } ?? "")]")
+        }
+
+        if monitorErrors.allSatisfy({ $0.1 == nil }), let details = lastErrorDetails {
+            lines.append("Last recorded event: \(details.stage.rawValue) — \(details.disposition.title) — \(details.message)")
+        }
+        if let storeOpenFailure {
+            lines.append("Store open: \(storeOpenFailure.disposition.rawValue) — \(storeOpenFailure.message) [\(storeOpenFailure.domain ?? "unknown")\(storeOpenFailure.code.map { ":\($0)" } ?? "")]")
+        }
+        lines.append("Recorded events: \(events.count)")
+        if let snapshot = latestSnapshot {
+            lines.append("Local snapshot: \(snapshot.placeCount) places, \(snapshot.moveCount) moves, observed \(snapshot.observedAt.ISO8601Format())")
+        }
+        lines.append("No coordinates, route points, account identifiers, or location names are included.")
+        return lines.joined(separator: "\n")
+    }
+
+    func copyableReport() -> String {
+        copyableReport(syncMonitor: SyncMonitor.default)
+    }
+
+    private func stage(for name: String) -> Stage {
+        switch name {
+        case "Setup": return .cloudKitSetup
+        case "Import": return .cloudKitImport
+        default: return .cloudKitExport
+        }
     }
 
     private func observeNotifications() {
@@ -130,10 +331,13 @@ final class MovesSyncDiagnostics: ObservableObject {
                 startedAt: startedAt,
                 endedAt: event.endDate,
                 succeeded: event.endDate.map { _ in event.succeeded },
-                errorSummary: event.error?.localizedDescription,
+                errorSummary: event.error.map { Self.privacySafeMessage($0.localizedDescription) },
                 placeCount: nil,
                 moveCount: nil,
-                newestCreatedAt: nil
+                newestCreatedAt: nil,
+                errorDetails: event.error.map {
+                    Self.errorDetails(for: $0, stage: stage, occurredAt: event.endDate ?? Date())
+                }
             )
         )
 

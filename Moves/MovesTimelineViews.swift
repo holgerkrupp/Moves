@@ -103,6 +103,7 @@ struct DayTimelinePageContent: View {
     @State private var pendingDeletionEntry: TimelineEntry?
     @State private var deletionErrorMessage = ""
     @State private var isShowingDeletionError = false
+    @State private var flightMergeAnchor: MoveSegment?
     @Binding private var mapSelection: TimelineMapSelection?
 
     init(
@@ -406,6 +407,17 @@ struct DayTimelinePageContent: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(deletionErrorMessage)
+        }
+        .sheet(item: $flightMergeAnchor) { move in
+            FlightMergeView(anchor: move)
+        }
+        .task {
+            for await notification in NotificationCenter.default.notifications(named: .movesPresentFlightMerge) {
+                guard !Task.isCancelled else { return }
+                if let move = notification.object as? MoveSegment {
+                    flightMergeAnchor = move
+                }
+            }
         }
     }
 
@@ -879,7 +891,7 @@ private struct TimelineEntryContextMenu: ViewModifier {
                     Menu("Change Transport", systemImage: "arrow.triangle.branch") {
                         ForEach(TransportMode.allCases) { mode in
                             Button {
-                                move.transportMode = mode
+                                move.setTransportMode(mode, provenance: .manual)
                                 move.clearCachedRouteCoordinates()
                                 do {
                                     try modelContext.save()
@@ -903,6 +915,11 @@ private struct TimelineEntryContextMenu: ViewModifier {
                         move.isExcludedFromConnectionStatistics.toggle()
                         try? modelContext.save()
                     }
+                }
+
+                Divider()
+                Button("Merge into Flight…", systemImage: "arrow.triangle.merge") {
+                    NotificationCenter.default.post(name: .movesPresentFlightMerge, object: move)
                 }
 
                 Divider()
@@ -1377,7 +1394,7 @@ private struct DayPresentationSource {
                 sortBy: [SortDescriptor(\MoveSegment.endDate, order: .reverse)]
             )
             if !loadAll {
-                moveDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedMoves
+                moveDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedMoves + 1
             }
 
             var placeDescriptor = FetchDescriptor<VisitPlace>(
@@ -1385,7 +1402,7 @@ private struct DayPresentationSource {
                 sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .reverse)]
             )
             if !loadAll {
-                placeDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedPlaces
+                placeDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedPlaces + 1
             }
 
             var sampleDescriptor = FetchDescriptor<LocationSample>(
@@ -1393,17 +1410,30 @@ private struct DayPresentationSource {
                 sortBy: [SortDescriptor(\LocationSample.timestamp, order: .reverse)]
             )
             if !loadAll {
-                sampleDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedSamples
+                sampleDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedSamples + 1
             }
 
             var importedDescriptor = FetchDescriptor<LocationSample>(predicate: importedSamplePredicate)
             importedDescriptor.fetchLimit = 1
 
-            let moves = try context.fetch(moveDescriptor)
-            let places = try context.fetch(placeDescriptor)
-            let samples = try context.fetch(sampleDescriptor)
-            let totalMoveCount = try context.fetchCount(FetchDescriptor(predicate: movePredicate))
-            let totalSampleCount = try context.fetchCount(FetchDescriptor(predicate: samplePredicate))
+            let fetchedMoves = try context.fetch(moveDescriptor)
+            let fetchedPlaces = try context.fetch(placeDescriptor)
+            let fetchedSamples = try context.fetch(sampleDescriptor)
+            let moves = loadAll
+                ? fetchedMoves
+                : Array(fetchedMoves.prefix(TimelinePresentationLimits.maxLoadedMoves))
+            let places = loadAll
+                ? fetchedPlaces
+                : Array(fetchedPlaces.prefix(TimelinePresentationLimits.maxLoadedPlaces))
+            let samples = loadAll
+                ? fetchedSamples
+                : Array(fetchedSamples.prefix(TimelinePresentationLimits.maxLoadedSamples))
+            let totalMoveCount = loadAll
+                ? try context.fetchCount(FetchDescriptor(predicate: movePredicate))
+                : fetchedMoves.count
+            let totalSampleCount = loadAll
+                ? try context.fetchCount(FetchDescriptor(predicate: samplePredicate))
+                : fetchedSamples.count
             let hasImportedSamples = try !context.fetch(importedDescriptor).isEmpty
             let hasImportedRouteData = moves.contains { $0.importedRouteData != nil }
                 || hasImportedSamples
@@ -1430,22 +1460,15 @@ private struct DayPresentationSource {
                 carriedOverPlace: carriedOverPlace
             )
         } catch {
-            // Preserve a usable page if an older store cannot execute one of the bounded
-            // predicates. This path is intentionally capped as well.
-            let allMoves = dayTimeline.moves
-            let allPlaces = dayTimeline.places
-            let allSamples = dayTimeline.samples
-            let moves = Array(allMoves.prefix(TimelinePresentationLimits.maxLoadedMoves))
-            let places = Array(allPlaces.prefix(TimelinePresentationLimits.maxLoadedPlaces))
-            let samples = Array(allSamples.prefix(TimelinePresentationLimits.maxLoadedSamples))
+            // Never fault an unbounded relationship as an error fallback. A
+            // subsequent bounded task can retry this page.
             return LoadedRecords(
-                places: places,
-                moves: moves,
-                samples: samples,
-                totalMoveCount: allMoves.count,
-                totalSampleCount: allSamples.count,
-                hasImportedRouteData: samples.contains { $0.source == .fileRouteImport }
-                    || moves.contains(where: { $0.importedRouteData != nil }),
+                places: [],
+                moves: [],
+                samples: [],
+                totalMoveCount: 0,
+                totalSampleCount: 0,
+                hasImportedRouteData: false,
                 carriedOverPlace: nil
             )
         }
@@ -1985,14 +2008,9 @@ struct DayMapStrip: View {
         if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey) {
             initialPresentation = cached
         } else {
-            let source = DayPresentationSourceCache.source(for: dayTimeline, generation: 0)
-            let cache = Self.makePresentationCache(
-                for: dayTimeline,
-                source: source,
-                generation: 0
-            )
-            DayMapPresentationCacheStore.store(cache, for: dayTimeline.dayKey)
-            initialPresentation = cache
+            // Do not fetch SwiftData while SwiftUI constructs the first page.
+            // The selected-day task below fills the cache after the first frame.
+            initialPresentation = Self.initialPresentationCache(coordinate: nil)
         }
         let initialRegion = Self.region(for: initialPresentation)
         _camera = State(initialValue: .region(initialRegion))
@@ -2196,6 +2214,14 @@ struct DayMapStrip: View {
                     .stroke(
                         route.tint.opacity(dimsForOtherSelection ? 0.28 : 0.95),
                         lineWidth: isSelected ? route.lineWidth + 4 : route.lineWidth
+                    )
+            }
+
+            ForEach(Array(route.inferredCoordinateSegments.enumerated()), id: \.offset) { _, coordinates in
+                MapPolyline(coordinates: coordinates)
+                    .stroke(
+                        route.shadowTint.opacity(dimsForOtherSelection ? 0.18 : 0.7),
+                        style: StrokeStyle(lineWidth: route.shadowLineWidth, dash: [8, 6])
                     )
             }
         }

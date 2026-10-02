@@ -63,6 +63,79 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
         }
     }
 
+    func testACompletedLeaseCanBeReopenedForANewerHighWaterMarker() async throws {
+        let container = try makeContainer()
+        let coordinator = CrossDeviceWorkCoordinator(
+            modelContainer: container,
+            deviceIdentifier: "phone"
+        )
+        let key = BackgroundWorkKey(kind: "externalSync", partition: "hour-1", version: 1)
+        let firstDate = Date(timeIntervalSince1970: 1_800_000_000)
+
+        guard case .acquired(let firstLease) = try await coordinator.acquire(
+            key: key,
+            scope: .accountShared,
+            now: firstDate,
+            completionMarker: "point-1"
+        ) else {
+            return XCTFail("Expected the first marker to acquire")
+        }
+        try await coordinator.finish(
+            firstLease,
+            completed: true,
+            completionMarker: "point-1",
+            now: firstDate
+        )
+
+        guard case .acquired = try await coordinator.acquire(
+            key: key,
+            scope: .accountShared,
+            now: firstDate.addingTimeInterval(1),
+            completionMarker: "point-2"
+        ) else {
+            return XCTFail("A newer high-water marker must not be suppressed by the old completion")
+        }
+    }
+
+    func testBackgroundWorkKeyIdentifierIncludesAllKeyParts() {
+        XCTAssertEqual(
+            BackgroundWorkKey(kind: "kind", partition: "partition", version: 3).identifier,
+            "kind:partition:v3"
+        )
+    }
+
+    func testAuthoritativeStoreCanBeOpenedAgainAfterAnExistingStoreUpgrade() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MovesStoreUpgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let storeURL = directory.appendingPathComponent("timeline.store")
+        let oldSchema = Schema([CrossDeviceWorkLease.self])
+        let oldConfiguration = ModelConfiguration(
+            "MovesTimeline",
+            schema: oldSchema,
+            url: storeURL,
+            cloudKitDatabase: ModelConfiguration.CloudKitDatabase.none
+        )
+        let first = try ModelContainer(for: oldSchema, configurations: [oldConfiguration])
+        let context = ModelContext(first)
+        context.insert(CrossDeviceWorkLease(
+            workKey: "existing:v1",
+            scope: .accountShared,
+            ownerDeviceIdentifier: "phone",
+            acquiredAt: .now,
+            leaseExpiresAt: .now.addingTimeInterval(60),
+            algorithmVersion: 1
+        ))
+        try context.save()
+
+        _ = try MovesTimelineStore.makeContainer(
+            cloudKitDatabase: ModelConfiguration.CloudKitDatabase.none,
+            storeURL: storeURL
+        )
+    }
+
     func testDeviceLocalWorkDoesNotCreateACloudKitLease() async throws {
         let container = try makeContainer()
         let coordinator = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "phone")

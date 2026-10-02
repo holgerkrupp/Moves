@@ -23,6 +23,16 @@
         }
       }
     },
+    "%@  •  %@  •  %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@  •  %2$@  •  %3$@"
+          }
+        }
+      }
+    },
     "%@ · %@ · %@" : {
       "localizations" : {
         "en" : {
@@ -79,6 +89,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@, %2$lld visits"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
           }
         }
       }
@@ -174,6 +194,9 @@
           }
         }
       }
+    },
+    "%lld transient intermediate place(s) will be removed." : {
+
     },
     "%lld visit%@" : {
       "localizations" : {
@@ -387,10 +410,16 @@
     "Controls on left in landscape" : {
 
     },
+    "Copied" : {
+
+    },
     "Copied Raw Data" : {
 
     },
     "Copies the complete selection into temporary storage before importing." : {
+
+    },
+    "Copy Diagnostics" : {
 
     },
     "Copy Raw Data" : {
@@ -412,6 +441,9 @@
 
     },
     "Could Not Delete Place" : {
+
+    },
+    "Could Not Merge Flight" : {
 
     },
     "Could Not Open Apple Health" : {
@@ -597,6 +629,9 @@
     "Edit route" : {
 
     },
+    "Elapsed" : {
+
+    },
     "Elevation" : {
 
     },
@@ -733,6 +768,9 @@
 
     },
     "Formats" : {
+
+    },
+    "Fragments" : {
 
     },
     "From" : {
@@ -1018,6 +1056,18 @@
         }
       }
     },
+    "Meaningful intermediate places will be kept." : {
+
+    },
+    "Merge" : {
+
+    },
+    "Merge into Flight" : {
+
+    },
+    "Merge into Flight…" : {
+
+    },
     "Metadata" : {
 
     },
@@ -1088,6 +1138,9 @@
 
     },
     "Moves will stop scanning this folder. Already imported timeline data will remain." : {
+
+    },
+    "Nearby moves" : {
 
     },
     "Needs attention" : {
@@ -1441,6 +1494,9 @@
 
     },
     "Select all" : {
+
+    },
+    "Select fragments from the nearby absolute time window. The merge keeps one canonical flight and preserves recorded samples." : {
 
     },
     "Select the latest recorded day when opening a window" : {

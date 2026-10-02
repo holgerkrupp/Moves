@@ -366,14 +366,90 @@ struct VisitedPlaceEntity: IndexedEntity, URLRepresentableEntity, Sendable {
 /// Builds the Spotlight payload away from the view's main-actor model context. This matters
 /// after a large route import, where walking every place just to refresh search would otherwise
 /// compete with the timeline and map for the main thread.
+struct VisitedPlaceSpotlightPage: Sendable {
+    let entities: [VisitedPlaceEntity]
+    let nextArrivalDate: Date?
+    let hasMore: Bool
+}
+
+enum VisitedPlaceSpotlightStateStore {
+    private static let schemaVersion = 1
+    private static let versionKey = "Moves.visitedPlaceSpotlight.schemaVersion"
+    private static let dirtyIDsKey = "Moves.visitedPlaceSpotlight.dirtyIDs"
+    private static let bootstrapKey = "Moves.visitedPlaceSpotlight.bootstrapRequired"
+
+    static var needsBootstrap: Bool {
+        UserDefaults.standard.integer(forKey: versionKey) != schemaVersion
+            || UserDefaults.standard.bool(forKey: bootstrapKey)
+    }
+
+    static func markBootstrapRequired() {
+        UserDefaults.standard.set(true, forKey: bootstrapKey)
+    }
+
+    static func completeBootstrap() {
+        UserDefaults.standard.set(schemaVersion, forKey: versionKey)
+        UserDefaults.standard.set(false, forKey: bootstrapKey)
+    }
+
+    static func enqueue(_ id: UUID) {
+        var ids = Set(UserDefaults.standard.stringArray(forKey: dirtyIDsKey) ?? [])
+        ids.insert(id.uuidString)
+        UserDefaults.standard.set(Array(ids), forKey: dirtyIDsKey)
+    }
+
+    static func pendingIDs(limit: Int) -> [String] {
+        Array((UserDefaults.standard.stringArray(forKey: dirtyIDsKey) ?? []).prefix(max(limit, 1)))
+    }
+
+    static func remove(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        var remaining = Set(UserDefaults.standard.stringArray(forKey: dirtyIDsKey) ?? [])
+        ids.forEach { remaining.remove($0) }
+        UserDefaults.standard.set(Array(remaining), forKey: dirtyIDsKey)
+    }
+}
+
 @ModelActor
 actor VisitedPlaceSpotlightWorker {
-    func entities() throws -> [VisitedPlaceEntity] {
-        try modelContext.fetch(
-            FetchDescriptor<VisitPlace>(
+    func entities(ids: [String]) throws -> [VisitedPlaceEntity] {
+        var result: [VisitedPlaceEntity] = []
+        result.reserveCapacity(ids.count)
+        for id in ids {
+            try Task.checkCancellation()
+            guard let uuid = UUID(uuidString: id) else { continue }
+            var descriptor = FetchDescriptor<VisitPlace>(
+                predicate: #Predicate { place in place.id == uuid }
+            )
+            descriptor.fetchLimit = 1
+            if let place = try modelContext.fetch(descriptor).first {
+                result.append(VisitedPlaceEntity(place: place))
+            }
+        }
+        return result
+    }
+
+    func entitiesPage(afterArrivalDate: Date?, limit: Int) throws -> VisitedPlaceSpotlightPage {
+        let pageLimit = max(limit, 1)
+        var descriptor: FetchDescriptor<VisitPlace>
+        if let afterArrivalDate {
+            descriptor = FetchDescriptor(
+                predicate: #Predicate { place in place.arrivalDate < afterArrivalDate },
                 sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .reverse)]
             )
-        ).map(VisitedPlaceEntity.init)
+        } else {
+            descriptor = FetchDescriptor(
+                sortBy: [SortDescriptor(\VisitPlace.arrivalDate, order: .reverse)]
+            )
+        }
+        descriptor.fetchLimit = pageLimit + 1
+        let rows = try modelContext.fetch(descriptor)
+        let page = Array(rows.prefix(pageLimit))
+        return VisitedPlaceSpotlightPage(
+            entities: page.map(VisitedPlaceEntity.init),
+            nextArrivalDate: page.last?.arrivalDate,
+            hasMore: rows.count > pageLimit
+        )
     }
 }
 
@@ -403,13 +479,28 @@ extension VisitedPlaceEntityQuery: IndexedEntityQuery {
 enum VisitedPlaceSpotlightIndexer {
     static let indexName = "MovesVisitedPlaces"
 
-    static func replaceIndex(with entities: [VisitedPlaceEntity]) async throws {
-        let index = CSSearchableIndex(name: indexName)
-        try await index.deleteAppEntities(ofType: VisitedPlaceEntity.self)
+    static func index(_ entities: [VisitedPlaceEntity]) async throws {
+        guard !entities.isEmpty else { return }
+        try await CSSearchableIndex(name: indexName).indexAppEntities(entities)
+    }
 
+    static func delete(ids: [String]) async throws {
+        guard !ids.isEmpty else { return }
+        try await CSSearchableIndex(name: indexName)
+            .deleteSearchableItems(withIdentifiers: ids)
+    }
+
+    static func beginFullRebuild() async throws {
+        try await CSSearchableIndex(name: indexName)
+            .deleteAppEntities(ofType: VisitedPlaceEntity.self)
+    }
+
+    static func replaceIndex(with entities: [VisitedPlaceEntity]) async throws {
+        try await beginFullRebuild()
         for start in stride(from: 0, to: entities.count, by: 250) {
+            try Task.checkCancellation()
             let end = min(start + 250, entities.count)
-            try await index.indexAppEntities(Array(entities[start..<end]))
+            try await index(Array(entities[start..<end]))
         }
     }
 }

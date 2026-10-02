@@ -42,6 +42,9 @@ extension Notification.Name {
     static let movesLocationSamplesDidChange = Notification.Name("Moves.locationSamplesDidChange")
     static let movesImportedRouteDataDidChange = Notification.Name("Moves.importedRouteDataDidChange")
     static let movesMoveDataDidChange = Notification.Name("Moves.moveDataDidChange")
+    static let movesVisitedPlaceDidChange = Notification.Name("Moves.visitedPlaceDidChange")
+    static let movesPresentFlightMerge = Notification.Name("Moves.presentFlightMerge")
     static let movesTimelineDidChange = Notification.Name("Moves.timelineDidChange")
     static let movesCloudKitImportObserved = Notification.Name("Moves.cloudKitImportObserved")
+    static let movesCloudKitRetryRequested = Notification.Name("Moves.cloudKitRetryRequested")
 }

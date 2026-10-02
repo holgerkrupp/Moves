@@ -494,12 +494,15 @@ actor ImportedRouteDataSummaryWorker {
 final class ImportedRouteDataSummaryStore: ObservableObject {
     @Published private(set) var summary: ImportedRouteDataSummary
     @Published private(set) var daySummaries: [String: TimelineDaySummary]
+    @Published private(set) var isRefreshing = false
 
     private static let cacheKey = "Moves.importedRouteDataSummary"
     private static let dayCacheKey = "Moves.timelineDaySummaries"
     private let modelContainer: ModelContainer
     private var refreshTask: Task<Void, Never>?
     private var refreshAgain = false
+    private var processingEnabled = false
+    private var isDirty = true
     private var notificationTasks: [Task<Void, Never>] = []
 
     init(modelContainer: ModelContainer) {
@@ -515,12 +518,17 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
     }
 
     func refresh() {
+        isDirty = true
+        guard processingEnabled else { return }
         guard refreshTask == nil else {
             refreshAgain = true
             return
         }
+        isDirty = false
         let container = modelContainer
+        isRefreshing = true
         refreshTask = Task { [weak self] in
+            defer { self?.finishRefresh() }
             do {
                 let updated = try await Task.detached(priority: .utility) {
                     let worker = ImportedRouteDataSummaryWorker(modelContainer: container)
@@ -533,19 +541,53 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
                 daySummaries = updated.1
                 Self.saveCachedSummary(updated.0)
                 Self.saveCachedDaySummaries(updated.1)
-                finishRefresh()
             } catch is CancellationError {
-                self?.finishRefresh()
+                return
             } catch {
                 // Keep displaying the last successfully reconciled totals.
-                self?.finishRefresh()
             }
         }
     }
 
+    /// Auxiliary SwiftData work is owned by the scene lifecycle. While disabled,
+    /// notifications only leave a dirty marker; no model actor is started.
+    func setProcessingEnabled(_ enabled: Bool) {
+        guard processingEnabled != enabled else {
+            if enabled, isDirty, refreshTask == nil {
+                refresh()
+            }
+            return
+        }
+
+        processingEnabled = enabled
+        if !enabled {
+            refreshAgain = false
+            isDirty = true
+            refreshTask?.cancel()
+            refreshTask = nil
+            return
+        }
+
+        if isDirty {
+            refresh()
+        }
+    }
+
+    func cancelRefresh() {
+        refreshAgain = false
+        isDirty = true
+        refreshTask?.cancel()
+        refreshTask = nil
+    }
+
+    func markDirty() {
+        isDirty = true
+    }
+
     private func finishRefresh() {
         refreshTask = nil
-        guard refreshAgain else { return }
+        isRefreshing = false
+        guard processingEnabled, refreshAgain || isDirty else { return }
         refreshAgain = false
         refresh()
     }
@@ -560,7 +602,7 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
             Task { [weak self] in
                 for await _ in NotificationCenter.default.notifications(named: name) {
                     guard !Task.isCancelled, let self else { return }
-                    refresh()
+                    self.markDirty()
                 }
             }
         }
