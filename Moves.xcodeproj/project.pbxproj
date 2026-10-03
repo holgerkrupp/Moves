@@ -117,7 +117,7 @@
 		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; platformFilter = ios; };
 		A70000012FF0000100000001 /* MovesShareViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000012FF0000100000000 /* MovesShareViews.swift */; platformFilter = ios; };
 		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; };
-		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; platformFilter = ios; };
+		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; };
 		AC6BEC2A92CDFA332032BD37 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */; };
 		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; platformFilter = ios; };
 		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
@@ -139,6 +139,7 @@
 		E50000013050000100000001 /* CloudKitSyncMonitor in Frameworks */ = {isa = PBXBuildFile; productRef = E50000013050000100000003 /* CloudKitSyncMonitor */; };
 		E60000014000000100000001 /* CrossDeviceWorkCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */; };
 		E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */; platformFilter = ios; };
+		E62000014000000100000001 /* LaunchReliabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62000014000000100000000 /* LaunchReliabilityTests.swift */; platformFilter = ios; };
 		F1000001310000010000000F /* RouteCoordinateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001310000010000000E /* RouteCoordinateStorage.swift */; };
 		F10000013100000100000014 /* MovesMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000000 /* MovesMacApp.swift */; };
 		F10000013100000100000025 /* TimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000013100000100000015 /* TimelineStore.swift */; };
@@ -334,6 +335,7 @@
 		9A1B00012F00000100000001 /* MovesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAssemblerTests.swift; sourceTree = "<group>"; };
 		9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebugTests.swift; sourceTree = "<group>"; };
+		E62000014000000100000000 /* LaunchReliabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchReliabilityTests.swift; sourceTree = "<group>"; };
 		A10000012F00000100000001 /* MovesRouteSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteSupport.swift; sourceTree = "<group>"; };
 		A10000012F00000100000003 /* MovesTimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesTimelineViews.swift; sourceTree = "<group>"; };
 		A10000012F00000100000005 /* MovesDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesDetailViews.swift; sourceTree = "<group>"; };
@@ -679,6 +681,7 @@
 		9A1B00012F00000100000003 /* MovesTests */ = {
 			isa = PBXGroup;
 			children = (
+				E62000014000000100000000 /* LaunchReliabilityTests.swift */,
 				E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */,
 				F20000013120000100000000 /* MacSearchTests.swift */,
 				D10000013010000100000002 /* DawarichSyncTests.swift */,
@@ -1160,6 +1163,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E62000014000000100000001 /* LaunchReliabilityTests.swift in Sources */,
 				F20000013120000100000001 /* MacSearchTests.swift in Sources */,
 				D10000013010000100000003 /* DawarichSyncTests.swift in Sources */,
 				E61000014000000100000001 /* CrossDeviceWorkCoordinatorTests.swift in Sources */,

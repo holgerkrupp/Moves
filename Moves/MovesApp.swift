@@ -151,13 +151,25 @@ struct MovesApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let container = runtime.container {
-                    readyContent(container: container)
-                } else {
+                switch runtime.preparationState {
+                case .loading:
                     MovesLaunchPlaceholder()
+                case .ready:
+                    if let container = runtime.container {
+                        readyContent(container: container)
+                    } else {
+                        MovesLaunchPlaceholder()
+                    }
+                case .failed(let failure):
+                    MovesStoreOpenFailureView(
+                        failure: failure,
+                        retry: {
+                            await runtime.retryPreparation()
+                        }
+                    )
                 }
             }
-            .animation(.default, value: runtime.isReady)
+            .animation(.default, value: runtime.preparationState)
             .task {
                 await runtime.prepare()
             }
@@ -261,13 +273,119 @@ private struct MovesLaunchPlaceholder: View {
     }
 }
 
+private struct MovesStoreOpenFailureView: View {
+    let failure: MovesStoreOpenFailure
+    let retry: () async -> Void
+
+    @State private var copiedDiagnostics = false
+    @State private var showsTechnicalDetails = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: "externaldrive.badge.exclamationmark")
+                    .font(.system(size: 54))
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+
+                VStack(spacing: 8) {
+                    Text("Moves couldn't open your local data")
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                    Text(failure.message)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                LabeledContent("Status", value: dispositionTitle)
+
+                DisclosureGroup("Technical details", isExpanded: $showsTechnicalDetails) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledContent("Attempt", value: failure.attemptedMode.title)
+                        LabeledContent("Domain", value: failure.domain ?? "Unknown")
+                        LabeledContent("Code", value: failure.code.map(String.init) ?? "Unknown")
+                        LabeledContent(
+                            "Time",
+                            value: failure.occurredAt.formatted(date: .abbreviated, time: .standard)
+                        )
+                    }
+                    .font(.caption)
+                    .padding(.top, 8)
+                }
+
+                Text(recoveryGuidance)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 12) {
+                    Button {
+                        Task { await retry() }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        UIPasteboard.general.string = MovesStoreRecovery.diagnosticsReport(for: failure)
+                        copiedDiagnostics = true
+                    } label: {
+                        Label(
+                            copiedDiagnostics ? "Diagnostics Copied" : "Copy Diagnostics",
+                            systemImage: copiedDiagnostics ? "checkmark" : "doc.on.doc"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Text("Retrying never deletes or recreates your local store.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 520)
+            .padding(32)
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private var dispositionTitle: String {
+        switch failure.disposition {
+        case .retryable: return "Retryable"
+        case .persistent: return "Needs attention"
+        case .unknown: return "Unknown"
+        }
+    }
+
+    private var recoveryGuidance: String {
+        switch failure.disposition {
+        case .retryable:
+            return "Check your network connection and iCloud account, then try again. Your local files have not been changed."
+        case .persistent:
+            return "Restart Moves after checking for app and system updates. If this continues, copy the diagnostics before contacting support."
+        case .unknown:
+            return "Try again once. If the problem continues, copy the diagnostics before contacting support."
+        }
+    }
+}
+
+enum MovesAppPreparationState: Equatable {
+    case loading
+    case ready
+    case failed(MovesStoreOpenFailure)
+}
+
 @MainActor
 final class MovesAppRuntime: ObservableObject {
+    typealias ContainerFactory = @Sendable () throws -> ModelContainer
+    typealias DiagnosticsFactory = @MainActor (ModelContainer) -> MovesSyncDiagnostics
+
     let undoController = AppUndoController()
 
     @Published private(set) var container: ModelContainer?
     @Published private(set) var isReady = false
     @Published private(set) var storeOpenFailure: MovesStoreOpenFailure?
+    @Published private(set) var preparationState: MovesAppPreparationState = .loading
     var didStartActiveServices = false
 
     private(set) var captureManager: MovesLocationCaptureManager?
@@ -284,8 +402,29 @@ final class MovesAppRuntime: ObservableObject {
 
     private var prepareTask: Task<Void, Never>?
     private var retryObserver: NSObjectProtocol?
+    private let applicationContainerFactory: ContainerFactory
+    private let localFallbackContainerFactory: ContainerFactory
+    private let diagnosticsFactory: DiagnosticsFactory
+    private let initializesServices: Bool
 
-    init() {
+    init(
+        applicationContainerFactory: @escaping ContainerFactory = {
+            try MovesApp.makeModelContainer()
+        },
+        localFallbackContainerFactory: @escaping ContainerFactory = {
+            try MovesTimelineStore.makeApplicationContainer(
+                cloudKitDatabase: ModelConfiguration.CloudKitDatabase.none
+            )
+        },
+        initializesServices: Bool = true,
+        diagnosticsFactory: @escaping DiagnosticsFactory = {
+            MovesSyncDiagnostics(modelContainer: $0)
+        }
+    ) {
+        self.applicationContainerFactory = applicationContainerFactory
+        self.localFallbackContainerFactory = localFallbackContainerFactory
+        self.initializesServices = initializesServices
+        self.diagnosticsFactory = diagnosticsFactory
         storeOpenFailure = MovesStoreRecovery.lastFailure
         retryObserver = NotificationCenter.default.addObserver(
             forName: .movesCloudKitRetryRequested,
@@ -306,28 +445,18 @@ final class MovesAppRuntime: ObservableObject {
 
     func retryPreparation() async {
         SyncMonitor.default.startMonitoring()
-        if isReady, storeOpenFailure != nil {
-            container = nil
-            captureManager = nil
-            watchRouteInbox = nil
-            healthWorkoutRouteAutoImporter = nil
-            cloudDataPresencePublisher = nil
-            syncDiagnostics = nil
-            locationServiceSyncManager = nil
-            multiDevicePresenceManager = nil
-            importCoordinator = nil
-            routeFileImporter = nil
-            routeWatchFolderManager = nil
-            importedRouteDataSummary = nil
-            didStartActiveServices = false
-            isReady = false
+        if let prepareTask {
+            await prepareTask.value
         }
-        guard !isReady else { return }
+
+        if isReady, storeOpenFailure == nil { return }
+        resetPreparedState()
+        preparationState = .loading
         await prepare()
     }
 
     func prepare() async {
-        guard !isReady else { return }
+        guard preparationState == .loading else { return }
         if let prepareTask {
             await prepareTask.value
             return
@@ -335,80 +464,109 @@ final class MovesAppRuntime: ObservableObject {
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.prepareTask = nil }
+            var attemptedMode = MovesStoreOpenMode.cloudKit
             do {
                 let container: ModelContainer
                 do {
+                    let factory = self.applicationContainerFactory
                     container = try await Task.detached(priority: .userInitiated) {
-                        try MovesApp.makeModelContainer()
+                        try factory()
                     }.value
                     MovesStoreRecovery.clear()
                     self.storeOpenFailure = nil
                 } catch {
-                    self.storeOpenFailure = MovesStoreRecovery.record(error)
+                    self.storeOpenFailure = MovesStoreRecovery.record(
+                        error,
+                        attemptedMode: .cloudKit
+                    )
+                    attemptedMode = .localFallback
                     // Open the same store without the CloudKit integration as a
                     // non-destructive fallback. No file is deleted or replaced;
                     // local edits remain available while sync is repaired.
+                    let fallbackFactory = self.localFallbackContainerFactory
                     container = try await Task.detached(priority: .utility) {
-                        try MovesTimelineStore.makeApplicationContainer(
-                            cloudKitDatabase: ModelConfiguration.CloudKitDatabase.none
-                        )
+                        try fallbackFactory()
                     }.value
                 }
 
-                #if !targetEnvironment(macCatalyst)
-                try await Task.detached(priority: .utility) {
-                    try MovesApp.ensureCurrentDayExists(in: container)
-                }.value
-                #endif
+                if self.initializesServices {
+                    #if !targetEnvironment(macCatalyst)
+                    try await Task.detached(priority: .utility) {
+                        try MovesApp.ensureCurrentDayExists(in: container)
+                    }.value
+                    #endif
 
-                #if targetEnvironment(simulator) && DEBUG
-                DemoDataSeeder.seedIfNeeded(in: container)
-                #endif
+                    #if targetEnvironment(simulator) && DEBUG
+                    DemoDataSeeder.seedIfNeeded(in: container)
+                    #endif
 
-                let captureManager = MovesLocationCaptureManager(modelContainer: container)
-                let watchRouteInbox = WatchRouteInbox(modelContainer: container)
-                let healthWorkoutRouteAutoImporter = HealthWorkoutRouteAutoImportManager(modelContainer: container)
-                let cloudDataPresencePublisher = MovesCloudDataPresencePublisher(modelContainer: container)
-                let syncDiagnostics = MovesSyncDiagnostics(modelContainer: container)
-                let locationServiceSyncManager = LocationServiceSyncManager(modelContainer: container)
-                let multiDevicePresenceManager = MultiDevicePresenceManager(modelContainer: container)
-                let importCoordinator = ImportCoordinator()
-                let routeFileImporter = RouteFileImporter(
-                    modelContext: ModelContext(container),
-                    importCoordinator: importCoordinator
-                )
-                importCoordinator.attach(routeFileImporter: routeFileImporter)
+                    let captureManager = MovesLocationCaptureManager(modelContainer: container)
+                    let watchRouteInbox = WatchRouteInbox(modelContainer: container)
+                    let healthWorkoutRouteAutoImporter = HealthWorkoutRouteAutoImportManager(modelContainer: container)
+                    let cloudDataPresencePublisher = MovesCloudDataPresencePublisher(modelContainer: container)
+                    let locationServiceSyncManager = LocationServiceSyncManager(modelContainer: container)
+                    let multiDevicePresenceManager = MultiDevicePresenceManager(modelContainer: container)
+                    let importCoordinator = ImportCoordinator()
+                    let routeFileImporter = RouteFileImporter(
+                        modelContext: ModelContext(container),
+                        importCoordinator: importCoordinator
+                    )
+                    importCoordinator.attach(routeFileImporter: routeFileImporter)
 
-                self.container = container
-                self.captureManager = captureManager
-                self.watchRouteInbox = watchRouteInbox
-                self.healthWorkoutRouteAutoImporter = healthWorkoutRouteAutoImporter
-                self.cloudDataPresencePublisher = cloudDataPresencePublisher
+                    self.captureManager = captureManager
+                    self.watchRouteInbox = watchRouteInbox
+                    self.healthWorkoutRouteAutoImporter = healthWorkoutRouteAutoImporter
+                    self.cloudDataPresencePublisher = cloudDataPresencePublisher
+                    self.locationServiceSyncManager = locationServiceSyncManager
+                    self.multiDevicePresenceManager = multiDevicePresenceManager
+                    self.importCoordinator = importCoordinator
+                    self.routeFileImporter = routeFileImporter
+                    self.routeWatchFolderManager = RouteWatchFolderManager(importer: routeFileImporter)
+                    self.importedRouteDataSummary = ImportedRouteDataSummaryStore(modelContainer: container)
+
+                    MovesIntentRuntime.shared.configure(
+                        modelContainer: container,
+                        captureManager: captureManager
+                    )
+                    MovesAppShortcuts.updateAppShortcutParameters()
+                }
+
+                let syncDiagnostics = self.diagnosticsFactory(container)
                 self.syncDiagnostics = syncDiagnostics
-                self.locationServiceSyncManager = locationServiceSyncManager
-                self.multiDevicePresenceManager = multiDevicePresenceManager
-                self.importCoordinator = importCoordinator
-                self.routeFileImporter = routeFileImporter
-                self.routeWatchFolderManager = RouteWatchFolderManager(importer: routeFileImporter)
-                self.importedRouteDataSummary = ImportedRouteDataSummaryStore(modelContainer: container)
-
-                MovesIntentRuntime.shared.configure(
-                    modelContainer: container,
-                    captureManager: captureManager
-                )
-                MovesAppShortcuts.updateAppShortcutParameters()
+                self.container = container
                 isReady = true
+                preparationState = .ready
+                syncDiagnostics.startObservingTimeline()
             } catch {
-                storeOpenFailure = MovesStoreRecovery.record(error)
-                // Keep the loading UI alive. The local store is never deleted or replaced;
-                // the user can retry after fixing the account/network or inspect the
-                // recorded domain/code in Settings once the app is able to open.
-                prepareTask = nil
+                let failure = MovesStoreRecovery.record(
+                    error,
+                    attemptedMode: attemptedMode
+                )
+                storeOpenFailure = failure
+                preparationState = .failed(failure)
             }
         }
         prepareTask = task
         await task.value
-        prepareTask = nil
+    }
+
+    private func resetPreparedState() {
+        syncDiagnostics?.suspendTimelineObservation()
+        container = nil
+        captureManager = nil
+        watchRouteInbox = nil
+        healthWorkoutRouteAutoImporter = nil
+        cloudDataPresencePublisher = nil
+        syncDiagnostics = nil
+        locationServiceSyncManager = nil
+        multiDevicePresenceManager = nil
+        importCoordinator = nil
+        routeFileImporter = nil
+        routeWatchFolderManager = nil
+        importedRouteDataSummary = nil
+        didStartActiveServices = false
+        isReady = false
     }
 }
 

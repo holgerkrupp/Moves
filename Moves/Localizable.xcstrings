@@ -302,6 +302,9 @@
     "Aspect Ratio" : {
 
     },
+    "Attempt" : {
+
+    },
     "Auto-detected: %@" : {
 
     },
@@ -387,6 +390,9 @@
 
     },
     "Clear selection" : {
+
+    },
+    "Code" : {
 
     },
     "Comment" : {
@@ -578,6 +584,9 @@
     "Diagnostics are device-local and contain counts/timestamps only; no coordinates or location text is recorded." : {
 
     },
+    "Diagnostics Copied" : {
+
+    },
     "Discard" : {
 
     },
@@ -606,6 +615,9 @@
 
     },
     "Distance" : {
+
+    },
+    "Domain" : {
 
     },
     "Done" : {
@@ -1110,6 +1122,9 @@
     "Moves · %@" : {
 
     },
+    "Moves couldn't open your local data" : {
+
+    },
     "Moves keeps the 10 most recent reports on this device." : {
 
     },
@@ -1430,6 +1445,9 @@
     "Retry" : {
 
     },
+    "Retrying never deletes or recreates your local store." : {
+
+    },
     "Revert" : {
 
     },
@@ -1714,6 +1732,9 @@
 
     },
     "Target date" : {
+
+    },
+    "Technical details" : {
 
     },
     "Test and Save Connection" : {

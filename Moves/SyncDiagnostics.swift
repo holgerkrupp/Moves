@@ -5,10 +5,65 @@ import OSLog
 import CloudKitSyncMonitor
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
+struct MovesSyncTimelineSnapshot: Equatable, Sendable {
+    let observedAt: Date
+    let placeCount: Int
+    let moveCount: Int
+    let newestCreatedAt: Date?
+}
+
+actor MovesSyncDiagnosticsSnapshotLoader {
+    static let newestFetchLimit = 1
+
+    private let modelContainer: ModelContainer
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
+    func load() throws -> MovesSyncTimelineSnapshot {
+        try Task.checkCancellation()
+        let context = ModelContext(modelContainer)
+        let placeCount = try context.fetchCount(FetchDescriptor<VisitPlace>())
+        try Task.checkCancellation()
+        let moveCount = try context.fetchCount(FetchDescriptor<MoveSegment>())
+        try Task.checkCancellation()
+
+        var newestPlace = FetchDescriptor<VisitPlace>(
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        newestPlace.fetchLimit = Self.newestFetchLimit
+        let newestPlaceCreatedAt = try context.fetch(newestPlace).first?.createdAt
+        try Task.checkCancellation()
+
+        var newestMove = FetchDescriptor<MoveSegment>(
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        newestMove.fetchLimit = Self.newestFetchLimit
+        let newestMoveCreatedAt = try context.fetch(newestMove).first?.createdAt
+        try Task.checkCancellation()
+
+        return MovesSyncTimelineSnapshot(
+            observedAt: Date(),
+            placeCount: placeCount,
+            moveCount: moveCount,
+            newestCreatedAt: [newestPlaceCreatedAt, newestMoveCreatedAt].compactMap { $0 }.max()
+        )
+    }
+}
 
 /// Device-local, privacy-safe CloudKit/SwiftData timing telemetry.
 @MainActor
 final class MovesSyncDiagnostics: ObservableObject {
+    typealias TimelineSnapshot = MovesSyncTimelineSnapshot
+    typealias SnapshotLoader = @Sendable () async throws -> TimelineSnapshot
+
     enum Stage: String, Codable, Sendable {
         case cloudKitSetup
         case cloudKitImport
@@ -106,34 +161,57 @@ final class MovesSyncDiagnostics: ObservableObject {
         }
     }
 
-    struct TimelineSnapshot: Equatable {
-        let observedAt: Date
-        let placeCount: Int
-        let moveCount: Int
-        let newestCreatedAt: Date?
-    }
-
     @Published private(set) var events: [Event] = []
     @Published private(set) var latestSnapshot: TimelineSnapshot?
 
     private static let persistedEventsKey = "Moves.syncDiagnostics.events.v1"
     private static let maxEvents = 120
-    private let modelContainer: ModelContainer
     private let logger = Logger(subsystem: "de.holgerkrupp.Moves", category: "SyncDiagnostics")
+    private let snapshotLoader: SnapshotLoader
+    private let observationDebounce: Duration
+    private let userDefaults: UserDefaults
+    private let notificationCenter: NotificationCenter
     private var observers: [NSObjectProtocol] = []
+    private var observationTask: Task<Void, Never>?
+    private var observationsEnabled = false
 
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-        if let data = UserDefaults.standard.data(forKey: Self.persistedEventsKey),
+    init(
+        modelContainer: ModelContainer,
+        observationDebounce: Duration = .milliseconds(350),
+        userDefaults: UserDefaults = .standard,
+        notificationCenter: NotificationCenter = .default,
+        snapshotLoader: SnapshotLoader? = nil
+    ) {
+        let swiftDataLoader = MovesSyncDiagnosticsSnapshotLoader(modelContainer: modelContainer)
+        self.snapshotLoader = snapshotLoader ?? {
+            try await swiftDataLoader.load()
+        }
+        self.observationDebounce = observationDebounce
+        self.userDefaults = userDefaults
+        self.notificationCenter = notificationCenter
+        if let data = userDefaults.data(forKey: Self.persistedEventsKey),
            let stored = try? JSONDecoder().decode([Event].self, from: data) {
             events = Array(stored.suffix(Self.maxEvents))
         }
         observeNotifications()
-        observeTimeline(reason: "startup")
     }
 
     deinit {
-        observers.forEach(NotificationCenter.default.removeObserver)
+        observationTask?.cancel()
+        observers.forEach(notificationCenter.removeObserver)
+    }
+
+    /// Starts the auxiliary timeline snapshot after the app has published its
+    /// usable container. Calling this repeatedly is safe and coalesces work.
+    func startObservingTimeline() {
+        observationsEnabled = true
+        scheduleTimelineObservation(reason: "startup", debounce: false)
+    }
+
+    func suspendTimelineObservation() {
+        observationsEnabled = false
+        observationTask?.cancel()
+        observationTask = nil
     }
 
     var lastSuccessfulImport: Event? {
@@ -212,22 +290,7 @@ final class MovesSyncDiagnostics: ObservableObject {
     }
 
     static func privacySafeMessage(_ message: String) -> String {
-        var result = message
-        let patterns = [
-            #"https?://[^\s]+"#,
-            #"/(?:Users|private|var|tmp)/[^\s]+"#
-        ]
-        for pattern in patterns {
-            if let expression = try? NSRegularExpression(pattern: pattern) {
-                let range = NSRange(result.startIndex..<result.endIndex, in: result)
-                result = expression.stringByReplacingMatches(
-                    in: result,
-                    range: range,
-                    withTemplate: "<redacted>"
-                )
-            }
-        }
-        return result
+        MovesStoreRecovery.privacySafeMessage(message)
     }
 
     func copyableReport(syncMonitor: SyncMonitor) -> String {
@@ -276,7 +339,7 @@ final class MovesSyncDiagnostics: ObservableObject {
     }
 
     private func observeNotifications() {
-        let center = NotificationCenter.default
+        let center = notificationCenter
         observers.append(center.addObserver(
             forName: NSPersistentCloudKitContainer.eventChangedNotification,
             object: nil,
@@ -298,7 +361,7 @@ final class MovesSyncDiagnostics: ObservableObject {
         ] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
-                    self?.observeTimeline(reason: "authoritative-change")
+                    self?.scheduleTimelineObservation(reason: "authoritative-change")
                 }
             })
         }
@@ -309,9 +372,49 @@ final class MovesSyncDiagnostics: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.observeTimeline(reason: "cloud-import")
+                self?.scheduleTimelineObservation(reason: "cloud-import")
             }
         })
+
+        #if canImport(UIKit)
+        observers.append(center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.suspendTimelineObservation()
+            }
+        })
+        observers.append(center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.startObservingTimeline()
+            }
+        })
+        #elseif canImport(AppKit)
+        observers.append(center.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.suspendTimelineObservation()
+            }
+        })
+        observers.append(center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.startObservingTimeline()
+            }
+        })
+        #endif
     }
 
     private func recordCloudKitEvent(_ event: NSPersistentCloudKitContainer.Event) {
@@ -342,41 +445,53 @@ final class MovesSyncDiagnostics: ObservableObject {
         )
 
         if stage == .cloudKitImport, event.endDate != nil, event.succeeded {
-            NotificationCenter.default.post(name: .movesCloudKitImportObserved, object: nil)
+            notificationCenter.post(name: .movesCloudKitImportObserved, object: nil)
         }
     }
 
-    private func observeTimeline(reason: String) {
-        let context = ModelContext(modelContainer)
-        do {
-            let placeCount = try context.fetchCount(FetchDescriptor<VisitPlace>())
-            let moveCount = try context.fetchCount(FetchDescriptor<MoveSegment>())
-            let places = try context.fetch(FetchDescriptor<VisitPlace>())
-            let moves = try context.fetch(FetchDescriptor<MoveSegment>())
-            let newestCreatedAt = (places.map(\.createdAt) + moves.map(\.createdAt)).max()
-            let observedAt = Date()
-            latestSnapshot = TimelineSnapshot(
-                observedAt: observedAt,
-                placeCount: placeCount,
-                moveCount: moveCount,
-                newestCreatedAt: newestCreatedAt
-            )
-            append(
-                Event(
-                    id: UUID(),
-                    stage: reason == "authoritative-change" ? .localSave : .localTimelineObservedChange,
-                    startedAt: observedAt,
-                    endedAt: observedAt,
-                    succeeded: true,
-                    errorSummary: nil,
-                    placeCount: placeCount,
-                    moveCount: moveCount,
-                    newestCreatedAt: newestCreatedAt
-                )
-            )
-        } catch {
-            logger.error("Timeline observation failed: \(error.localizedDescription, privacy: .public)")
+    private func scheduleTimelineObservation(reason: String, debounce: Bool = true) {
+        guard observationsEnabled else { return }
+        observationTask?.cancel()
+
+        let delay = debounce ? observationDebounce : .zero
+        let loader = snapshotLoader
+        observationTask = Task(priority: .utility) { [weak self] in
+            do {
+                if delay > .zero {
+                    try await Task.sleep(for: delay)
+                }
+                try Task.checkCancellation()
+                let snapshot = try await loader()
+                try Task.checkCancellation()
+                guard let self, self.observationsEnabled else { return }
+                self.record(snapshot: snapshot, reason: reason)
+                self.observationTask = nil
+            } catch is CancellationError {
+                // A newer notification or app suspension superseded this work.
+            } catch {
+                guard let self else { return }
+                self.observationTask = nil
+                let safeMessage = Self.privacySafeMessage(error.localizedDescription)
+                self.logger.error("Timeline observation failed: \(safeMessage, privacy: .public)")
+            }
         }
+    }
+
+    private func record(snapshot: TimelineSnapshot, reason: String) {
+        latestSnapshot = snapshot
+        append(
+            Event(
+                id: UUID(),
+                stage: reason == "authoritative-change" ? .localSave : .localTimelineObservedChange,
+                startedAt: snapshot.observedAt,
+                endedAt: snapshot.observedAt,
+                succeeded: true,
+                errorSummary: nil,
+                placeCount: snapshot.placeCount,
+                moveCount: snapshot.moveCount,
+                newestCreatedAt: snapshot.newestCreatedAt
+            )
+        )
     }
 
     private func append(_ event: Event) {
@@ -385,7 +500,7 @@ final class MovesSyncDiagnostics: ObservableObject {
             events.removeFirst(events.count - Self.maxEvents)
         }
         if let data = try? JSONEncoder().encode(events) {
-            UserDefaults.standard.set(data, forKey: Self.persistedEventsKey)
+            userDefaults.set(data, forKey: Self.persistedEventsKey)
         }
         logger.log("sync stage=\(event.stage.rawValue, privacy: .public)")
         objectWillChange.send()

@@ -1,9 +1,156 @@
+#if canImport(UIKit)
 import BackgroundTasks
+#endif
 import CoreLocation
 import CryptoKit
 import Foundation
 import OSLog
 import SwiftData
+
+enum MovesSharePeriod: String, CaseIterable, Identifiable {
+    case day
+    case week
+    case month
+    case year
+    case forever
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .day: return "Days"
+        case .week: return "Weeks"
+        case .month: return "Months"
+        case .year: return "Years"
+        case .forever: return "Forever"
+        }
+    }
+
+    var singularTitle: String {
+        switch self {
+        case .day: return "Day"
+        case .week: return "Week"
+        case .month: return "Month"
+        case .year: return "Year"
+        case .forever: return "Forever"
+        }
+    }
+
+    var includesAllTracks: Bool {
+        switch self {
+        case .day, .week, .month, .year: return true
+        case .forever: return false
+        }
+    }
+
+    var buildsTracksDirectly: Bool {
+        self == .day || self == .week || self == .month
+    }
+
+    var includesCalendar: Bool { self == .month }
+
+    func start(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
+        switch self {
+        case .day:
+            return calendar.startOfDay(for: date)
+        case .week:
+            let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+            return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+        case .month:
+            let components = calendar.dateComponents([.year, .month], from: date)
+            return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+        case .year:
+            let components = calendar.dateComponents([.year], from: date)
+            return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+        case .forever:
+            return .distantPast
+        }
+    }
+
+    func dateInterval(containing date: Date, calendar: Calendar = .autoupdatingCurrent) -> DateInterval? {
+        guard self != .forever else { return nil }
+        let periodStart = start(for: date, calendar: calendar)
+        let component: Calendar.Component
+        switch self {
+        case .day: component = .day
+        case .week: component = .weekOfYear
+        case .month: component = .month
+        case .year: component = .year
+        case .forever: return nil
+        }
+        let periodEnd = calendar.date(byAdding: component, value: 1, to: periodStart) ?? periodStart
+        return DateInterval(start: periodStart, end: periodEnd)
+    }
+
+    func contains(
+        _ date: Date,
+        periodStart: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Bool {
+        guard let interval = dateInterval(containing: periodStart, calendar: calendar) else {
+            return true
+        }
+        return date >= interval.start && date < interval.end
+    }
+
+    func adding(_ value: Int, to date: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
+        guard self != .forever else { return .distantPast }
+        let component: Calendar.Component
+        switch self {
+        case .day: component = .day
+        case .week: component = .weekOfYear
+        case .month: component = .month
+        case .year: component = .year
+        case .forever: return .distantPast
+        }
+        let shifted = calendar.date(byAdding: component, value: value, to: date) ?? date
+        return start(for: shifted, calendar: calendar)
+    }
+
+    func label(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> String {
+        switch self {
+        case .day:
+            return date.formatted(.dateTime.day().month(.abbreviated).year())
+        case .week:
+            let start = start(for: date, calendar: calendar)
+            let end = calendar.date(byAdding: .day, value: 6, to: start) ?? start
+            let formatter = DateIntervalFormatter()
+            formatter.locale = .autoupdatingCurrent
+            formatter.calendar = calendar
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            return formatter.string(from: start, to: end)
+        case .month:
+            return date.formatted(.dateTime.month(.wide).year())
+        case .year:
+            return date.formatted(.dateTime.year())
+        case .forever:
+            return "Forever"
+        }
+    }
+
+    func gpxFileStem(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> String {
+        guard self != .forever else { return "moves-all-days" }
+
+        let periodStart = start(for: date, calendar: calendar)
+        let components = calendar.dateComponents([.year, .month, .day], from: periodStart)
+        let year = components.year ?? 0
+        let month = components.month ?? 0
+        let day = components.day ?? 0
+        switch self {
+        case .day:
+            return String(format: "moves-%04d-%02d-%02d", year, month, day)
+        case .week:
+            return String(format: "moves-week-%04d-%02d-%02d", year, month, day)
+        case .month:
+            return String(format: "moves-%04d-%02d", year, month)
+        case .year:
+            return String(format: "moves-%04d", year)
+        case .forever:
+            return "moves-all-days"
+        }
+    }
+}
 
 struct ShareMapAggregateTrack {
     let id: UUID
@@ -445,6 +592,7 @@ private actor ShareMapAggregateWorker {
     }
 }
 
+#if canImport(UIKit)
 enum ShareMapAggregateBackgroundTask {
     static let taskIdentifier = "de.holgerkrupp.Moves.shareMapAggregates"
 
@@ -490,3 +638,4 @@ enum ShareMapAggregateBackgroundTask {
         task.expirationHandler = { work.cancel() }
     }
 }
+#endif
