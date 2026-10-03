@@ -8,6 +8,79 @@ import SwiftData
 import UIKit
 #endif
 
+// LocationChange.swift is excluded from macOS builds because it owns the iOS
+// location-capture service. The maintenance pass below still needs the same
+// conservative terrestrial-route evidence, so provide that platform's shared
+// routing contract here without bringing capture code into the Mac app.
+#if os(macOS)
+enum TerrestrialRouteEvidence: Equatable, Sendable {
+    case routeFound(mode: TransportMode, distance: CLLocationDistance, expectedTravelTime: TimeInterval?)
+    case confirmedNoRoute
+    case unavailableOrTransientFailure
+    case notChecked
+}
+
+protocol TerrestrialRouteFeasibilityProber: Sendable {
+    func probe(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, directDistance: CLLocationDistance) async -> TerrestrialRouteEvidence
+}
+
+struct MapKitTerrestrialRouteProbe: TerrestrialRouteFeasibilityProber, Sendable {
+    func probe(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, directDistance: CLLocationDistance) async -> TerrestrialRouteEvidence {
+        let modes: [MKDirectionsTransportType]
+        if directDistance <= 10_000 {
+            modes = [.walking, .automobile]
+        } else if directDistance <= 80_000 {
+            modes = [.automobile, .walking]
+        } else {
+            modes = [.automobile, .transit]
+        }
+
+        var sawConfirmedNoRoute = false
+        for mode in modes {
+            let request = MKDirections.Request()
+            request.source = MKMapItem(
+                location: CLLocation(latitude: from.latitude, longitude: from.longitude),
+                address: nil
+            )
+            request.destination = MKMapItem(
+                location: CLLocation(latitude: to.latitude, longitude: to.longitude),
+                address: nil
+            )
+            request.transportType = mode
+            request.requestsAlternateRoutes = false
+
+            do {
+                let response = try await MKDirections(request: request).calculate()
+                if let route = response.routes.first {
+                    return .routeFound(
+                        mode: Self.transportMode(for: mode),
+                        distance: route.distance,
+                        expectedTravelTime: route.expectedTravelTime
+                    )
+                }
+                sawConfirmedNoRoute = true
+            } catch let error as MKError {
+                if error.code == .directionsNotFound {
+                    sawConfirmedNoRoute = true
+                    continue
+                }
+                return .unavailableOrTransientFailure
+            } catch {
+                return .unavailableOrTransientFailure
+            }
+        }
+
+        return sawConfirmedNoRoute ? .confirmedNoRoute : .unavailableOrTransientFailure
+    }
+
+    private static func transportMode(for type: MKDirectionsTransportType) -> TransportMode {
+        if type == .walking { return .walking }
+        if type == .transit { return .train }
+        return .automotive
+    }
+}
+#endif
+
 protocol PlaceNameResolver {
     func resolveName(for coordinate: CLLocationCoordinate2D) async -> String?
 }

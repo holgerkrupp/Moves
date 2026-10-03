@@ -124,6 +124,9 @@ struct MovesMacApp: App {
                 importedRouteDataSummary: importedRouteDataSummary,
                 isDemoMode: $isDemoMode
             )
+            .onAppear {
+                syncDiagnostics.startObservingTimeline()
+            }
         }
 #if DEBUG
             .modelContainer(isDemoMode ? demoModelContainer : modelContainer)
@@ -134,9 +137,6 @@ struct MovesMacApp: App {
             .environmentObject(routeFileImporter)
             .environmentObject(cloudDataPresencePublisher)
             .environmentObject(syncDiagnostics)
-            .task {
-                syncDiagnostics.startObservingTimeline()
-            }
             .defaultSize(width: 1_180, height: 760)
             .commands {
                 CommandGroup(after: .windowList) {

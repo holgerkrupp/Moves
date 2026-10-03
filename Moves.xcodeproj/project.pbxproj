@@ -76,13 +76,11 @@
 		48F925F2305AD31C0011EEA3 /* metroMelbourne.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F1305AD31C0011EEA3 /* metroMelbourne.icon */; };
 		48F925F4305AD7120011EEA3 /* sydney.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F3305AD7120011EEA3 /* sydney.icon */; };
 		48F925F6305B073A0011EEA3 /* M-stadt.icon in Resources */ = {isa = PBXBuildFile; fileRef = 48F925F5305B073A0011EEA3 /* M-stadt.icon */; };
-		4E9B81F23F4DDEAEA5667DEF /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */; };
 		507E360AAA1F24F3DF4DA9A5 /* RoutePreviewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */; };
 		61BFCAF2845C004C3FBC9EAD /* Moves Quick Look Preview.appex in Embed Quick Look Extensions */ = {isa = PBXBuildFile; fileRef = 306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		66AE2247E432E29925E3CFB0 /* RouteFileKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F8808470F5A4588C0C4BF95 /* RouteFileKit */; };
 		6D0DFB3E801D7F1166F8E1AF /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B8CB235774F07DEB3FFC2CFC /* QuickLookThumbnailing.framework */; };
 		88B7109D72782030A430DC8F /* RouteFileKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F8808470F5A4588C0C4BF95 /* RouteFileKit */; };
-		A50000012FD0000100000005 /* RoutePreviewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */; };
 		8BA59BD28B4A0147757DC52C /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */; };
 		9A1B00012F00000100000004 /* TimelineAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */; platformFilter = ios; };
 		9A1B00012F00000100000010 /* PhotosIntegrationDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */; platformFilter = ios; };
@@ -114,11 +112,11 @@
 		A45000012FC0000100000001 /* RouteFileImportConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45000012FC0000100000000 /* RouteFileImportConfiguration.swift */; };
 		A50000012FD0000100000001 /* CloudDataPresencePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000012FD0000100000000 /* CloudDataPresencePublisher.swift */; };
 		A50000012FD0000100000002 /* CloudDataPresence in Frameworks */ = {isa = PBXBuildFile; productRef = A50000012FD0000100000004 /* CloudDataPresence */; };
+		A50000012FD0000100000005 /* RoutePreviewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */; };
 		A60000012FE0000100000001 /* DailyTimelineBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000012FE0000100000000 /* DailyTimelineBackup.swift */; platformFilter = ios; };
 		A70000012FF0000100000001 /* MovesShareViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000012FF0000100000000 /* MovesShareViews.swift */; platformFilter = ios; };
 		A80000012FF0000100000001 /* MovesJumpToDateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000012FF0000100000000 /* MovesJumpToDateView.swift */; };
 		A90000012FF0000100000001 /* ShareMapAggregate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000012FF0000100000000 /* ShareMapAggregate.swift */; };
-		AC6BEC2A92CDFA332032BD37 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */; };
 		B10000013000000100000001 /* MovesAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013000000100000000 /* MovesAppIntents.swift */; platformFilter = ios; };
 		B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000012FC0000100000002 /* RouteFileImportWorker.swift */; };
 		B41000012FC0000100000001 /* ImportedTransportModeInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41000012FC0000100000000 /* ImportedTransportModeInference.swift */; };
@@ -171,8 +169,8 @@
 		F6000001400000010000002D /* ExplorationMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001400000010000002E /* ExplorationMapProjection.swift */; };
 		F6000001400000010000002F /* ExplorationCountryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000030 /* ExplorationCountryPresence.swift */; };
 		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
-		F60000014000000100000035 /* FlightMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000036 /* FlightMatching.swift */; };
 		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; };
+		F60000014000000100000035 /* FlightMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000036 /* FlightMatching.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -270,8 +268,9 @@
 
 /* Begin PBXFileReference section */
 		11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
-		306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; name = "Moves Quick Look Preview.appex"; path = "Moves Quick Look Preview.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		306C76D6C18F826A87D8E707 /* Moves Quick Look Preview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Quick Look Preview.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		30A1B6C2D9E14B7A8F0C1123 /* QuickLookPreview.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookPreview.entitlements; sourceTree = "<group>"; };
+		30A1B6C2D9E14B7A8F0C1124 /* QuickLookThumbnails.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookThumbnails.entitlements; sourceTree = "<group>"; };
 		489A76312C4FC6F300F43B69 /* Moves.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Moves.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		489A76342C4FC6F300F43B69 /* MovesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesApp.swift; sourceTree = "<group>"; };
 		489A76362C4FC6F300F43B69 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -335,7 +334,6 @@
 		9A1B00012F00000100000001 /* MovesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAssemblerTests.swift; sourceTree = "<group>"; };
 		9A1B00012F00000100000011 /* PhotosIntegrationDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebugTests.swift; sourceTree = "<group>"; };
-		E62000014000000100000000 /* LaunchReliabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchReliabilityTests.swift; sourceTree = "<group>"; };
 		A10000012F00000100000001 /* MovesRouteSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesRouteSupport.swift; sourceTree = "<group>"; };
 		A10000012F00000100000003 /* MovesTimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesTimelineViews.swift; sourceTree = "<group>"; };
 		A10000012F00000100000005 /* MovesDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesDetailViews.swift; sourceTree = "<group>"; };
@@ -388,6 +386,7 @@
 		E40000013040000100000000 /* MovesHistoryMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesHistoryMapView.swift; sourceTree = "<group>"; };
 		E60000014000000100000000 /* CrossDeviceWorkCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinator.swift; sourceTree = "<group>"; };
 		E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceWorkCoordinatorTests.swift; sourceTree = "<group>"; };
+		E62000014000000100000000 /* LaunchReliabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchReliabilityTests.swift; sourceTree = "<group>"; };
 		EAC9868DEC97A4F8F267FC9E /* QuickLook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLook.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/QuickLook.framework; sourceTree = DEVELOPER_DIR; };
 		F10000013100000100000000 /* MovesMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovesMacApp.swift; sourceTree = "<group>"; };
 		F10000013100000100000001 /* MovesMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovesMac.entitlements; sourceTree = "<group>"; };
@@ -396,8 +395,7 @@
 		F10000013100000100000016 /* MoveRouteCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveRouteCacheStore.swift; sourceTree = "<group>"; };
 		F10000013100000100000017 /* SyncDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDiagnostics.swift; sourceTree = "<group>"; };
 		F20000013120000100000000 /* MacSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchTests.swift; sourceTree = "<group>"; };
-		F5A84185D84FA0424F9E7B53 /* Moves Quick Look Thumbnails.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; name = "Moves Quick Look Thumbnails.appex"; path = "Moves Quick Look Thumbnails.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
-		30A1B6C2D9E14B7A8F0C1124 /* QuickLookThumbnails.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookThumbnails.entitlements; sourceTree = "<group>"; };
+		F5A84185D84FA0424F9E7B53 /* Moves Quick Look Thumbnails.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Moves Quick Look Thumbnails.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F60000014000000100000004 /* ExplorationRaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationRaster.swift; sourceTree = "<group>"; };
 		F60000014000000100000005 /* ExplorationShards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationShards.swift; sourceTree = "<group>"; };
 		F60000014000000100000006 /* ExplorationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCache.swift; sourceTree = "<group>"; };
@@ -422,8 +420,8 @@
 		F6000001400000010000002E /* ExplorationMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationMapProjection.swift; sourceTree = "<group>"; };
 		F60000014000000100000030 /* ExplorationCountryPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationCountryPresence.swift; sourceTree = "<group>"; };
 		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
-		F60000014000000100000036 /* FlightMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightMatching.swift; sourceTree = "<group>"; };
 		F60000014000000100000034 /* PhotosIntegrationDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebug.swift; sourceTree = "<group>"; };
+		F60000014000000100000036 /* FlightMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightMatching.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -674,7 +672,6 @@
 				30A1B6C2D9E14B7A8F0C1124 /* QuickLookThumbnails.entitlements */,
 				11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */,
 			);
-			name = QuickLookThumbnails;
 			path = QuickLookThumbnails;
 			sourceTree = "<group>";
 		};
@@ -702,7 +699,6 @@
 				30A1B6C2D9E14B7A8F0C1123 /* QuickLookPreview.entitlements */,
 				609CEA33FBE3C59E6FB3F232 /* PreviewProvider.swift */,
 			);
-			name = QuickLookPreview;
 			path = QuickLookPreview;
 			sourceTree = "<group>";
 		};
@@ -951,9 +947,9 @@
 			packageReferences = (
 				A50000012FD0000100000003 /* XCRemoteSwiftPackageReference "CloudDataPresence" */,
 				E50000013050000100000002 /* XCRemoteSwiftPackageReference "CloudKitSyncMonitor" */,
-				F30000013130000100000002 /* XCLocalSwiftPackageReference "ESADesignKit" */,
-				F60000014000000100000011 /* XCLocalSwiftPackageReference "FogOfWorldKit" */,
-				9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */,
+				F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */,
+				F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */,
+				9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "Packages/RouteFileKit" */,
 			);
 			productRefGroup = 489A76322C4FC6F300F43B69 /* Products */;
 			projectDirPath = "";
@@ -1263,13 +1259,13 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = QuickLookPreview/QuickLookPreview.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = QuickLookPreview/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.21;
-				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.preview;
+				MARKETING_VERSION = 2026.22;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklookpreview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -1413,7 +1409,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Moves/Moves.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 113;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1459,7 +1455,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1481,7 +1477,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Moves/Moves.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 113;
 				DEVELOPMENT_ASSET_PATHS = "\"Moves/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1527,7 +1523,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1547,13 +1543,13 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = QuickLookPreview/QuickLookPreview.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = QuickLookPreview/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.21;
-				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.preview;
+				MARKETING_VERSION = 2026.22;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklookpreview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -1570,13 +1566,13 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = QuickLookThumbnails/QuickLookThumbnails.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = QuickLookThumbnails/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.21;
-				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.thumbnails;
+				MARKETING_VERSION = 2026.22;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklookthumbnails;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -1648,14 +1644,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Moves Watch App/MovesWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1674,14 +1670,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Moves Watch App/MovesWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1700,7 +1696,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1708,7 +1704,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1727,7 +1723,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1735,7 +1731,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1754,7 +1750,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1762,7 +1758,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1781,7 +1777,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = "Moves Widgets/MovesWidgets.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Moves Widgets/MovesWidgets-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1789,7 +1785,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.21;
+				MARKETING_VERSION = 2026.22;
 				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -1808,13 +1804,13 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = QuickLookThumbnails/QuickLookThumbnails.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 111;
+				CURRENT_PROJECT_VERSION = 112;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = QuickLookThumbnails/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2026.21;
-				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklook.thumbnails;
+				MARKETING_VERSION = 2026.22;
+				PRODUCT_BUNDLE_IDENTIFIER = de.holgerkrupp.Moves.quicklookthumbnails;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -1903,15 +1899,15 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */ = {
+		9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "Packages/RouteFileKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/RouteFileKit;
 		};
-		F30000013130000100000002 /* XCLocalSwiftPackageReference "ESADesignKit" */ = {
+		F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../ESADesignKit;
 		};
-		F60000014000000100000011 /* XCLocalSwiftPackageReference "FogOfWorldKit" */ = {
+		F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/FogOfWorldKit;
 		};
@@ -1939,12 +1935,12 @@
 /* Begin XCSwiftPackageProductDependency section */
 		5F8808470F5A4588C0C4BF95 /* RouteFileKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */;
+			package = 9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "Packages/RouteFileKit" */;
 			productName = RouteFileKit;
 		};
 		73E960CE47ADC0DC1D5A774C /* RoutePreviewKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "RouteFileKit" */;
+			package = 9BF3BA2B630FEFFCAF0F5FFC /* XCLocalSwiftPackageReference "Packages/RouteFileKit" */;
 			productName = RoutePreviewKit;
 		};
 		A50000012FD0000100000004 /* CloudDataPresence */ = {
@@ -1959,12 +1955,12 @@
 		};
 		F30000013130000100000003 /* ESADesignKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F30000013130000100000002 /* XCLocalSwiftPackageReference "ESADesignKit" */;
+			package = F30000013130000100000002 /* XCLocalSwiftPackageReference "../ESADesignKit" */;
 			productName = ESADesignKit;
 		};
 		F60000014000000100000012 /* FogOfWorldKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F60000014000000100000011 /* XCLocalSwiftPackageReference "FogOfWorldKit" */;
+			package = F60000014000000100000011 /* XCLocalSwiftPackageReference "Packages/FogOfWorldKit" */;
 			productName = FogOfWorldKit;
 		};
 /* End XCSwiftPackageProductDependency section */

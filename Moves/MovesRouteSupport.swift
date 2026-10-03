@@ -15,6 +15,22 @@ import UIKit
 import AppKit
 #endif
 
+// LocationChange.swift is intentionally iOS-only in the target's build phase.
+// Keep the routing contract available to the macOS route-cache maintenance code.
+#if os(macOS)
+@MainActor
+protocol InferredMoveRouteMatchingScheduler: AnyObject {
+    func scheduleRouteMatching(for move: MoveSegment)
+    func schedulePendingRouteMatches(limit: Int)
+}
+#endif
+
+extension ProcessInfo {
+    var isRunningUnitTests: Bool {
+        environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
 enum MovesPalette {
     #if canImport(UIKit)
     static let backgroundTop = Color(uiColor: .systemGroupedBackground)

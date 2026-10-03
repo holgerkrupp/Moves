@@ -1125,6 +1125,9 @@
     "Moves couldn't open your local data" : {
 
     },
+    "Moves Help" : {
+
+    },
     "Moves keeps the 10 most recent reports on this device." : {
 
     },
@@ -1488,6 +1491,9 @@
 
     },
     "Search by place, note, or date" : {
+
+    },
+    "Search help" : {
 
     },
     "Search locations" : {
