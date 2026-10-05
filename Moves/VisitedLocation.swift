@@ -1317,25 +1317,47 @@ final class MoveSegment {
     }
 
     func cachedRouteCoordinates(for signature: String) -> [CLLocationCoordinate2D]? {
-        let local = MoveRouteCacheStore.shared.load(moveID: id, signature: signature)
-        if let local, !local.isEmpty {
-            return local
+        let synced = RouteCoordinateStorage.decode(routeCacheCoordinatesData)
+        if routeCacheSignature == signature, !synced.isEmpty {
+            MoveRouteCacheStore.shared.store(synced, moveID: id, signature: signature)
+            return synced
         }
 
-        let legacy = RouteCoordinateStorage.decode(routeCacheCoordinatesData)
-        guard routeCacheSignature == signature, !legacy.isEmpty else {
-            return nil
-        }
-        MoveRouteCacheStore.shared.store(legacy, moveID: id, signature: signature)
-        return legacy
+        let local = MoveRouteCacheStore.shared.load(moveID: id, signature: signature)
+        return local?.isEmpty == false ? local : nil
     }
 
     func storeCachedRouteCoordinates(_ coordinates: [CLLocationCoordinate2D], signature: String) {
         MoveRouteCacheStore.shared.store(coordinates, moveID: id, signature: signature)
     }
 
+    /// Stores derived road geometry in both the immediate device cache and the
+    /// CloudKit-backed model fields. Recorded samples remain unchanged.
+    func storeSyncedRouteCoordinates(_ coordinates: [CLLocationCoordinate2D], signature: String) {
+        guard let data = RouteCoordinateStorage.encode(coordinates), !coordinates.isEmpty else { return }
+        MoveRouteCacheStore.shared.store(coordinates, moveID: id, signature: signature)
+        routeCacheSignature = signature
+        routeCacheCoordinatesData = data
+    }
+
+    @discardableResult
+    func promoteCachedRouteCoordinatesToSynced(for signature: String) -> Bool {
+        let synced = RouteCoordinateStorage.decode(routeCacheCoordinatesData)
+        if routeCacheSignature == signature, !synced.isEmpty {
+            return false
+        }
+        guard let local = MoveRouteCacheStore.shared.load(moveID: id, signature: signature),
+              !local.isEmpty else {
+            return false
+        }
+        storeSyncedRouteCoordinates(local, signature: signature)
+        return true
+    }
+
     func clearCachedRouteCoordinates() {
         MoveRouteCacheStore.shared.remove(moveID: id)
+        routeCacheSignature = nil
+        routeCacheCoordinatesData = nil
     }
 
     var importedRouteCoordinates: [CLLocationCoordinate2D]? {
@@ -3404,7 +3426,6 @@ enum DemoDataSeeder {
             MoveSegment.self,
             LocationSample.self,
             MovesDeviceProfile.self,
-            CrossDeviceWorkLease.self,
         ])
         let configuration = ModelConfiguration(
             schema: schema,

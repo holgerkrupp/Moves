@@ -1,0 +1,24 @@
+{
+  "containerIdentifier": "iCloud.de.holgerkrupp.Moves",
+  "recordTypes": [
+    {
+      "name": "MovesWorkLease",
+      "database": "private",
+      "zone": "_defaultZone",
+      "ownership": "Direct CloudKit infrastructure; not SwiftData timeline data",
+      "fields": {
+        "workKey": { "type": "STRING", "required": true },
+        "scopeRawValue": { "type": "STRING", "required": true },
+        "ownerDeviceIdentifier": { "type": "STRING", "required": true },
+        "acquiredAt": { "type": "TIMESTAMP", "required": true },
+        "leaseExpiresAt": { "type": "TIMESTAMP", "required": true },
+        "lastUpdatedAt": { "type": "TIMESTAMP", "required": true },
+        "algorithmVersion": { "type": "INT64", "required": true },
+        "completedAt": { "type": "TIMESTAMP", "required": false },
+        "completionMarker": { "type": "STRING", "required": false }
+      },
+      "indexes": [],
+      "indexNotes": "No custom query indexes are required; leases are addressed by deterministic CKRecord.ID and updated with conditional saves."
+    }
+  ]
+}

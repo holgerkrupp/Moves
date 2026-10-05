@@ -11,6 +11,228 @@ import UIKit
 import AppKit
 #endif
 
+enum CloudKitFailureAnalysis {
+    struct Cause: Codable, Equatable, Sendable {
+        let domain: String
+        let code: Int
+        let count: Int
+        let summary: String
+    }
+
+    struct Result: Sendable {
+        let disposition: MovesSyncDiagnostics.ErrorDisposition
+        let message: String
+        let recoverySuggestion: String?
+        let retryAfterSeconds: TimeInterval?
+        let causes: [Cause]
+    }
+
+    private struct Finding {
+        let error: NSError
+        let disposition: MovesSyncDiagnostics.ErrorDisposition
+        let summary: String
+        let retryAfterSeconds: TimeInterval?
+    }
+
+    static func analyze(_ error: Error) -> Result {
+        let root = error as NSError
+        let findings = leafErrors(in: root).map(finding(for:))
+        let effectiveFindings = findings.isEmpty ? [finding(for: root)] : findings
+        let disposition = combinedDisposition(effectiveFindings.map(\.disposition))
+        let causes = summarizedCauses(effectiveFindings)
+        let retryAfter = effectiveFindings.compactMap(\.retryAfterSeconds).max()
+        let suggestion = retryAfter.map {
+            "Retry after at least \(Int(ceil($0))) seconds."
+        } ?? recoverySuggestion(for: disposition, findings: effectiveFindings)
+        let message: String
+        if root.domain == CKErrorDomain,
+           CKError.Code(rawValue: root.code) == .partialFailure,
+           !causes.isEmpty {
+            let summary = causes.map { cause in
+                cause.count == 1 ? cause.summary : "\(cause.count)× \(cause.summary)"
+            }.joined(separator: "; ")
+            message = "CloudKit reported partial failures: \(summary)"
+        } else {
+            message = effectiveFindings.first?.summary ?? safe(root.localizedDescription)
+        }
+
+        return Result(
+            disposition: disposition,
+            message: message,
+            recoverySuggestion: suggestion,
+            retryAfterSeconds: retryAfter,
+            causes: causes
+        )
+    }
+
+    private static func leafErrors(in root: NSError) -> [NSError] {
+        var leaves: [NSError] = []
+        var queue = [root]
+        var visited = Set<ObjectIdentifier>()
+
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            guard visited.insert(ObjectIdentifier(current)).inserted else { continue }
+
+            var children: [NSError] = []
+            if let underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError {
+                children.append(underlying)
+            }
+            if let multiple = current.userInfo["NSMultipleUnderlyingErrors"] as? [NSError] {
+                children.append(contentsOf: multiple)
+            }
+            if let partial = current.userInfo[CKPartialErrorsByItemIDKey] as? NSDictionary {
+                children.append(contentsOf: partial.allValues.compactMap { $0 as? NSError })
+            }
+
+            if children.isEmpty {
+                leaves.append(current)
+            } else {
+                queue.append(contentsOf: children)
+            }
+        }
+        return leaves
+    }
+
+    private static func finding(for error: NSError) -> Finding {
+        let retryAfter = (error.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue
+        guard error.domain == CKErrorDomain,
+              let code = CKError.Code(rawValue: error.code) else {
+            if error.domain == NSURLErrorDomain {
+                let retryable: Set<URLError.Code> = [
+                    .cancelled, .timedOut, .cannotConnectToHost, .networkConnectionLost,
+                    .notConnectedToInternet, .dnsLookupFailed, .resourceUnavailable
+                ]
+                return Finding(
+                    error: error,
+                    disposition: retryable.contains(URLError.Code(rawValue: error.code)) ? .retryable : .unknown,
+                    summary: safe(error.localizedDescription),
+                    retryAfterSeconds: retryAfter
+                )
+            }
+            return Finding(
+                error: error,
+                disposition: .unknown,
+                summary: safe(error.localizedDescription),
+                retryAfterSeconds: retryAfter
+            )
+        }
+
+        let serverDescription = ["CKErrorServerDescription", "ServerErrorDescription"]
+            .compactMap { error.userInfo[$0] as? String }
+            .first
+            .map(safe)
+        let localized = safe(error.localizedDescription)
+        let genericDescription = localized.contains("CKErrorDomain error \(error.code)")
+        let summary: String
+        let disposition: MovesSyncDiagnostics.ErrorDisposition
+
+        switch code {
+        case .networkUnavailable:
+            (disposition, summary) = (.retryable, "The network is unavailable.")
+        case .networkFailure:
+            (disposition, summary) = (.retryable, "The CloudKit network request failed.")
+        case .serviceUnavailable:
+            (disposition, summary) = (.retryable, "CloudKit is temporarily unavailable.")
+        case .requestRateLimited:
+            (disposition, summary) = (.retryable, "CloudKit rate-limited the request.")
+        case .zoneBusy:
+            (disposition, summary) = (.retryable, "The CloudKit zone is busy.")
+        case .resultsTruncated, .serverRecordChanged, .changeTokenExpired, .batchRequestFailed,
+             .operationCancelled, .accountTemporarilyUnavailable:
+            (disposition, summary) = (.retryable, genericDescription ? readableName(for: code) : localized)
+        case .notAuthenticated:
+            (disposition, summary) = (.persistent, "iCloud is not signed in or is unavailable for this app.")
+        case .permissionFailure:
+            (disposition, summary) = (.persistent, "CloudKit denied permission for the request.")
+        case .quotaExceeded:
+            (disposition, summary) = (.persistent, "The iCloud storage quota is exceeded.")
+        case .unknownItem:
+            (disposition, summary) = (.persistent, "A required CloudKit record or zone was not found.")
+        case .zoneNotFound:
+            (disposition, summary) = (.persistent, "The required CloudKit zone is not deployed or available.")
+        case .serverRejectedRequest:
+            let detail = serverDescription ?? (genericDescription ? nil : localized)
+            (disposition, summary) = (
+                .persistent,
+                detail.map { "CloudKit rejected the request: \($0)" }
+                    ?? "CloudKit rejected the request. Verify the deployed Production schema."
+            )
+        case .constraintViolation, .incompatibleVersion, .badContainer, .badDatabase,
+             .invalidArguments, .limitExceeded, .missingEntitlement, .userDeletedZone:
+            (disposition, summary) = (.persistent, genericDescription ? readableName(for: code) : localized)
+        case .partialFailure:
+            (disposition, summary) = (.unknown, "CloudKit reported one or more partial failures.")
+        default:
+            (disposition, summary) = (.unknown, genericDescription ? readableName(for: code) : localized)
+        }
+
+        return Finding(
+            error: error,
+            disposition: disposition,
+            summary: summary,
+            retryAfterSeconds: retryAfter
+        )
+    }
+
+    private static func summarizedCauses(_ findings: [Finding]) -> [Cause] {
+        struct Key: Hashable {
+            let domain: String
+            let code: Int
+            let summary: String
+        }
+        let grouped = Dictionary(grouping: findings) {
+            Key(domain: $0.error.domain, code: $0.error.code, summary: $0.summary)
+        }
+        return grouped.map { key, values in
+            Cause(domain: key.domain, code: key.code, count: values.count, summary: key.summary)
+        }.sorted {
+            if $0.domain != $1.domain { return $0.domain < $1.domain }
+            if $0.code != $1.code { return $0.code < $1.code }
+            return $0.summary < $1.summary
+        }
+    }
+
+    private static func combinedDisposition(
+        _ dispositions: [MovesSyncDiagnostics.ErrorDisposition]
+    ) -> MovesSyncDiagnostics.ErrorDisposition {
+        if dispositions.contains(.persistent) { return .persistent }
+        if dispositions.allSatisfy({ $0 == .retryable }) { return .retryable }
+        return .unknown
+    }
+
+    private static func recoverySuggestion(
+        for disposition: MovesSyncDiagnostics.ErrorDisposition,
+        findings: [Finding]
+    ) -> String? {
+        if findings.contains(where: {
+            $0.error.domain == CKErrorDomain
+                && CKError.Code(rawValue: $0.error.code) == .serverRejectedRequest
+        }) {
+            return "Verify and deploy the required schema in the CloudKit Production environment before releasing."
+        }
+        if findings.contains(where: {
+            $0.error.domain == CKErrorDomain
+                && CKError.Code(rawValue: $0.error.code) == .notAuthenticated
+        }) {
+            return "Check iCloud sign-in and that iCloud Drive is enabled, then retry."
+        }
+        switch disposition {
+        case .retryable: return "Retry after the connection or CloudKit service recovers."
+        case .persistent: return "Review the CloudKit account, quota, permissions, and deployed schema."
+        case .unknown: return nil
+        }
+    }
+
+    private static func readableName(for code: CKError.Code) -> String {
+        "CloudKit error \(code.rawValue) (\(String(describing: code)))."
+    }
+
+    private static func safe(_ message: String) -> String {
+        MovesStoreRecovery.privacySafeMessage(message)
+    }
+}
+
 struct MovesSyncTimelineSnapshot: Equatable, Sendable {
     let observedAt: Date
     let placeCount: Int
@@ -94,6 +316,30 @@ final class MovesSyncDiagnostics: ObservableObject {
         let message: String
         let recoverySuggestion: String?
         let occurredAt: Date
+        let retryAfterSeconds: TimeInterval?
+        let causes: [CloudKitFailureAnalysis.Cause]?
+
+        init(
+            stage: Stage,
+            disposition: ErrorDisposition,
+            domain: String?,
+            code: Int?,
+            message: String,
+            recoverySuggestion: String?,
+            occurredAt: Date,
+            retryAfterSeconds: TimeInterval? = nil,
+            causes: [CloudKitFailureAnalysis.Cause]? = nil
+        ) {
+            self.stage = stage
+            self.disposition = disposition
+            self.domain = domain
+            self.code = code
+            self.message = message
+            self.recoverySuggestion = recoverySuggestion
+            self.occurredAt = occurredAt
+            self.retryAfterSeconds = retryAfterSeconds
+            self.causes = causes
+        }
 
         var shortDescription: String {
             "\(disposition.title): \(message)"
@@ -234,59 +480,33 @@ final class MovesSyncDiagnostics: ObservableObject {
         MovesStoreRecovery.lastFailure
     }
 
+    var coordinationFailure: CrossDeviceWorkCoordinationFailure? {
+        CrossDeviceWorkCoordinationHealth.lastFailure
+    }
+
     static func errorDetails(
         for error: Error,
         stage: Stage,
         occurredAt: Date = .now
     ) -> ErrorDetails {
         let nsError = error as NSError
-        let disposition = classify(error)
+        let analysis = CloudKitFailureAnalysis.analyze(error)
         return ErrorDetails(
             stage: stage,
-            disposition: disposition,
+            disposition: analysis.disposition,
             domain: nsError.domain.isEmpty ? nil : nsError.domain,
             code: nsError.code == 0 ? nil : nsError.code,
-            message: privacySafeMessage(error.localizedDescription),
-            recoverySuggestion: nsError.localizedRecoverySuggestion.map(privacySafeMessage),
-            occurredAt: occurredAt
+            message: analysis.message,
+            recoverySuggestion: analysis.recoverySuggestion
+                ?? nsError.localizedRecoverySuggestion.map(privacySafeMessage),
+            occurredAt: occurredAt,
+            retryAfterSeconds: analysis.retryAfterSeconds,
+            causes: analysis.causes.isEmpty ? nil : analysis.causes
         )
     }
 
     static func classify(_ error: Error) -> ErrorDisposition {
-        var current: NSError? = error as NSError
-        var visited = Set<String>()
-
-        while let candidate = current {
-            let identity = "\(candidate.domain):\(candidate.code)"
-            guard visited.insert(identity).inserted else { break }
-
-            let urlCode = URLError.Code(rawValue: candidate.code)
-            switch urlCode {
-            case .cancelled, .timedOut, .cannotConnectToHost, .networkConnectionLost,
-                 .notConnectedToInternet, .dnsLookupFailed, .resourceUnavailable:
-                return .retryable
-            default:
-                break
-            }
-
-            if let cloudKitCode = CKError.Code(rawValue: candidate.code) {
-                switch cloudKitCode {
-                case .networkUnavailable, .networkFailure, .serviceUnavailable,
-                     .requestRateLimited, .zoneBusy, .resultsTruncated, .notAuthenticated:
-                    return .retryable
-                case .permissionFailure, .constraintViolation,
-                     .incompatibleVersion, .badContainer, .badDatabase,
-                     .invalidArguments, .quotaExceeded:
-                    return .persistent
-                default:
-                    break
-                }
-            }
-
-            current = candidate.userInfo[NSUnderlyingErrorKey] as? NSError
-        }
-
-        return .unknown
+        CloudKitFailureAnalysis.analyze(error).disposition
     }
 
     static func privacySafeMessage(_ message: String) -> String {
@@ -309,7 +529,8 @@ final class MovesSyncDiagnostics: ObservableObject {
         for (name, error) in monitorErrors {
             guard let error else { continue }
             let details = Self.errorDetails(for: error, stage: stage(for: name))
-            lines.append("\(name): \(details.disposition.title) — \(details.message) [\(details.domain ?? "unknown")\(details.code.map { ":\($0)" } ?? "")]")
+            let retryAfter = details.retryAfterSeconds.map { " retry-after=\(Int(ceil($0)))s" } ?? ""
+            lines.append("\(name): \(details.disposition.title) — \(details.message) [\(details.domain ?? "unknown")\(details.code.map { ":\($0)" } ?? "")\(retryAfter)]")
         }
 
         if monitorErrors.allSatisfy({ $0.1 == nil }), let details = lastErrorDetails {
@@ -317,6 +538,9 @@ final class MovesSyncDiagnostics: ObservableObject {
         }
         if let storeOpenFailure {
             lines.append("Store open: \(storeOpenFailure.disposition.rawValue) — \(storeOpenFailure.message) [\(storeOpenFailure.domain ?? "unknown")\(storeOpenFailure.code.map { ":\($0)" } ?? "")]")
+        }
+        if let coordinationFailure {
+            lines.append("Background coordination (\(coordinationFailure.operation)): \(coordinationFailure.disposition.title) — \(coordinationFailure.message)")
         }
         lines.append("Recorded events: \(events.count)")
         if let snapshot = latestSnapshot {
@@ -340,6 +564,13 @@ final class MovesSyncDiagnostics: ObservableObject {
 
     private func observeNotifications() {
         let center = notificationCenter
+        observers.append(center.addObserver(
+            forName: .movesWorkCoordinationHealthDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.objectWillChange.send()
+        })
         observers.append(center.addObserver(
             forName: NSPersistentCloudKitContainer.eventChangedNotification,
             object: nil,
@@ -427,6 +658,9 @@ final class MovesSyncDiagnostics: ObservableObject {
         }
 
         let startedAt = event.startDate
+        let details = event.error.map {
+            Self.errorDetails(for: $0, stage: stage, occurredAt: event.endDate ?? Date())
+        }
         append(
             Event(
                 id: UUID(),
@@ -434,13 +668,11 @@ final class MovesSyncDiagnostics: ObservableObject {
                 startedAt: startedAt,
                 endedAt: event.endDate,
                 succeeded: event.endDate.map { _ in event.succeeded },
-                errorSummary: event.error.map { Self.privacySafeMessage($0.localizedDescription) },
+                errorSummary: details?.shortDescription,
                 placeCount: nil,
                 moveCount: nil,
                 newestCreatedAt: nil,
-                errorDetails: event.error.map {
-                    Self.errorDetails(for: $0, stage: stage, occurredAt: event.endDate ?? Date())
-                }
+                errorDetails: details
             )
         )
 

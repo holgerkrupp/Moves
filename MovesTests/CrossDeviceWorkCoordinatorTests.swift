@@ -1,3 +1,4 @@
+import CloudKit
 import SwiftData
 import XCTest
 @testable import Moves
@@ -5,8 +6,8 @@ import XCTest
 final class CrossDeviceWorkCoordinatorTests: XCTestCase {
     func testOnlyOneDeviceClaimsAnActiveSharedLease() async throws {
         let container = try makeContainer()
-        let first = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "phone")
-        let second = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "mac")
+        let first = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "phone", backend: .legacySwiftDataForTesting)
+        let second = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "mac", backend: .legacySwiftDataForTesting)
         let key = BackgroundWorkKey(kind: "test", partition: "same-range", version: 1)
         let now = Date(timeIntervalSince1970: 1_800_000_000)
 
@@ -26,8 +27,8 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
 
     func testCompletedWorkAndExpiredLeasesCanBeDistinguished() async throws {
         let container = try makeContainer()
-        let first = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "phone")
-        let second = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "mac")
+        let first = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "phone", backend: .legacySwiftDataForTesting)
+        let second = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "mac", backend: .legacySwiftDataForTesting)
         let key = BackgroundWorkKey(kind: "test", partition: "versioned", version: 2)
         let now = Date(timeIntervalSince1970: 1_800_000_000)
 
@@ -67,7 +68,8 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
         let container = try makeContainer()
         let coordinator = CrossDeviceWorkCoordinator(
             modelContainer: container,
-            deviceIdentifier: "phone"
+            deviceIdentifier: "phone",
+            backend: .legacySwiftDataForTesting
         )
         let key = BackgroundWorkKey(kind: "externalSync", partition: "hour-1", version: 1)
         let firstDate = Date(timeIntervalSince1970: 1_800_000_000)
@@ -111,7 +113,7 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let storeURL = directory.appendingPathComponent("timeline.store")
-        let oldSchema = Schema([CrossDeviceWorkLease.self])
+        let oldSchema = Schema(MovesTimelineStore.authoritativeModelTypes + [CrossDeviceWorkLease.self])
         let oldConfiguration = ModelConfiguration(
             "MovesTimeline",
             schema: oldSchema,
@@ -134,11 +136,18 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
             cloudKitDatabase: ModelConfiguration.CloudKitDatabase.none,
             storeURL: storeURL
         )
+        XCTAssertFalse(MovesTimelineStore.authoritativeSchema.entities.contains {
+            $0.name == "CrossDeviceWorkLease"
+        })
     }
 
     func testDeviceLocalWorkDoesNotCreateACloudKitLease() async throws {
         let container = try makeContainer()
-        let coordinator = CrossDeviceWorkCoordinator(modelContainer: container, deviceIdentifier: "phone")
+        let coordinator = CrossDeviceWorkCoordinator(
+            modelContainer: container,
+            deviceIdentifier: "phone",
+            backend: .legacySwiftDataForTesting
+        )
         let key = BackgroundWorkKey(kind: "explorationCache", partition: "tile-1", version: 1)
 
         guard case .acquired = try await coordinator.acquire(key: key, scope: .deviceLocal) else {
@@ -149,6 +158,68 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
         XCTAssertTrue(try context.fetch(FetchDescriptor<CrossDeviceWorkLease>()).isEmpty)
     }
 
+    func testTransientLeaseFailureRetriesAreBoundedAndUnsafeWorkIsDeferred() async {
+        let store = FailingLeaseStore(error: LeaseTestError.networkUnavailable)
+        let delays = RetryDelayRecorder()
+        let coordinator = CrossDeviceWorkCoordinator(
+            deviceIdentifier: "phone",
+            leaseStore: store,
+            retryPolicy: CrossDeviceWorkRetryPolicy(
+                maximumAttempts: 3,
+                initialDelay: 0.25,
+                maximumDelay: 1
+            ),
+            sleep: { delay in await delays.record(delay) }
+        )
+
+        do {
+            _ = try await coordinator.acquire(
+                key: BackgroundWorkKey(kind: "unsafeUpload", partition: "range", version: 1),
+                scope: .accountShared
+            )
+            XCTFail("Unsafe shared work must be deferred when no lease can be established")
+        } catch is CrossDeviceWorkCoordinationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let acquireAttempts = await store.acquireAttempts
+        let recordedDelays = await delays.values
+        XCTAssertEqual(acquireAttempts, 3)
+        XCTAssertEqual(recordedDelays, [0.25, 0.5])
+    }
+
+    func testIdempotentWorkCanExplicitlyFallBackWithoutRetryingPersistentFailure() async throws {
+        let store = FailingLeaseStore(error: LeaseTestError.productionSchemaMissing)
+        let coordinator = CrossDeviceWorkCoordinator(
+            deviceIdentifier: "phone",
+            leaseStore: store,
+            retryPolicy: CrossDeviceWorkRetryPolicy(
+                maximumAttempts: 3,
+                initialDelay: 0,
+                maximumDelay: 0
+            ),
+            sleep: { _ in }
+        )
+
+        let claim = try await coordinator.acquire(
+            key: BackgroundWorkKey(kind: "idempotentMaintenance", partition: "all", version: 1),
+            scope: .accountShared,
+            failurePolicy: .allowLocalFallback
+        )
+        guard case .acquired(let token) = claim else {
+            return XCTFail("Explicitly safe work should receive a local fallback token")
+        }
+
+        XCTAssertEqual(token.scope, .deviceLocal)
+        let acquireAttempts = await store.acquireAttempts
+        XCTAssertEqual(acquireAttempts, 1)
+        try await coordinator.finish(token, completed: true)
+        let finishAttempts = await store.finishAttempts
+        XCTAssertEqual(finishAttempts, 0)
+    }
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([CrossDeviceWorkLease.self])
         let configuration = ModelConfiguration(
@@ -157,5 +228,73 @@ final class CrossDeviceWorkCoordinatorTests: XCTestCase {
             cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+}
+
+private enum LeaseTestError: Error, CustomNSError, LocalizedError, Sendable {
+    case networkUnavailable
+    case productionSchemaMissing
+
+    static var errorDomain: String { CKErrorDomain }
+
+    var errorCode: Int {
+        switch self {
+        case .networkUnavailable: return CKError.Code.networkUnavailable.rawValue
+        case .productionSchemaMissing: return CKError.Code.serverRejectedRequest.rawValue
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .networkUnavailable: return "The network is unavailable."
+        case .productionSchemaMissing: return "Cannot create new type MovesWorkLease in production schema"
+        }
+    }
+}
+
+private actor FailingLeaseStore: CrossDeviceWorkLeaseStore {
+    private let error: LeaseTestError
+    private(set) var acquireAttempts = 0
+    private(set) var finishAttempts = 0
+
+    init(error: LeaseTestError) {
+        self.error = error
+    }
+
+    func acquire(
+        key: BackgroundWorkKey,
+        ownerDeviceIdentifier: String,
+        now: Date,
+        leaseDuration: TimeInterval,
+        completionMarker: String?
+    ) async throws -> CrossDeviceWorkClaim {
+        acquireAttempts += 1
+        throw error
+    }
+
+    func renew(
+        _ token: CrossDeviceWorkLeaseToken,
+        now: Date,
+        leaseDuration: TimeInterval
+    ) async throws -> Bool {
+        throw error
+    }
+
+    func finish(
+        _ token: CrossDeviceWorkLeaseToken,
+        completed: Bool,
+        completionMarker: String?,
+        now: Date
+    ) async throws {
+        finishAttempts += 1
+        throw error
+    }
+}
+
+private actor RetryDelayRecorder {
+    private(set) var values: [TimeInterval] = []
+
+    func record(_ value: TimeInterval) {
+        values.append(value)
     }
 }

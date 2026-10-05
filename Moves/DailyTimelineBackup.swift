@@ -113,7 +113,13 @@ enum DailyTimelineBackup {
             partition: "\(dayKey)-\(format.rawValue)",
             version: 1
         )
-        let claim = try await coordinator.acquire(key: workKey, scope: .accountShared)
+        // Replacing the same deterministic day file is idempotent, so a local
+        // fallback is safe when CloudKit coordination is temporarily unavailable.
+        let claim = try await coordinator.acquire(
+            key: workKey,
+            scope: .accountShared,
+            failurePolicy: .allowLocalFallback
+        )
         guard case .acquired(let lease) = claim else {
             guard FileManager.default.fileExists(atPath: destination.path) else {
                 throw DailyTimelineBackupError.workHandledByAnotherDevice

@@ -2113,6 +2113,16 @@ struct DayMapStrip: View {
                 )
                 applyPresentation(cache)
             }
+            .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)") {
+                guard isActive, !Task.isCancelled else { return }
+                let source = DayPresentationSourceCache.source(
+                    for: dayTimeline,
+                    generation: presentationGeneration
+                )
+                captureManager.prepareRouteMatches(
+                    for: Self.displayedMoves(from: source)
+                )
+            }
     }
 
     @ViewBuilder
@@ -2715,12 +2725,7 @@ struct DayMapStrip: View {
         source: DayPresentationSource,
         generation: Int
     ) -> DayMapPresentationCache {
-        let displayedMoves = TimelinePresentationLimits.selection(
-            from: source.visibleMoves,
-            maxImportedMoves: TimelinePresentationLimits.maxMapImportedMoves,
-            maxTotalMoves: TimelinePresentationLimits.maxMapMoves,
-            importedMoveIDs: source.importedMoveIDs
-        ).moves
+        let displayedMoves = displayedMoves(from: source)
         let sortedPlaces = mapPlaces(
             for: dayTimeline,
             source: source,
@@ -2753,6 +2758,15 @@ struct DayMapStrip: View {
             placeRefreshKey: placeRefreshKey,
             latestSampleKey: latestSampleKey
         )
+    }
+
+    private static func displayedMoves(from source: DayPresentationSource) -> [MoveSegment] {
+        TimelinePresentationLimits.selection(
+            from: source.visibleMoves,
+            maxImportedMoves: TimelinePresentationLimits.maxMapImportedMoves,
+            maxTotalMoves: TimelinePresentationLimits.maxMapMoves,
+            importedMoveIDs: source.importedMoveIDs
+        ).moves
     }
 
     private static func mapPlaces(

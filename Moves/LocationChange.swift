@@ -1203,6 +1203,15 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         routeMatchingScheduler.schedulePendingRouteMatches(limit: limit)
     }
 
+    /// Ensures routes visible on the selected timeline day are road-matched even when
+    /// they fall outside the small lifecycle retry batch. The scheduler de-duplicates
+    /// in-flight work, and its cache-signature check makes completed matches no-ops.
+    func prepareRouteMatches(for moves: [MoveSegment]) {
+        for move in moves {
+            routeMatchingScheduler.scheduleRouteMatching(for: move)
+        }
+    }
+
     var trackingStatusText: String {
         if isDemoMode {
             return "Simulator demo mode"

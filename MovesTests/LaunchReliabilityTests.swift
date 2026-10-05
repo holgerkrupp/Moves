@@ -1,4 +1,5 @@
 import Foundation
+import CloudKit
 import SwiftData
 import UIKit
 import XCTest
@@ -388,6 +389,93 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertFalse(report.contains("alice@example.com"))
         XCTAssertFalse(report.contains("48.137"))
         XCTAssertFalse(report.contains("11.575"))
+    }
+
+    func testCloudKitPartialFailureExposesDistinctNestedCauses() {
+        let rejected = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.serverRejectedRequest.rawValue,
+            userInfo: [
+                "CKErrorServerDescription": "Cannot create new type MovesWorkLease in production schema"
+            ]
+        )
+        let network = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.networkUnavailable.rawValue
+        )
+        let partial = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.partialFailure.rawValue,
+            userInfo: [
+                CKPartialErrorsByItemIDKey: [
+                    "lease-a": rejected,
+                    "lease-b": rejected,
+                    "lease-c": network
+                ]
+            ]
+        )
+
+        let details = MovesSyncDiagnostics.errorDetails(for: partial, stage: .cloudKitExport)
+
+        XCTAssertEqual(details.disposition, .persistent)
+        XCTAssertTrue(details.message.contains("2× CloudKit rejected"))
+        XCTAssertTrue(details.message.contains("MovesWorkLease"))
+        XCTAssertTrue(details.message.contains("network is unavailable"))
+        XCTAssertEqual(details.causes?.count, 2)
+        XCTAssertFalse(details.message.contains("lease-a"), "Partial-error item identifiers are private")
+    }
+
+    func testNestedCloudKitCodeTwoUsesUnderlyingRetryDispositionAndRetryAfter() {
+        let underlying = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.requestRateLimited.rawValue,
+            userInfo: [CKErrorRetryAfterKey: 12.0]
+        )
+        let wrapper = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.partialFailure.rawValue,
+            userInfo: [NSUnderlyingErrorKey: underlying]
+        )
+
+        let details = MovesSyncDiagnostics.errorDetails(for: wrapper, stage: .cloudKitImport)
+
+        XCTAssertEqual(details.disposition, .retryable)
+        XCTAssertEqual(details.retryAfterSeconds, 12)
+        XCTAssertFalse(details.message.contains("Unknown"))
+        XCTAssertTrue(details.message.contains("rate-limited"))
+    }
+
+    func testCloudKitAccountFailuresHaveActionableDispositions() {
+        let temporarilyUnavailable = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.accountTemporarilyUnavailable.rawValue
+        )
+        let signedOut = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.notAuthenticated.rawValue
+        )
+
+        XCTAssertEqual(MovesSyncDiagnostics.classify(temporarilyUnavailable), .retryable)
+        XCTAssertEqual(MovesSyncDiagnostics.classify(signedOut), .persistent)
+        XCTAssertTrue(
+            MovesSyncDiagnostics.errorDetails(for: signedOut, stage: .cloudKitSetup)
+                .message.contains("not signed in")
+        )
+    }
+
+    func testNestedCloudKitDiagnosticsRemainPrivacySafe() {
+        let rejected = NSError(
+            domain: CKErrorDomain,
+            code: CKError.Code.serverRejectedRequest.rawValue,
+            userInfo: [
+                "CKErrorServerDescription": "Rejected account=alice@example.com latitude=48.137 /Users/alice/private.db"
+            ]
+        )
+        let details = MovesSyncDiagnostics.errorDetails(for: rejected, stage: .cloudKitExport)
+
+        XCTAssertFalse(details.message.contains("alice"))
+        XCTAssertFalse(details.message.contains("48.137"))
+        XCTAssertFalse(details.message.contains("/Users"))
     }
 
     private func assertApplicationConfigurations(

@@ -1,11 +1,11 @@
 import CoreLocation
 import Foundation
 
-/// Device-local storage for rebuildable route-render output.
+/// Device-local mirror for rebuildable route-render output.
 ///
-/// The legacy `MoveSegment.routeCache*` columns remain readable for older
-/// records, but new route matching results never mutate those CloudKit-backed
-/// properties. The cache is disposable and lives under the system Caches URL.
+/// Automatically road-matched geometry is also stored on `MoveSegment` so it can
+/// sync through CloudKit. This disposable cache avoids decoding the synced value
+/// repeatedly and remains useful while a newly computed value is waiting to sync.
 final class MoveRouteCacheStore {
     static let shared = MoveRouteCacheStore()
 

@@ -170,7 +170,9 @@ enum ImportedTransportModeRefinement {
         )
         guard let claim = try? await coordinator.acquire(
             key: workKey,
-            scope: .accountShared
+            scope: .accountShared,
+            // This pass only applies deterministic inference to unknown modes.
+            failurePolicy: .allowLocalFallback
         ), case .acquired(let lease) = claim else {
             return
         }

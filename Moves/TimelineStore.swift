@@ -181,7 +181,6 @@ enum MovesTimelineStore {
         MoveSegment.self,
         LocationSample.self,
         MovesDeviceProfile.self,
-        CrossDeviceWorkLease.self,
     ]
 
     static var authoritativeSchema: Schema {

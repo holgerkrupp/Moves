@@ -839,7 +839,7 @@ actor InferredMoveRouteMatchingWorker {
 
         // A successful result is stored against the signature, while a transient
         // failure deliberately leaves no persisted entry and remains retryable.
-        move.storeCachedRouteCoordinates(result.coordinates, signature: request.cacheSignature)
+        move.storeSyncedRouteCoordinates(result.coordinates, signature: request.cacheSignature)
         let matchedDistance = routeDistance(for: result.coordinates)
         if matchedDistance.isFinite, matchedDistance > 0 {
             move.distanceMeters = matchedDistance
@@ -898,6 +898,9 @@ final class AutomaticInferredMoveRouteMatchingScheduler: InferredMoveRouteMatchi
 
     func scheduleRouteMatching(for move: MoveSegment) {
         guard !ProcessInfo.processInfo.isRunningUnitTests else { return }
+        if promoteCachedRouteIfNeeded(for: move) {
+            return
+        }
         guard let request = makeRequest(for: move) else { return }
         enqueue(request)
     }
@@ -970,6 +973,29 @@ final class AutomaticInferredMoveRouteMatchingScheduler: InferredMoveRouteMatchi
             transportMode: move.transportMode,
             fallback: fallback.map(RouteCoordinateStoragePoint.init)
         )
+    }
+
+    private func promoteCachedRouteIfNeeded(for move: MoveSegment) -> Bool {
+        guard RoadRouteMatchingPolicy.shouldMatch(move.transportMode),
+              !move.hasManualRouteCoordinates,
+              !move.usesImportedRoute,
+              !move.usesHighAccuracyRouteTracking else {
+            return false
+        }
+
+        let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+        guard fallback.count > 1 else { return false }
+        let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+        guard move.promoteCachedRouteCoordinatesToSynced(for: signature) else { return false }
+
+        do {
+            try move.modelContext?.save()
+            NotificationCenter.default.post(name: .movesTimelineDidChange, object: nil)
+            NotificationCenter.default.post(name: .movesMoveDataDidChange, object: move.id)
+        } catch {
+            // The local cache remains available. A later presentation pass can retry promotion.
+        }
+        return true
     }
 }
 
@@ -1757,6 +1783,9 @@ enum RoadRouteMatcher {
 
         if let cached = move.cachedRouteCoordinates(for: cacheSignature) {
             await memo.storePersistent(cached, for: cacheKey)
+            if persistResult, RoadRouteMatchingPolicy.shouldMatch(move.transportMode) {
+                move.storeSyncedRouteCoordinates(cached, signature: cacheSignature)
+            }
             return cached
         }
 
@@ -1764,7 +1793,7 @@ enum RoadRouteMatcher {
             switch cached {
             case .persistent(let coordinates):
                 if persistResult {
-                    move.storeCachedRouteCoordinates(coordinates, signature: cacheSignature)
+                    storeResolvedCoordinates(coordinates, for: move, signature: cacheSignature)
                 }
                 return coordinates
             case .transient(let coordinates):
@@ -1777,7 +1806,7 @@ enum RoadRouteMatcher {
             if result.cacheable {
                 await memo.storePersistent(result.coordinates, for: cacheKey)
                 if persistResult {
-                    move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+                    storeResolvedCoordinates(result.coordinates, for: move, signature: cacheSignature)
                 }
             } else {
                 await memo.storeTransient(
@@ -1800,7 +1829,7 @@ enum RoadRouteMatcher {
         if result.cacheable {
             await memo.storePersistent(result.coordinates, for: cacheKey)
             if persistResult {
-                move.storeCachedRouteCoordinates(result.coordinates, signature: cacheSignature)
+                storeResolvedCoordinates(result.coordinates, for: move, signature: cacheSignature)
             }
         } else {
             await memo.storeTransient(
@@ -1810,6 +1839,18 @@ enum RoadRouteMatcher {
             )
         }
         return result.coordinates
+    }
+
+    private static func storeResolvedCoordinates(
+        _ coordinates: [CLLocationCoordinate2D],
+        for move: MoveSegment,
+        signature: String
+    ) {
+        if RoadRouteMatchingPolicy.shouldMatch(move.transportMode) {
+            move.storeSyncedRouteCoordinates(coordinates, signature: signature)
+        } else {
+            move.storeCachedRouteCoordinates(coordinates, signature: signature)
+        }
     }
 
     static func matchedManualCoordinates(

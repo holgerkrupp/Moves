@@ -968,6 +968,19 @@ private struct CloudKitSyncStatusCard: View {
                 }
             }
 
+            if let coordinationFailure = diagnostics.coordinationFailure {
+                Divider()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Background coordination: \(coordinationFailure.disposition.title)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(coordinationFailure.disposition == .retryable ? .orange : .red)
+                    Text("Shared background work is deferred; timeline sync remains available.")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+
             Text("Shows iCloud activity for this copy of Moves. Other devices sync independently.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)

@@ -1125,7 +1125,7 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(MoveRouteGeometry.rawCoordinates(for: move).count, 3)
     }
 
-    func testMoveSegmentRouteCacheRoundTripsAndHonorsSignatureChanges() {
+    func testMoveSegmentSyncedRouteCacheRoundTripsAndHonorsSignatureChanges() {
         let segment = MoveSegment(
             dedupeKey: "move-cache",
             startDate: Date(timeIntervalSince1970: 1_710_000_000),
@@ -1142,11 +1142,14 @@ final class TimelineAssemblerTests: XCTestCase {
 
         XCTAssertNil(segment.cachedRouteCoordinates(for: signature))
 
-        segment.storeCachedRouteCoordinates(coordinates, signature: signature)
+        segment.storeSyncedRouteCoordinates(coordinates, signature: signature)
 
         let cached = segment.cachedRouteCoordinates(for: signature)
-        XCTAssertNil(segment.routeCacheSignature)
-        XCTAssertNil(segment.routeCacheCoordinatesData)
+        XCTAssertEqual(segment.routeCacheSignature, signature)
+        XCTAssertEqual(
+            RouteCoordinateStorage.decode(segment.routeCacheCoordinatesData).count,
+            coordinates.count
+        )
         XCTAssertEqual(cached?.count, 2)
         XCTAssertEqual(cached?.first?.latitude, coordinates.first?.latitude)
         XCTAssertEqual(cached?.first?.longitude, coordinates.first?.longitude)
@@ -1156,27 +1159,83 @@ final class TimelineAssemblerTests: XCTestCase {
 
         segment.clearCachedRouteCoordinates()
         XCTAssertNil(segment.cachedRouteCoordinates(for: signature))
+        XCTAssertNil(segment.routeCacheSignature)
+        XCTAssertNil(segment.routeCacheCoordinatesData)
     }
 
-    func testLegacySyncedRouteCacheRemainsReadableAsFallback() {
+    func testDeviceLocalRouteCacheDoesNotPopulateSyncedFields() {
         let segment = MoveSegment(
-            dedupeKey: "legacy-cache",
+            dedupeKey: "device-local-cache",
             startDate: .now,
             endDate: .now.addingTimeInterval(60),
             transportMode: .walking,
             distanceMeters: 100,
             stepCount: nil
         )
-        let signature = "legacy-signature"
+        let signature = "device-local-signature"
         let coordinates = [
             CLLocationCoordinate2D(latitude: 52.52, longitude: 13.40),
             CLLocationCoordinate2D(latitude: 52.521, longitude: 13.401),
         ]
-        segment.routeCacheSignature = signature
-        segment.routeCacheCoordinatesData = RouteCoordinateStorage.encode(coordinates)
 
-        let fallback = segment.cachedRouteCoordinates(for: signature)
-        XCTAssertEqual(fallback?.count, coordinates.count)
+        segment.storeCachedRouteCoordinates(coordinates, signature: signature)
+
+        XCTAssertEqual(segment.cachedRouteCoordinates(for: signature)?.count, coordinates.count)
+        XCTAssertNil(segment.routeCacheSignature)
+        XCTAssertNil(segment.routeCacheCoordinatesData)
+    }
+
+    func testDeviceLocalRouteCacheCanBePromotedToSyncedFields() {
+        let segment = MoveSegment(
+            dedupeKey: "promoted-cache",
+            startDate: .now,
+            endDate: .now.addingTimeInterval(60),
+            transportMode: .cycling,
+            distanceMeters: 100,
+            stepCount: nil
+        )
+        let signature = "promoted-signature"
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.52, longitude: 13.40),
+            CLLocationCoordinate2D(latitude: 52.521, longitude: 13.401),
+        ]
+        segment.storeCachedRouteCoordinates(coordinates, signature: signature)
+
+        XCTAssertTrue(segment.promoteCachedRouteCoordinatesToSynced(for: signature))
+        XCTAssertFalse(segment.promoteCachedRouteCoordinatesToSynced(for: signature))
+        XCTAssertEqual(segment.routeCacheSignature, signature)
+        XCTAssertEqual(
+            RouteCoordinateStorage.decode(segment.routeCacheCoordinatesData).count,
+            coordinates.count
+        )
+    }
+
+    func testSyncedRouteCacheTakesPrecedenceOverDeviceLocalCache() {
+        let segment = MoveSegment(
+            dedupeKey: "synced-cache",
+            startDate: .now,
+            endDate: .now.addingTimeInterval(60),
+            transportMode: .walking,
+            distanceMeters: 100,
+            stepCount: nil
+        )
+        let signature = "synced-signature"
+        let localCoordinates = [
+            CLLocationCoordinate2D(latitude: 52.52, longitude: 13.40),
+            CLLocationCoordinate2D(latitude: 52.521, longitude: 13.401),
+        ]
+        let syncedCoordinates = [
+            CLLocationCoordinate2D(latitude: 52.52, longitude: 13.40),
+            CLLocationCoordinate2D(latitude: 52.5205, longitude: 13.402),
+            CLLocationCoordinate2D(latitude: 52.521, longitude: 13.401),
+        ]
+        segment.storeCachedRouteCoordinates(localCoordinates, signature: signature)
+        segment.routeCacheSignature = signature
+        segment.routeCacheCoordinatesData = RouteCoordinateStorage.encode(syncedCoordinates)
+
+        let resolved = segment.cachedRouteCoordinates(for: signature)
+        XCTAssertEqual(resolved?.count, syncedCoordinates.count)
+        XCTAssertEqual(resolved?[1].longitude, syncedCoordinates[1].longitude)
     }
 
     func testMatchedRouteSynchronizesMoveDistanceWithDisplayedCoordinates() async {

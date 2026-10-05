@@ -332,6 +332,9 @@
     "Background" : {
 
     },
+    "Background coordination: %@" : {
+
+    },
     "Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking." : {
 
     },
@@ -1578,6 +1581,9 @@
 
     },
     "Share Selected Images" : {
+
+    },
+    "Shared background work is deferred; timeline sync remains available." : {
 
     },
     "Show big map markers" : {
