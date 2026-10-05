@@ -11,19 +11,138 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+struct RegularPlacesSettingsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \KnownLocation.name, order: .forward) private var locations: [KnownLocation]
+    @Query private var visits: [VisitPlace]
+    @State private var isCreating = false
+
+    private var unlabeledFrequentLocations: [MovesLocationSummary] {
+        let groups = Dictionary(grouping: visits.filter {
+            ($0.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                && ($0.regularPlaceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }) { visit in
+            "\(Int((visit.latitude * 1_000).rounded()))|\(Int((visit.longitude * 1_000).rounded()))"
+        }
+        return groups.values.filter { $0.count >= 2 }.map { group in
+            let sorted = group.sorted { $0.arrivalDate > $1.arrivalDate }
+            let duration = sorted.reduce(0.0) { total, visit in
+                total + max((visit.departureDate ?? .now).timeIntervalSince(visit.arrivalDate), 0)
+            }
+            return MovesLocationSummary(id: "unlabeled:\(Int((sorted[0].latitude * 1_000).rounded()))|\(Int((sorted[0].longitude * 1_000).rounded()))",
+                                        title: "\(sorted[0].latitude.formatted(.number.precision(.fractionLength(3)))), \(sorted[0].longitude.formatted(.number.precision(.fractionLength(3))))",
+                                        visits: sorted, totalDuration: duration)
+        }.sorted { $0.visitCount > $1.visitCount }
+    }
+
+    var body: some View {
+        List {
+            if locations.isEmpty {
+                ContentUnavailableView("No Regular Places", systemImage: "mappin.and.ellipse", description: Text("Save places such as Home or Work to recognize future visits."))
+            }
+            if !locations.isEmpty { Section("Named Regular Places") {
+            ForEach(locations) { location in
+                NavigationLink {
+                    KnownLocationEditorView(knownLocation: location, suggestedLocation: nil, allVisits: visits)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(location.name).font(.headline)
+                            Spacer()
+                            Text(KnownLocationFormatting.radius(location.radiusMeters)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        let count = visits.filter { location.contains($0.coordinate) }.count
+                        Text("\(count) matching visits · \(location.latitude.formatted(.number.precision(.fractionLength(3)))), \(location.longitude.formatted(.number.precision(.fractionLength(3))))")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if locations.contains(where: { $0.id != location.id && location.distance(from: $0.coordinate) < location.radiusMeters + $0.radiusMeters }) {
+                            Label("Overlaps another Regular Place", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            }}
+            Section("Often Visited · Unnamed") {
+                if unlabeledFrequentLocations.isEmpty {
+                    Text("Repeated visits without a name will appear here.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(unlabeledFrequentLocations) { summary in
+                        NavigationLink {
+                            KnownLocationEditorView(knownLocation: nil, suggestedLocation: summary, allVisits: visits)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(summary.title).font(.headline)
+                                Text("\(summary.visitCount) visits · Save a name to make this a Regular Place")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(.vertical, 3)
+                        }
+                    }
+                }
+            }
+            if !legacyCandidates.isEmpty {
+                Section("Legacy labels to review") {
+                    Text("These visits have a label matching a Regular Place name but are outside its saved radius. Keep labels that you assigned manually; remove only labels that were propagated by mistake.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(legacyCandidates, id: \.id) { visit in
+                        HStack {
+                            NavigationLink {
+                                PlaceMapDetailView(place: visit)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(visit.userLabel ?? "Visit")
+                                    Text(visit.arrivalDate, format: .dateTime.month().day().year())
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Button("Remove label", role: .destructive) {
+                                visit.userLabel = nil
+                                try? modelContext.save()
+                            }.font(.caption)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Regular Places")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { isCreating = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add Regular Place")
+            }
+        }
+        .sheet(isPresented: $isCreating) {
+            NavigationStack {
+                KnownLocationEditorView(knownLocation: nil, suggestedLocation: nil, allVisits: visits)
+            }
+        }
+    }
+
+    private var legacyCandidates: [VisitPlace] {
+        visits.filter { visit in
+            visit.regularPlaceID == nil && locations.contains { location in
+                visit.userLabel?.localizedCaseInsensitiveCompare(location.name) == .orderedSame
+                    && !location.contains(visit.coordinate)
+            }
+        }.sorted { $0.arrivalDate > $1.arrivalDate }
+    }
+}
+
 struct KnownLocationEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \KnownLocation.name, order: .forward) private var allKnownLocations: [KnownLocation]
 
     let knownLocation: KnownLocation?
     let suggestedLocation: MovesLocationSummary?
+    let selectedVisit: VisitPlace?
     let allVisits: [VisitPlace]
-
-    private let centerLatitude: Double
-    private let centerLongitude: Double
+    private let visitsNewestFirst: [VisitPlace]
 
     @State private var draftName: String
     @State private var radiusMeters: Double
+    @State private var centerLatitude: Double
+    @State private var centerLongitude: Double
     @State private var camera: MapCameraPosition
     @State private var isConfirmingDeletion = false
     @State private var errorMessage = ""
@@ -32,11 +151,14 @@ struct KnownLocationEditorView: View {
     init(
         knownLocation: KnownLocation?,
         suggestedLocation: MovesLocationSummary?,
-        allVisits: [VisitPlace]
+        allVisits: [VisitPlace],
+        selectedVisit: VisitPlace? = nil
     ) {
         self.knownLocation = knownLocation
         self.suggestedLocation = suggestedLocation
+        self.selectedVisit = selectedVisit
         self.allVisits = allVisits
+        self.visitsNewestFirst = allVisits.sorted { $0.arrivalDate > $1.arrivalDate }
 
         let center: CLLocationCoordinate2D
         let initialRadius: Double
@@ -44,6 +166,10 @@ struct KnownLocationEditorView: View {
             center = knownLocation.coordinate
             initialRadius = knownLocation.radiusMeters
             _draftName = State(initialValue: knownLocation.name)
+        } else if let selectedVisit {
+            center = selectedVisit.coordinate
+            initialRadius = 120
+            _draftName = State(initialValue: selectedVisit.userLabel ?? selectedVisit.autoLabel ?? "")
         } else if let suggestedLocation {
             center = Self.suggestedCenter(for: suggestedLocation.visits)
             initialRadius = Self.suggestedRadius(for: suggestedLocation.visits, around: center)
@@ -54,8 +180,8 @@ struct KnownLocationEditorView: View {
             _draftName = State(initialValue: "")
         }
 
-        centerLatitude = center.latitude
-        centerLongitude = center.longitude
+        _centerLatitude = State(initialValue: center.latitude)
+        _centerLongitude = State(initialValue: center.longitude)
         _radiusMeters = State(initialValue: initialRadius)
         _camera = State(initialValue: .region(Self.region(center: center, radiusMeters: initialRadius)))
     }
@@ -64,13 +190,11 @@ struct KnownLocationEditorView: View {
         CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude)
     }
 
-    private var matchingVisits: [VisitPlace] {
+    private var visitsInsideRadius: [VisitPlace] {
         let centerLocation = CLLocation(latitude: centerLatitude, longitude: centerLongitude)
-        return allVisits
-            .filter { visit in
-                centerLocation.distance(from: CLLocation(latitude: visit.latitude, longitude: visit.longitude)) <= radiusMeters
-            }
-            .sorted { $0.arrivalDate > $1.arrivalDate }
+        return visitsNewestFirst.filter { visit in
+            centerLocation.distance(from: CLLocation(latitude: visit.latitude, longitude: visit.longitude)) <= radiusMeters
+        }
     }
 
     private var trimmedName: String {
@@ -78,9 +202,10 @@ struct KnownLocationEditorView: View {
     }
 
     var body: some View {
+        let matchingVisits = visitsInsideRadius
         ScrollView {
             LazyVStack(spacing: 14) {
-                proximityMap
+                proximityMap(matchingVisits: matchingVisits)
 
                 SettingsCard(title: knownLocation == nil ? "Create Known Location" : "Location Settings") {
                     TextField("Location name", text: $draftName)
@@ -92,6 +217,10 @@ struct KnownLocationEditorView: View {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(MovesPalette.textFieldBackground.opacity(0.92))
                         )
+
+                    Text("Drag the map to reposition the center, or choose a recorded visit below.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -125,7 +254,7 @@ struct KnownLocationEditorView: View {
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
 
-                    Button(knownLocation == nil ? "Create Location" : "Save Changes") {
+                    Button(knownLocation == nil ? "Create Regular Place" : "Save Changes") {
                         save()
                     }
                     .buttonStyle(.borderedProminent)
@@ -140,12 +269,22 @@ struct KnownLocationEditorView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(matchingVisits) { visit in
-                            NavigationLink {
-                                PlaceMapDetailView(place: visit)
-                            } label: {
-                                KnownLocationVisitRow(visit: visit)
+                            HStack {
+                                Button {
+                                    centerLatitude = visit.latitude
+                                    centerLongitude = visit.longitude
+                                    camera = .region(Self.region(center: visit.coordinate, radiusMeters: radiusMeters))
+                                } label: {
+                                    KnownLocationVisitRow(visit: visit)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Use visit at \(visit.arrivalDate.formatted(date: .abbreviated, time: .shortened)) as Regular Place center")
+                                NavigationLink {
+                                    PlaceMapDetailView(place: visit)
+                                } label: {
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -190,7 +329,7 @@ struct KnownLocationEditorView: View {
         }
     }
 
-    private var proximityMap: some View {
+    private func proximityMap(matchingVisits: [VisitPlace]) -> some View {
         Map(position: $camera) {
             MapCircle(center: center, radius: radiusMeters)
                 .foregroundStyle(MovesPalette.place.opacity(0.15))
@@ -214,6 +353,12 @@ struct KnownLocationEditorView: View {
                 }
             }
         }
+        .onMapCameraChange(frequency: .onEnd) { context in
+            let candidate = context.region.center
+            guard CLLocationCoordinate2DIsValid(candidate) else { return }
+            centerLatitude = candidate.latitude
+            centerLongitude = candidate.longitude
+        }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted))
         .frame(height: 320)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -231,12 +376,13 @@ struct KnownLocationEditorView: View {
         guard !trimmedName.isEmpty else { return }
 
         let location: KnownLocation
-        let previousName: String?
+        let originalID = knownLocation?.id
         if let knownLocation {
             location = knownLocation
-            previousName = knownLocation.name
             knownLocation.name = trimmedName
             knownLocation.radiusMeters = radiusMeters
+            knownLocation.latitude = centerLatitude
+            knownLocation.longitude = centerLongitude
             knownLocation.updatedAt = .now
         } else {
             location = KnownLocation(
@@ -245,15 +391,10 @@ struct KnownLocationEditorView: View {
                 longitude: centerLongitude,
                 radiusMeters: radiusMeters
             )
-            previousName = suggestedLocation?.title
             modelContext.insert(location)
         }
 
-        KnownLocationLabeler.apply(
-            location: location,
-            previousName: previousName,
-            to: allVisits
-        )
+        KnownLocationLabeler.reconcile(location: location, replacedID: originalID, definitions: allKnownLocations, to: allVisits)
 
         do {
             try modelContext.save()
@@ -267,6 +408,18 @@ struct KnownLocationEditorView: View {
 
     private func delete() {
         guard let knownLocation else { return }
+        for visit in allVisits where visit.regularPlaceID == knownLocation.id {
+            visit.regularPlaceID = nil
+            visit.regularPlaceName = nil
+            if let replacement = RegularPlaceMatcher.match(
+                coordinate: visit.coordinate,
+                accuracy: visit.horizontalAccuracy,
+                among: allKnownLocations.filter { $0.id != knownLocation.id }
+            ) {
+                visit.regularPlaceID = replacement.id
+                visit.regularPlaceName = replacement.name
+            }
+        }
         modelContext.delete(knownLocation)
         do {
             try modelContext.save()
@@ -344,21 +497,31 @@ private struct KnownLocationVisitRow: View {
 }
 
 enum KnownLocationLabeler {
-    static func apply(
+    static func reconcile(
         location: KnownLocation,
-        previousName: String?,
+        replacedID: UUID?,
+        definitions: [KnownLocation],
         to visits: [VisitPlace]
     ) {
-        let oldName = previousName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        for visit in visits where location.contains(visit.coordinate) {
-            let currentLabel = visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if currentLabel?.isEmpty != false
-                || currentLabel?.localizedCaseInsensitiveCompare(oldName ?? "") == .orderedSame
-                || currentLabel?.localizedCaseInsensitiveCompare(location.name) == .orderedSame {
-                visit.userLabel = location.name
+        let candidates = definitions.contains(where: { $0.id == location.id }) ? definitions : definitions + [location]
+        for visit in visits {
+            if visit.regularPlaceID == location.id || visit.regularPlaceID == replacedID {
+                visit.regularPlaceID = nil
+                visit.regularPlaceName = nil
+            }
+            if let match = RegularPlaceMatcher.match(
+                coordinate: visit.coordinate,
+                accuracy: visit.horizontalAccuracy,
+                among: candidates
+            ), visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                if visit.regularPlaceID == nil {
+                    visit.regularPlaceID = match.id
+                    visit.regularPlaceName = match.name
+                }
             }
         }
     }
+
 }
 
 private enum KnownLocationFormatting {

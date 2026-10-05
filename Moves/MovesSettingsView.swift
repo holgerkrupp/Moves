@@ -106,6 +106,18 @@ struct MovesSettingsView: View {
                     }
 
                     NavigationLink {
+                        RegularPlacesSettingsView()
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Regular Places",
+                            subtitle: "Manage Home, Work, and other recognized areas",
+                            systemImage: "mappin.and.ellipse",
+                            tint: MovesPalette.place,
+                            status: nil
+                        )
+                    }
+
+                    NavigationLink {
                         SettingsTrackingDetailView(
                             captureManager: captureManager,
                             automaticallyFillsVisitGaps: $automaticallyFillsVisitGaps
@@ -999,6 +1011,20 @@ private struct CloudKitSyncStatusCard: View {
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let domain = details.domain, let code = details.code {
+                Text("\(domain) error \(code)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+            if let causes = details.causes {
+                ForEach(Array(causes.enumerated()), id: \.offset) { _, cause in
+                    Text("Cause: \(cause.domain) error \(cause.code) — \(cause.summary)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if let suggestion = details.recoverySuggestion {
                 Text(suggestion)
                     .font(.system(size: 11, design: .rounded))
@@ -1508,6 +1534,8 @@ private struct RouteTrackingSettingsSection: View {
     @State private var isBackgroundLocationListeningEnabled: Bool
     @State private var isShowingNotificationPermissionAlert = false
     @State private var isShowingLocationPermissionAlert = false
+    @State private var diagnosticsCopied = false
+    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
 
     init(captureManager: MovesLocationCaptureManager) {
         self.captureManager = captureManager
@@ -1646,6 +1674,19 @@ private struct RouteTrackingSettingsSection: View {
                 Text("Background tracking uses iOS visit monitoring and significant location changes to record places and movement with low energy use. When this is off, Moves stops background listening until you turn it on again or start temporary route tracking.")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
+
+                Picker("Route display", selection: $routeDisplayMode) {
+                    ForEach(TrackingRouteDisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text(routeDisplayMode == .rawOSLocationFixes
+                     ? "Shows only individual locations reported by iOS. Gaps are intentional: Moves did not receive enough fixes to know the path. Background tracking can look sparse."
+                     : "Shows the normal reconstructed routes from your location evidence. This is the default display mode.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .panelSurface()
@@ -1658,6 +1699,39 @@ private struct RouteTrackingSettingsSection: View {
                 Text("Use frequent GPS updates for the actual route when you need more detail. Battery use increases while this is on.")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
+
+                if captureManager.authorizationStatus == .authorizedAlways ||
+                    captureManager.authorizationStatus == .authorizedWhenInUse {
+                    if !captureManager.isPreciseLocationAuthorized {
+                        Label("Precise Location is off. iOS may reduce route detail.", systemImage: "location.slash")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                DisclosureGroup("Tracking diagnostics") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(captureManager.trackingDiagnostics)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+#if canImport(UIKit)
+                            UIPasteboard.general.string = captureManager.trackingDiagnostics
+#elseif canImport(AppKit)
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(captureManager.trackingDiagnostics, forType: .string)
+#endif
+                            diagnosticsCopied = true
+                        } label: {
+                            Label(diagnosticsCopied ? "Copied" : "Copy Diagnostics", systemImage: diagnosticsCopied ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.system(size: 13, weight: .medium, design: .rounded))
 
                 if routeTrackingAuthorizationStatus == .authorizedAlways ||
                     routeTrackingAuthorizationStatus == .authorizedWhenInUse {

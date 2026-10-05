@@ -18,6 +18,8 @@ struct PlaceMapDetailView: View {
     @EnvironmentObject private var undoController: AppUndoController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query private var allVisitPlaces: [VisitPlace]
+    @Query(sort: \KnownLocation.name, order: .forward) private var knownLocations: [KnownLocation]
     @Bindable var place: VisitPlace
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
 
@@ -161,6 +163,9 @@ struct PlaceMapDetailView: View {
                     .buttonStyle(.borderedProminent)
                 }
 
+                Text("Saving a name also creates or updates a Regular Place for future visits.")
+                    .font(.caption).foregroundStyle(.secondary)
+
                 HStack(spacing: 8) {
                     QuickLabelButton(label: "Home") {
                         draftLabel = "Home"
@@ -206,6 +211,46 @@ struct PlaceMapDetailView: View {
         } else {
             place.userLabel = trimmed
             place.autoLabel = nil
+            let existingLocation = knownLocations.first { $0.id == place.regularPlaceID }
+            let matchingLocation = knownLocations.first {
+                $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
+            }
+            let location: KnownLocation
+            if let existingLocation, existingLocation.name.localizedCaseInsensitiveCompare(trimmed) != .orderedSame {
+                existingLocation.name = trimmed
+                existingLocation.updatedAt = .now
+                location = existingLocation
+                KnownLocationLabeler.reconcile(
+                    location: location,
+                    replacedID: location.id,
+                    definitions: knownLocations,
+                    to: allVisitPlaces
+                )
+            } else if let matchingLocation {
+                location = matchingLocation
+            } else {
+                location = KnownLocation(
+                    name: trimmed,
+                    latitude: place.latitude,
+                    longitude: place.longitude,
+                    radiusMeters: min(max(place.horizontalAccuracy.isFinite ? place.horizontalAccuracy * 2 : 120, 120), 500)
+                )
+                modelContext.insert(location)
+            }
+            place.regularPlaceID = location.id
+            place.regularPlaceName = location.name
+            if matchingLocation == nil || existingLocation != nil {
+                KnownLocationLabeler.reconcile(
+                    location: location,
+                    replacedID: nil,
+                    definitions: knownLocations,
+                    to: allVisitPlaces
+                )
+                // The visit being edited has a manual label and is intentionally not
+                // touched by automatic reconciliation, so link it explicitly.
+                place.regularPlaceID = location.id
+                place.regularPlaceName = location.name
+            }
         }
 
         do {
@@ -297,6 +342,7 @@ struct MoveMapDetailView: View {
     @Environment(\.openURL) private var openURL
     @Bindable var segment: MoveSegment
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
+    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
 
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
@@ -536,7 +582,8 @@ struct MoveMapDetailView: View {
         .sheet(isPresented: $isShowingFlightMerge) {
             FlightMergeView(anchor: segment)
         }
-        .task(id: routeRefreshKey) {
+        .task(id: "\(routeRefreshKey)|\(routeDisplayMode.rawValue)") {
+            guard RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode) else { return }
             await refreshRouteCoordinates()
         }
     }
@@ -557,6 +604,23 @@ struct MoveMapDetailView: View {
                             }
                         }
 
+                        if routeDisplayMode == .rawOSLocationFixes {
+                            ForEach(osLocationFixes, id: \.dedupeKey) { sample in
+                                Annotation(
+                                    "\(sample.source.displayName), \(sample.timestamp.formatted(date: .abbreviated, time: .standard)), ±\(Int(max(sample.horizontalAccuracy, 0).rounded())) m",
+                                    coordinate: sample.coordinate,
+                                    anchor: .center
+                                ) {
+                                    Circle()
+                                        .fill(sample.source == .routeTracking || sample.source == .watchRouteTracking
+                                              ? MovesPalette.routeTracking
+                                              : MovesPalette.start)
+                                        .frame(width: 9, height: 9)
+                                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                        .accessibilityLabel("Location fix: \(sample.source.displayName), \(sample.timestamp.formatted(date: .abbreviated, time: .standard)), accuracy \(Int(max(sample.horizontalAccuracy, 0).rounded())) meters")
+                                }
+                            }
+                        } else {
                         if activeRenderedRoute.shadowCoordinates.count > 1 {
                             MapPolyline(coordinates: activeRenderedRoute.shadowCoordinates)
                                 .stroke(activeRenderedRoute.shadowTint, lineWidth: activeRenderedRoute.shadowLineWidth)
@@ -587,11 +651,21 @@ struct MoveMapDetailView: View {
                         }
 
                         if isEditingManualRoute {
+                            ForEach(observedRouteAnchors, id: \.dedupeKey) { sample in
+                                Annotation("Recorded GPS anchor", coordinate: sample.coordinate, anchor: .center) {
+                                    Circle()
+                                        .fill(MovesPalette.routeTracking)
+                                        .frame(width: 9, height: 9)
+                                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                        .accessibilityLabel("Recorded GPS anchor")
+                                }
+                            }
                             ForEach(Array(manualRouteWaypointCoordinates.enumerated()), id: \.offset) { index, coordinate in
                                 Annotation("Waypoint", coordinate: coordinate, anchor: .center) {
                                     ManualRouteWaypointMarker(isActive: index == activeManualRouteWaypointIndex)
                                 }
                             }
+                        }
                         }
 
                         if let proposedSplit {
@@ -655,9 +729,16 @@ struct MoveMapDetailView: View {
                         .disabled(isSavingManualRoute)
                     }
                 } else if isEditingManualRoute {
-                    Label("Drag the route line to adjust it", systemImage: "hand.draw")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(activeRenderedRoute.tint)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Drag the route line to adjust it", systemImage: "hand.draw")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(activeRenderedRoute.tint)
+                        if !observedRouteAnchors.isEmpty {
+                            Label("Blue dots are recorded GPS points; they cannot be moved.", systemImage: "circle.fill")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(MovesPalette.routeTracking)
+                        }
+                    }
                 }
                 if isSelectingSplitPoint {
                     Label("Tap the track where the second activity should begin", systemImage: "scissors")
@@ -702,6 +783,19 @@ struct MoveMapDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .panelSurface()
+    }
+
+    private var observedRouteAnchors: [LocationSample] {
+        segment.samples
+            .filter { $0.source.isRouteTrack }
+            .sorted { lhs, rhs in
+                if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+                return lhs.dedupeKey < rhs.dedupeKey
+            }
+    }
+
+    private var osLocationFixes: [LocationSample] {
+        RawLocationFixPresentation.orderedOSFixes(from: segment.samples)
     }
 
     @ViewBuilder
@@ -1053,6 +1147,7 @@ struct MoveMapDetailView: View {
 
     @MainActor
     private func refreshRouteCoordinates() async {
+        guard RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode) else { return }
         routeCoordinates = await RoadRouteMatcher.matchedCoordinates(for: segment)
         refreshMoveGPXShareFile()
         if isEditingManualRoute, manualRouteDrag == nil {

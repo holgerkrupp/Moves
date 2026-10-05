@@ -1836,6 +1836,100 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(mode, .automotive)
     }
 
+    func testMotionActivityEvidenceIsWeightedByCoveredDurationAndConfidence() {
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let scores = CoreMotionTransportClassifier.durationWeightedActivityScores(
+            [
+                (start: start, confidence: 3, mode: .walking),
+                (start: start.addingTimeInterval(54 * 60), confidence: 3, mode: .automotive)
+            ],
+            from: start,
+            to: start.addingTimeInterval(60 * 60)
+        )
+
+        XCTAssertEqual(scores[.walking], 54 * 60 * 3)
+        XCTAssertEqual(scores[.automotive], 6 * 60 * 3)
+        XCTAssertEqual(scores.max(by: { $0.value < $1.value })?.key, .walking)
+    }
+
+    func testFortWayneFoxIslandSparseAndDenseEvidenceRemainDistinct() {
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let sparse = [
+            LocationSample(location: makeLocation(latitude: 41.0793, longitude: -85.1394, speed: -1, timestamp: start), source: .significantChange, dedupeKey: "sparse-a"),
+            LocationSample(location: makeLocation(latitude: 41.0800, longitude: -85.1370, speed: -1, timestamp: start.addingTimeInterval(3_600)), source: .significantChange, dedupeKey: "sparse-b")
+        ]
+        let dense = (0..<24).map { index in
+            LocationSample(
+                location: makeLocation(
+                    latitude: 41.0793 + Double(index) * 0.0001,
+                    longitude: -85.1394 + sin(Double(index) / 3) * 0.001,
+                    speed: 1.3,
+                    timestamp: start.addingTimeInterval(Double(index) * 60)
+                ),
+                source: .routeTracking,
+                dedupeKey: "dense-\(index)"
+            )
+        }
+        let move = MoveSegment(
+            dedupeKey: "fox-island-synthetic",
+            startDate: start,
+            endDate: start.addingTimeInterval(23 * 60),
+            transportMode: .walking,
+            distanceMeters: 1_500,
+            stepCount: nil
+        )
+        move.startPlace = VisitPlace(
+            arrivalDate: start,
+            departureDate: start,
+            latitude: 41.0793,
+            longitude: -85.1394,
+            horizontalAccuracy: 5
+        )
+        move.endPlace = VisitPlace(
+            arrivalDate: start.addingTimeInterval(23 * 60),
+            departureDate: nil,
+            latitude: 41.0816,
+            longitude: -85.1394 + sin(23.0 / 3) * 0.001,
+            horizontalAccuracy: 5
+        )
+
+        let sparseGeometry = MoveRouteGeometry.rawCoordinates(for: move, samples: sparse, usesHealthWorkoutRoute: false)
+        let denseGeometry = MoveRouteGeometry.rawCoordinates(for: move, samples: dense, usesHealthWorkoutRoute: false)
+
+        XCTAssertGreaterThanOrEqual(sparseGeometry.count, 2, "Sparse endpoint anchors remain available for plausible reconstruction.")
+        XCTAssertGreaterThan(denseGeometry.count, sparseGeometry.count)
+        XCTAssertEqual(denseGeometry.count, dense.count, "Recorded routeTracking geometry must remain the displayed source; coincident visit anchors are deduplicated.")
+        XCTAssertTrue(dense.allSatisfy { $0.source == .routeTracking }, "Observed OS anchors retain their source provenance.")
+    }
+
+    func testRawLocationFixModeKeepsEveryOSFixAndDisablesRoutePresentationAndMatching() {
+        let time = Date(timeIntervalSince1970: 1_710_000_000)
+        let samples = [
+            LocationSample(location: makeLocation(latitude: 41.1, longitude: -85.1, speed: 1, timestamp: time.addingTimeInterval(20)), source: .routeTracking, dedupeKey: "later"),
+            LocationSample(location: makeLocation(latitude: 41.0, longitude: -85.0, speed: -1, timestamp: time), source: .significantChange, dedupeKey: "earlier"),
+            LocationSample(location: makeLocation(latitude: 41.2, longitude: -85.2, speed: 1, timestamp: time.addingTimeInterval(10)), source: .fileRouteImport, dedupeKey: "imported")
+        ]
+
+        let fixes = RawLocationFixPresentation.orderedOSFixes(from: samples)
+
+        XCTAssertEqual(fixes.map(\.dedupeKey), ["earlier", "later"])
+        XCTAssertEqual(fixes.map(\.coordinate.latitude), [41.0, 41.1])
+        XCTAssertFalse(RawLocationFixPresentation.drawsConnectingGeometry(in: .rawOSLocationFixes))
+        XCTAssertFalse(RawLocationFixPresentation.schedulesRouteMatching(in: .rawOSLocationFixes))
+        XCTAssertTrue(RawLocationFixPresentation.drawsConnectingGeometry(in: .reconstructed))
+        XCTAssertTrue(RawLocationFixPresentation.schedulesRouteMatching(in: .reconstructed))
+    }
+
+    func testRawLocationFixDisplayModeUsesPersistableDefaultOffValue() {
+        let suiteName = "RawLocationFixDisplayModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(TrackingRouteDisplayMode(rawValue: defaults.string(forKey: TrackingRouteDisplayMode.storageKey) ?? "reconstructed"), .reconstructed)
+        defaults.set(TrackingRouteDisplayMode.rawOSLocationFixes.rawValue, forKey: TrackingRouteDisplayMode.storageKey)
+        XCTAssertEqual(TrackingRouteDisplayMode(rawValue: defaults.string(forKey: TrackingRouteDisplayMode.storageKey) ?? ""), .rawOSLocationFixes)
+    }
+
     func testClassifierPrefersSustainedWalkingTraceOverStaleAutomotiveSpeed() async {
         let classifier = CoreMotionTransportClassifier()
 

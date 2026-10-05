@@ -774,6 +774,41 @@ enum MoveRouteGeometry {
     }
 }
 
+enum TrackingRouteDisplayMode: String, CaseIterable, Identifiable {
+    case reconstructed
+    case rawOSLocationFixes
+
+    static let storageKey = "trackingRouteDisplayMode"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .reconstructed: "Normal / Reconstructed Routes"
+        case .rawOSLocationFixes: "Raw OS Location Fixes"
+        }
+    }
+}
+
+enum RawLocationFixPresentation {
+    static func orderedOSFixes(from samples: [LocationSample]) -> [LocationSample] {
+        samples
+            .filter { $0.source.isOSLocationFix && CLLocationCoordinate2DIsValid($0.coordinate) }
+            .sorted {
+                if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+                return $0.dedupeKey < $1.dedupeKey
+            }
+    }
+
+    static func drawsConnectingGeometry(in mode: TrackingRouteDisplayMode) -> Bool {
+        mode == .reconstructed
+    }
+
+    static func schedulesRouteMatching(in mode: TrackingRouteDisplayMode) -> Bool {
+        mode == .reconstructed
+    }
+}
+
 enum RoadRouteMatchingPolicy {
     static func shouldMatch(_ transportMode: TransportMode) -> Bool {
         switch transportMode {

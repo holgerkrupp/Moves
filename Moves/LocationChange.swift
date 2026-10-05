@@ -415,18 +415,13 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         if CMMotionActivityManager.isActivityAvailable(),
            let activities = await queryActivities(from: start, to: end),
            !activities.isEmpty {
-            var scores: [TransportMode: Int] = [:]
+            let intervals = Self.durationWeightedActivityScores(
+                activities.map { (start: $0.startDate, confidence: confidenceWeight(for: $0.confidence), mode: Self.mode(for: $0)) },
+                from: start,
+                to: end
+            )
 
-            for activity in activities {
-                let weight = confidenceWeight(for: activity.confidence)
-                if activity.automotive { scores[.automotive, default: 0] += weight }
-                if activity.cycling { scores[.cycling, default: 0] += weight }
-                if activity.running { scores[.running, default: 0] += weight }
-                if activity.walking { scores[.walking, default: 0] += weight }
-                if activity.stationary { scores[.stationary, default: 0] += weight }
-            }
-
-            if let best = scores.max(by: { $0.value < $1.value })?.key {
+            if let best = intervals.max(by: { $0.value < $1.value })?.key {
                 let corrected = correctedModeIfNeeded(best, fallback: fallback, locations: locations)
                 candidate = refinedLongDistanceCandidate(for: corrected, fallback: fallback, locations: locations)
                 return makeEvidence(
@@ -487,6 +482,38 @@ final class CoreMotionTransportClassifier: MotionClassifier {
         case .low: return 1
         @unknown default: return 1
         }
+    }
+
+    /// CMMotionActivity entries are state transitions. Count the covered time
+    /// (weighted by confidence), rather than treating each callback as one vote.
+    /// Kept pure so sparse and mixed timelines can be regression tested.
+    static func durationWeightedActivityScores(
+        _ activities: [(start: Date, confidence: Int, mode: TransportMode)],
+        from start: Date,
+        to end: Date
+    ) -> [TransportMode: TimeInterval] {
+        guard end > start else { return [:] }
+        let ordered = activities.sorted { $0.start < $1.start }
+        var scores: [TransportMode: TimeInterval] = [:]
+        for index in ordered.indices {
+            let intervalStart = max(start, ordered[index].start)
+            let intervalEnd = index + 1 < ordered.count
+                ? min(end, ordered[index + 1].start)
+                : end
+            let duration = intervalEnd.timeIntervalSince(intervalStart)
+            guard duration > 0 else { continue }
+            scores[ordered[index].mode, default: 0] += duration * Double(max(ordered[index].confidence, 1))
+        }
+        return scores
+    }
+
+    private static func mode(for activity: CMMotionActivity) -> TransportMode {
+        if activity.automotive { return .automotive }
+        if activity.cycling { return .cycling }
+        if activity.running { return .running }
+        if activity.walking { return .walking }
+        if activity.stationary { return .stationary }
+        return .unknown
     }
 
     private func inferFromSpeed(_ locations: [CLLocation]) -> TransportMode {
@@ -1086,6 +1113,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     @Published private(set) var temporaryRouteTrackingStopsAtFiftyPercentBattery = false
     @Published private(set) var temporaryRouteTrackingStopsInLowPowerMode = false
     @Published private(set) var temporaryRouteTrackingStopNotificationEnabled = false
+    @Published private(set) var lastLocationHorizontalAccuracy: CLLocationAccuracy?
+    @Published private(set) var lastLocationBatchSize = 0
+    @Published private(set) var recentRouteTrackingLocationCount = 0
+    @Published private(set) var lastRouteTrackingStopReason = "Not recorded"
+    @Published private(set) var lastCoreLocationErrorCode: String?
 
     private let manager = CLLocationManager()
     private let userDefaults: UserDefaults
@@ -1103,6 +1135,74 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private var isHighAccuracyMonitoring = false
     private var temporaryRouteTrackingExpiryTask: Task<Void, Never>?
     private var temporaryRouteTrackingEnergyStateObserverTokens: [NSObjectProtocol] = []
+    private var routeTrackingCallbackDates: [Date] = []
+    private var locationCallbackCounts: [String: Int] = [:]
+
+    private var batteryDiagnosticText: String {
+        #if canImport(UIKit)
+        let level = UIDevice.current.batteryLevel
+        return level >= 0 ? "\(Int((level * 100).rounded()))%" : "unavailable"
+        #else
+        return "unavailable"
+        #endif
+    }
+
+    private var batteryThresholdIsMet: Bool {
+        #if canImport(UIKit)
+        let level = UIDevice.current.batteryLevel
+        return level >= 0 && level <= 0.5
+        #else
+        return false
+        #endif
+    }
+
+    var trackingDiagnostics: String {
+        let now = Date.now
+        let intervals = zip(routeTrackingCallbackDates, routeTrackingCallbackDates.dropFirst())
+            .map { $1.timeIntervalSince($0) }
+            .sorted()
+        let medianInterval = intervals.isEmpty ? nil : intervals[intervals.count / 2]
+        let accuracyText: String
+        switch manager.accuracyAuthorization {
+        case .fullAccuracy: accuracyText = "Precise"
+        case .reducedAccuracy: accuracyText = "Reduced"
+        @unknown default: accuracyText = "Unknown"
+        }
+        let authorizationText: String
+        switch authorizationStatus {
+        case .authorizedAlways: authorizationText = "Always"
+        case .authorizedWhenInUse: authorizationText = "When In Use"
+        case .denied: authorizationText = "Denied"
+        case .restricted: authorizationText = "Restricted"
+        case .notDetermined: authorizationText = "Not determined"
+        @unknown default: authorizationText = "Unknown"
+        }
+        let sourceCounts = LocationSampleSource.allCases
+            .map { "\($0.rawValue): \(locationCallbackCounts[$0.rawValue, default: 0])" }
+            .joined(separator: ", ")
+        let configuration = isTemporaryRouteTrackingActive
+            ? "Real Route Tracking: best-for-navigation, 10 m filter, continuous updates"
+            : "Background Tracking: low-power significant-change and visit monitoring"
+        return [
+            "Moves tracking diagnostics",
+            "Authorization: \(authorizationText); accuracy: \(accuracyText)",
+            "Background Tracking enabled: \(isBackgroundLocationListeningEnabled)",
+            "Real Route Tracking active: \(isTemporaryRouteTrackingActive)",
+            "Planned end: \(temporaryRouteTrackingEndsAt?.ISO8601Format() ?? "none")",
+            "Configuration: \(configuration)",
+            "Background location updates allowed: \(manager.allowsBackgroundLocationUpdates)",
+            "Last callback age: \(lastCaptureAt.map { max(now.timeIntervalSince($0), 0).formatted(.number.precision(.fractionLength(0))) + " s" } ?? "none")",
+            "Last callback batch size: \(lastLocationBatchSize)",
+            "Last horizontal accuracy: \(lastLocationHorizontalAccuracy.map { "\(Int($0.rounded())) m" } ?? "none")",
+            "Recent route-tracking locations: \(recentRouteTrackingLocationCount)",
+            "Median route-tracking callback interval: \(medianInterval.map { "\(Int($0.rounded())) s" } ?? "not available")",
+            "Callback counts by source: \(sourceCounts)",
+            "Last automatic stop reason: \(lastRouteTrackingStopReason)",
+            "Low Power Mode: \(ProcessInfo.processInfo.isLowPowerModeEnabled); battery: \(batteryDiagnosticText)",
+            "Last Core Location error: \(lastCoreLocationErrorCode ?? "none")",
+            "No coordinates, route geometry, place names or historical location data are included."
+        ].joined(separator: "\n")
+    }
 
     var isLocationTrackingAvailable: Bool {
         #if targetEnvironment(macCatalyst)
@@ -1110,6 +1210,10 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         #else
         true
         #endif
+    }
+
+    var isPreciseLocationAuthorized: Bool {
+        manager.accuracyAuthorization == .fullAccuracy
     }
 
     /// Kept internal so the integration test can guard the app's primary low-energy capture
@@ -1368,6 +1472,9 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
 
         pendingTemporaryRouteTrackingDuration = nil
 
+        lastRouteTrackingStopReason = "Not recorded"
+        recentRouteTrackingLocationCount = 0
+        routeTrackingCallbackDates.removeAll(keepingCapacity: true)
         temporaryRouteTrackingDuration = duration
         temporaryRouteTrackingStartedAt = .now
         temporaryRouteTrackingEndsAt = duration.endDate(from: .now)
@@ -1441,6 +1548,8 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     func disableTemporaryRouteTracking() {
         guard !shouldSkipLiveTracking else { return }
         guard temporaryRouteTrackingEndsAt != nil else { return }
+
+        lastRouteTrackingStopReason = "Stopped by user"
 
         cancelTemporaryRouteTrackingExpiryTask()
         temporaryRouteTrackingStartedAt = nil
@@ -1749,6 +1858,13 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     }
 
     private func expireTemporaryRouteTracking(notifyImmediately: Bool) {
+        if ProcessInfo.processInfo.isLowPowerModeEnabled && temporaryRouteTrackingStopsInLowPowerMode {
+            lastRouteTrackingStopReason = "Low Power Mode rule"
+        } else if temporaryRouteTrackingStopsAtFiftyPercentBattery && batteryThresholdIsMet {
+            lastRouteTrackingStopReason = "Battery threshold rule"
+        } else {
+            lastRouteTrackingStopReason = "Scheduled end time"
+        }
         cancelTemporaryRouteTrackingExpiryTask()
         temporaryRouteTrackingStartedAt = nil
         temporaryRouteTrackingEndsAt = nil
@@ -1955,6 +2071,16 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
         lastCaptureAt = .now
         let source: LocationSampleSource = pendingOneShotLocationSource ?? (isTemporaryRouteTrackingActive ? .routeTracking : .significantChange)
         pendingOneShotLocationSource = nil
+        lastLocationBatchSize = locations.count
+        lastLocationHorizontalAccuracy = locations.last?.horizontalAccuracy
+        locationCallbackCounts[source.rawValue, default: 0] += locations.count
+        if source == .routeTracking {
+            recentRouteTrackingLocationCount += locations.count
+            routeTrackingCallbackDates.append(.now)
+            if routeTrackingCallbackDates.count > 64 {
+                routeTrackingCallbackDates.removeFirst(routeTrackingCallbackDates.count - 64)
+            }
+        }
 
         Task {
             if source == .routeTracking {
@@ -1975,6 +2101,7 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
             return
         }
 
-        lastErrorMessage = error.localizedDescription
+        lastCoreLocationErrorCode = "\(nsError.domain):\(nsError.code)"
+        lastErrorMessage = MovesStoreRecovery.privacySafeMessage(error.localizedDescription)
     }
 }

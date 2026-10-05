@@ -201,6 +201,30 @@ enum VisitPlaceProvenance: String, Codable, CaseIterable, Sendable {
 }
 
 extension LocationSampleSource {
+    var displayName: String {
+        switch self {
+        case .visit: "Visit fix"
+        case .significantChange: "Background location fix"
+        case .routeTracking: "Real Route Tracking fix"
+        case .watchRouteTracking: "Watch Route Tracking fix"
+        case .fileRouteImport: "Imported route point"
+        case .watchSignificantChange: "Watch background fix"
+        case .healthWorkoutRoute: "Health workout point"
+        case .launchBackfill: "Launch backfill fix"
+        case .authorizationGrant: "Authorization backfill fix"
+        }
+    }
+
+    var isOSLocationFix: Bool {
+        switch self {
+        case .visit, .significantChange, .routeTracking, .watchRouteTracking,
+             .watchSignificantChange, .launchBackfill, .authorizationGrant:
+            return true
+        case .fileRouteImport, .healthWorkoutRoute:
+            return false
+        }
+    }
+
     var priority: Int {
         switch self {
         case .fileRouteImport: return 7
@@ -801,6 +825,8 @@ private struct DeletedTimelinePlace: TimelineDeletionUndoPayload {
     let longitude: Double
     let horizontalAccuracy: Double
     let userLabel: String?
+    let regularPlaceID: UUID?
+    let regularPlaceName: String?
     let autoLabel: String?
     let comment: String?
     let createdAt: Date
@@ -817,6 +843,8 @@ private struct DeletedTimelinePlace: TimelineDeletionUndoPayload {
         longitude = place.longitude
         horizontalAccuracy = place.horizontalAccuracy
         userLabel = place.userLabel
+        regularPlaceID = place.regularPlaceID
+        regularPlaceName = place.regularPlaceName
         autoLabel = place.autoLabel
         comment = place.comment
         createdAt = place.createdAt
@@ -828,6 +856,8 @@ private struct DeletedTimelinePlace: TimelineDeletionUndoPayload {
     @MainActor func restore(in context: ModelContext) {
         guard (try? context.fetch(FetchDescriptor<VisitPlace>()).contains(where: { $0.id == id })) != true else { return }
         let place = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment)
+        place.regularPlaceID = regularPlaceID
+        place.regularPlaceName = regularPlaceName
         place.id = id
         place.deviceIdentifier = deviceIdentifier
         place.createdAt = createdAt
@@ -1033,9 +1063,9 @@ private struct DeletedTimelineDay: TimelineDeletionUndoPayload {
 }
 
 private struct DeletedTimelineDayPlace {
-    let id: UUID, deviceIdentifier: String, arrivalDate: Date, departureDate: Date?, latitude: Double, longitude: Double, horizontalAccuracy: Double, userLabel: String?, autoLabel: String?, comment: String?, photoAssetIDsRawValue: String?, createdAt: Date
-    init(_ place: VisitPlace) { id = place.id; deviceIdentifier = place.deviceIdentifier; arrivalDate = place.arrivalDate; departureDate = place.departureDate; latitude = place.latitude; longitude = place.longitude; horizontalAccuracy = place.horizontalAccuracy; userLabel = place.userLabel; autoLabel = place.autoLabel; comment = place.comment; photoAssetIDsRawValue = place.photoAssetIDsRawValue; createdAt = place.createdAt }
-    func makeModel(day: DayTimeline) -> VisitPlace { let p = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment); p.id = id; p.deviceIdentifier = deviceIdentifier; p.photoAssetIDsRawValue = photoAssetIDsRawValue; p.createdAt = createdAt; p.dayTimeline = day; return p }
+    let id: UUID, deviceIdentifier: String, arrivalDate: Date, departureDate: Date?, latitude: Double, longitude: Double, horizontalAccuracy: Double, userLabel: String?, regularPlaceID: UUID?, regularPlaceName: String?, autoLabel: String?, comment: String?, photoAssetIDsRawValue: String?, createdAt: Date
+    init(_ place: VisitPlace) { id = place.id; deviceIdentifier = place.deviceIdentifier; arrivalDate = place.arrivalDate; departureDate = place.departureDate; latitude = place.latitude; longitude = place.longitude; horizontalAccuracy = place.horizontalAccuracy; userLabel = place.userLabel; regularPlaceID = place.regularPlaceID; regularPlaceName = place.regularPlaceName; autoLabel = place.autoLabel; comment = place.comment; photoAssetIDsRawValue = place.photoAssetIDsRawValue; createdAt = place.createdAt }
+    func makeModel(day: DayTimeline) -> VisitPlace { let p = VisitPlace(arrivalDate: arrivalDate, departureDate: departureDate, latitude: latitude, longitude: longitude, horizontalAccuracy: horizontalAccuracy, userLabel: userLabel, autoLabel: autoLabel, comment: comment); p.regularPlaceID = regularPlaceID; p.regularPlaceName = regularPlaceName; p.id = id; p.deviceIdentifier = deviceIdentifier; p.photoAssetIDsRawValue = photoAssetIDsRawValue; p.createdAt = createdAt; p.dayTimeline = day; return p }
 }
 
 private struct DeletedTimelineDayMove {
@@ -1062,6 +1092,9 @@ final class VisitPlace {
     var longitude: Double = 0
     var horizontalAccuracy: Double = 0
     var userLabel: String? = nil
+    /// Regular Place classification is separate from a one-off user label.
+    var regularPlaceID: UUID? = nil
+    var regularPlaceName: String? = nil
     var autoLabel: String? = nil
     var comment: String? = nil
     /// The source that created this place. Nil keeps older records unchanged.
@@ -1143,6 +1176,9 @@ final class VisitPlace {
         if let userLabel, !userLabel.isEmpty {
             return userLabel
         }
+        if let regularPlaceName, !regularPlaceName.isEmpty {
+            return regularPlaceName
+        }
         if let autoLabel, !autoLabel.isEmpty {
             return autoLabel
         }
@@ -1158,7 +1194,7 @@ final class VisitPlace {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
 
-        return [userLabel, autoLabel, comment]
+        return [userLabel, regularPlaceName, autoLabel, comment]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .contains { $0.localizedCaseInsensitiveContains(query) }
     }
@@ -1210,6 +1246,30 @@ final class KnownLocation {
 
     func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
         distance(from: coordinate) <= max(radiusMeters, 0)
+    }
+}
+
+/// Shared domain matching for the iOS editor and both timeline repositories.
+/// Requiring the observation's uncertainty disk to fit inside a saved region
+/// avoids assigning a regular-place label to coarse location observations.
+enum RegularPlaceMatcher {
+    static func match(
+        coordinate: CLLocationCoordinate2D,
+        accuracy: CLLocationAccuracy,
+        among locations: [KnownLocation]
+    ) -> KnownLocation? {
+        guard accuracy.isFinite, accuracy >= 0 else { return nil }
+        return locations
+            .compactMap { location -> (KnownLocation, CLLocationDistance)? in
+                let distance = location.distance(from: coordinate)
+                guard distance + accuracy <= max(location.radiusMeters, 0) else { return nil }
+                return (location, distance)
+            }
+            .sorted {
+                if $0.1 != $1.1 { return $0.1 < $1.1 }
+                return $0.0.id.uuidString < $1.0.id.uuidString
+            }
+            .first?.0
     }
 }
 
@@ -1970,6 +2030,11 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 existing.departureDate = departure
             }
             existing.horizontalAccuracy = min(existing.horizontalAccuracy, visit.horizontalAccuracy)
+            if existing.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+               let regularPlace = try matchedRegularPlace(near: visit.coordinate, accuracy: existing.horizontalAccuracy) {
+                existing.regularPlaceID = regularPlace.id
+                existing.regularPlaceName = regularPlace.name
+            }
             existing.dayTimeline = try timeline(for: arrival)
             let canonical = try collapseDuplicatePlaces(around: existing)
             try saveIfNeeded()
@@ -1977,7 +2042,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             return canonical
         }
 
-        let inferredUserLabel = try inferredUserLabel(near: visit.coordinate)
+        let regularPlace = try matchedRegularPlace(near: visit.coordinate, accuracy: visit.horizontalAccuracy)
 
         let place = VisitPlace(
             arrivalDate: arrival,
@@ -1985,8 +2050,10 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             latitude: visit.coordinate.latitude,
             longitude: visit.coordinate.longitude,
             horizontalAccuracy: visit.horizontalAccuracy,
-            userLabel: inferredUserLabel
+            userLabel: nil
         )
+        place.regularPlaceID = regularPlace?.id
+        place.regularPlaceName = regularPlace?.name
         place.deviceIdentifier = deviceIdentifier
         place.dayTimeline = try timeline(for: arrival)
         modelContext.insert(place)
@@ -2347,6 +2414,11 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     ) throws -> VisitPlace {
         if let existing = try existingVisit(near: arrivalDate, coordinate: location.coordinate) {
             existing.horizontalAccuracy = min(existing.horizontalAccuracy, max(location.horizontalAccuracy, 20))
+            if existing.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+               let regularPlace = try matchedRegularPlace(near: location.coordinate, accuracy: existing.horizontalAccuracy) {
+                existing.regularPlaceID = regularPlace.id
+                existing.regularPlaceName = regularPlace.name
+            }
             if existing.departureDate == nil {
                 existing.departureDate = departureDate
             }
@@ -2362,8 +2434,15 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             latitude: location.coordinate.latitude,
             longitude: location.coordinate.longitude,
             horizontalAccuracy: max(location.horizontalAccuracy, 20),
-            userLabel: resolvePlaceName ? try inferredUserLabel(near: location.coordinate) : nil
+            userLabel: nil
         )
+        if resolvePlaceName, let regularPlace = try matchedRegularPlace(
+            near: location.coordinate,
+            accuracy: max(location.horizontalAccuracy, 20)
+        ) {
+            place.regularPlaceID = regularPlace.id
+            place.regularPlaceName = regularPlace.name
+        }
         place.deviceIdentifier = deviceIdentifier
         place.dayTimeline = try timeline(for: arrivalDate)
         modelContext.insert(place)
@@ -3101,42 +3180,16 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         }
     }
 
-    private func inferredUserLabel(near coordinate: CLLocationCoordinate2D) throws -> String? {
-        if let knownLocations = try? modelContext.fetch(FetchDescriptor<KnownLocation>()),
-           let match = knownLocations
-            .map({ ($0, $0.distance(from: coordinate)) })
-            .filter({ $0.1 <= max($0.0.radiusMeters, 0) })
-            .min(by: { $0.1 < $1.1 }) {
-            let name = match.0.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty {
-                return name
-            }
-        }
-
-        let descriptor = FetchDescriptor<VisitPlace>(
-            predicate: #Predicate { place in
-                place.userLabel != nil
-            }
+    private func matchedRegularPlace(
+        near coordinate: CLLocationCoordinate2D,
+        accuracy: CLLocationAccuracy
+    ) throws -> KnownLocation? {
+        let knownLocations = try modelContext.fetch(FetchDescriptor<KnownLocation>())
+        return RegularPlaceMatcher.match(
+            coordinate: coordinate,
+            accuracy: accuracy,
+            among: knownLocations
         )
-
-        let labeledPlaces = try modelContext.fetch(descriptor)
-
-        let nearest = labeledPlaces
-            .compactMap { place -> (String, CLLocationDistance)? in
-                guard let label = place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else {
-                    return nil
-                }
-
-                let distance = Self.distanceMeters(
-                    from: coordinate,
-                    to: CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
-                )
-                return (label, distance)
-            }
-            .filter { $0.1 <= 120 }
-            .min(by: { $0.1 < $1.1 })
-
-        return nearest?.0
     }
 
     private static func distanceMeters(from lhs: CLLocationCoordinate2D, to rhs: CLLocationCoordinate2D) -> CLLocationDistance {

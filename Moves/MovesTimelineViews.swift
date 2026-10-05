@@ -330,6 +330,7 @@ struct DayTimelinePageContent: View {
             }
             #endif
         }
+        .id(dayTimeline.dayKey)
         .ignoresSafeArea(.container, edges: .bottom)
         .task(id: provisionalSampleLookupKey) {
             await resolveProvisionalSampleTitle()
@@ -1481,16 +1482,20 @@ private enum DayPresentationSourceCache {
     private static var keysInUseOrder: [String] = []
     /// This cache only coordinates the timeline and map tasks for the active day. The compact
     /// presentation caches below retain the reusable result without pinning every sample model.
-    private static let maximumEntryCount = 1
+    private static let maximumEntryCount = 2
 
-    static func source(for dayTimeline: DayTimeline, generation: Int) -> DayPresentationSource {
-        let key = "\(dayTimeline.dayKey)|\(generation)"
+    static func source(
+        for dayTimeline: DayTimeline,
+        generation: Int,
+        loadAll: Bool = false
+    ) -> DayPresentationSource {
+        let key = "\(dayTimeline.dayKey)|\(generation)|\(loadAll ? "all" : "bounded")"
         if let entry = entries[key] {
             markRecentlyUsed(key)
             return entry
         }
 
-        let source = DayPresentationSource(dayTimeline: dayTimeline)
+        let source = DayPresentationSource(dayTimeline: dayTimeline, loadAll: loadAll)
         entries[key] = source
         markRecentlyUsed(key)
         while keysInUseOrder.count > maximumEntryCount {
@@ -1765,10 +1770,36 @@ struct DayTransportSummaryView: View {
 private struct DayMapPresentationCache {
     let placeMarkers: [PlaceMarker]
     let routes: [RenderedRoute]
+    let rawLocationFixes: [RawLocationFixMarker]
     let latestSampleCoordinate: CLLocationCoordinate2D?
     let routeRefreshKey: String
     let placeRefreshKey: String
     let latestSampleKey: String
+}
+
+private struct RawLocationFixMarker: Identifiable {
+    let id: String
+    let moveID: UUID?
+    let coordinate: CLLocationCoordinate2D
+    let timestamp: Date
+    let horizontalAccuracy: CLLocationAccuracy
+    let source: LocationSampleSource
+
+    init(_ sample: LocationSample) {
+        id = sample.dedupeKey
+        moveID = sample.moveSegment?.id
+        coordinate = sample.coordinate
+        timestamp = sample.timestamp
+        horizontalAccuracy = sample.horizontalAccuracy
+        source = sample.source
+    }
+
+    var description: String {
+        let accuracy = horizontalAccuracy.isFinite && horizontalAccuracy >= 0
+            ? "±\(Int(horizontalAccuracy.rounded())) m"
+            : "accuracy unavailable"
+        return "\(source.displayName), \(timestamp.formatted(date: .abbreviated, time: .standard)), \(accuracy)"
+    }
 }
 
 @MainActor
@@ -1777,15 +1808,17 @@ private enum DayMapPresentationCacheStore {
     private static var keysInUseOrder: [String] = []
     private static let maximumEntryCount = 12
 
-    static func value(for key: String) -> DayMapPresentationCache? {
-        guard let entry = entries[key] else { return nil }
-        markRecentlyUsed(key)
+    static func value(for key: String, rawMode: Bool = false) -> DayMapPresentationCache? {
+        let cacheKey = key + (rawMode ? "|raw" : "|reconstructed")
+        guard let entry = entries[cacheKey] else { return nil }
+        markRecentlyUsed(cacheKey)
         return entry
     }
 
-    static func store(_ entry: DayMapPresentationCache, for key: String) {
-        entries[key] = entry
-        markRecentlyUsed(key)
+    static func store(_ entry: DayMapPresentationCache, for key: String, rawMode: Bool = false) {
+        let cacheKey = key + (rawMode ? "|raw" : "|reconstructed")
+        entries[cacheKey] = entry
+        markRecentlyUsed(cacheKey)
         while keysInUseOrder.count > maximumEntryCount {
             let oldest = keysInUseOrder.removeFirst()
             entries.removeValue(forKey: oldest)
@@ -1945,6 +1978,7 @@ struct DayMapStrip: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
+    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
     let dayTimeline: DayTimeline
     let isActive: Bool
     @Binding var selection: TimelineMapSelection?
@@ -1978,12 +2012,15 @@ struct DayMapStrip: View {
     }
 
     private var historicalRouteCoordinates: [CLLocationCoordinate2D] {
-        historicalRoutes.flatMap { $0.coordinates }
+        guard RawLocationFixPresentation.drawsConnectingGeometry(in: routeDisplayMode) else {
+            return presentationCache.rawLocationFixes.map(\.coordinate)
+        }
+        return historicalRoutes.flatMap { $0.coordinates }
     }
 
     private var cameraRefreshKey: String {
         let liveKey = liveRouteSnapshot?.id ?? "none"
-        return [presentationCache.routeRefreshKey, presentationCache.placeRefreshKey, liveKey, presentationCache.latestSampleKey].joined(separator: "|")
+        return [presentationCache.routeRefreshKey, presentationCache.placeRefreshKey, liveKey, presentationCache.latestSampleKey, routeDisplayMode.rawValue].joined(separator: "|")
     }
 
     private var presentationRefreshKey: String {
@@ -2005,14 +2042,17 @@ struct DayMapStrip: View {
         self.usesHeroStyle = usesHeroStyle
         self.externalFullScreenMapState = fullScreenMapState
         let initialPresentation: DayMapPresentationCache
-        if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey) {
+        let rawMode = UserDefaults.standard.string(forKey: TrackingRouteDisplayMode.storageKey) == TrackingRouteDisplayMode.rawOSLocationFixes.rawValue
+        if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode) {
             initialPresentation = cached
         } else {
             // Do not fetch SwiftData while SwiftUI constructs the first page.
             // The selected-day task below fills the cache after the first frame.
             initialPresentation = Self.initialPresentationCache(coordinate: nil)
         }
-        let initialRegion = Self.region(for: initialPresentation)
+        let initialMode = UserDefaults.standard.string(forKey: TrackingRouteDisplayMode.storageKey)
+            .flatMap(TrackingRouteDisplayMode.init(rawValue:)) ?? .reconstructed
+        let initialRegion = Self.region(for: initialPresentation, mode: initialMode)
         _camera = State(initialValue: .region(initialRegion))
         _mapRegion = State(initialValue: initialRegion)
         _historicalRoutes = State(initialValue: initialPresentation.routes)
@@ -2061,10 +2101,17 @@ struct DayMapStrip: View {
                 refreshCamera(for: newSelection)
             }
             .onChange(of: dayTimeline.dayKey) { _, _ in
-                let cachedPresentation = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey)
+                let cachedPresentation = DayMapPresentationCacheStore.value(
+                    for: dayTimeline.dayKey,
+                    rawMode: routeDisplayMode == .rawOSLocationFixes
+                )
                     ?? Self.initialPresentationCache(coordinate: nil)
                 applyPresentation(cachedPresentation)
                 presentationGeneration = 0
+            }
+            .onChange(of: routeDisplayMode) { _, _ in
+                presentationGeneration &+= 1
+                DayPresentationSourceCache.removeAll()
             }
             .task {
                 for await _ in NotificationCenter.default.notifications(
@@ -2094,27 +2141,31 @@ struct DayMapStrip: View {
             }
             .task(id: "presentation|\(presentationRefreshKey)") {
                 guard !Task.isCancelled else { return }
-                if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey) {
+                let rawMode = routeDisplayMode == .rawOSLocationFixes
+                if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode) {
                     applyPresentation(cached)
                     return
                 }
                 let source = DayPresentationSourceCache.source(
                     for: dayTimeline,
-                    generation: presentationGeneration
+                    generation: presentationGeneration,
+                    loadAll: rawMode
                 )
                 let cache = Self.makePresentationCache(
                     for: dayTimeline,
                     source: source,
-                    generation: presentationGeneration
+                    generation: presentationGeneration,
+                    mode: routeDisplayMode
                 )
                 DayMapPresentationCacheStore.store(
                     cache,
-                    for: dayTimeline.dayKey
+                    for: dayTimeline.dayKey,
+                    rawMode: rawMode
                 )
                 applyPresentation(cache)
             }
-            .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)") {
-                guard isActive, !Task.isCancelled else { return }
+            .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)|\(routeDisplayMode.rawValue)") {
+                guard isActive, RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode), !Task.isCancelled else { return }
                 let source = DayPresentationSourceCache.source(
                     for: dayTimeline,
                     generation: presentationGeneration
@@ -2207,6 +2258,37 @@ struct DayMapStrip: View {
 
     @MapContentBuilder
     private var mapContent: some MapContent {
+        if routeDisplayMode == .rawOSLocationFixes {
+            ForEach(presentationCache.rawLocationFixes) { fix in
+                Annotation(fix.description, coordinate: fix.coordinate, anchor: .center) {
+                    Button {
+                        selection = .sample(fix.id)
+                    } label: {
+                        Circle()
+                            .fill(fix.source == .routeTracking || fix.source == .watchRouteTracking
+                                  ? MovesPalette.routeTracking
+                                  : MovesPalette.start)
+                            .frame(width: 9, height: 9)
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                            .shadow(color: .black.opacity(0.25), radius: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Location fix: \(fix.description)")
+                }
+            }
+
+            if let liveRouteSnapshot {
+                ForEach(Array(liveRouteSnapshot.coordinates.enumerated()), id: \.offset) { index, coordinate in
+                    Annotation("Live OS fix \(index + 1)", coordinate: coordinate, anchor: .center) {
+                        Circle()
+                            .fill(MovesPalette.routeTracking)
+                            .frame(width: 8, height: 8)
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                            .accessibilityLabel("Live Real Route Tracking location fix \(index + 1)")
+                    }
+                }
+            }
+        } else {
         ForEach(historicalRoutes) { route in
             let isSelected = isSelectedRoute(route)
             let dimsForOtherSelection = selection != nil && !isSelected
@@ -2242,7 +2324,8 @@ struct DayMapStrip: View {
                 .stroke(
                     MovesPalette.routeTracking.opacity(selection != nil && !isLiveRouteSelected ? 0.28 : 0.95),
                     lineWidth: isLiveRouteSelected ? 9 : 5
-                )
+            )
+        }
         }
 
         ForEach(placeMarkers) { marker in
@@ -2267,7 +2350,8 @@ struct DayMapStrip: View {
             }
         }
 
-        if placeMarkers.isEmpty,
+        if routeDisplayMode == .reconstructed,
+           placeMarkers.isEmpty,
            historicalRouteCoordinates.isEmpty,
            (liveRouteSnapshot?.coordinates.isEmpty ?? true),
            let latestSampleCoordinate {
@@ -2617,7 +2701,8 @@ struct DayMapStrip: View {
     private func applyPresentation(_ presentation: DayMapPresentationCache) {
         let region = Self.region(
             for: presentation,
-            liveCoordinates: liveRouteSnapshot?.coordinates ?? []
+            liveCoordinates: liveRouteSnapshot?.coordinates ?? [],
+            mode: routeDisplayMode
         )
 
         // Commit the camera before exposing the route refresh key. Otherwise the snapshot
@@ -2630,9 +2715,13 @@ struct DayMapStrip: View {
 
     private static func region(
         for presentation: DayMapPresentationCache,
-        liveCoordinates: [CLLocationCoordinate2D] = []
+        liveCoordinates: [CLLocationCoordinate2D] = [],
+        mode: TrackingRouteDisplayMode = .reconstructed
     ) -> MKCoordinateRegion {
-        let coordinates = presentation.routes.flatMap(\.coordinates)
+        let displayCoordinates = RawLocationFixPresentation.drawsConnectingGeometry(in: mode)
+            ? presentation.routes.flatMap(\.coordinates)
+            : presentation.rawLocationFixes.map(\.coordinate)
+        let coordinates = displayCoordinates
             + liveCoordinates
             + presentation.placeMarkers.map(\.coordinate)
         let cameraCoordinates = coordinates.isEmpty
@@ -2666,7 +2755,13 @@ struct DayMapStrip: View {
         case .place(let id):
             coordinates = placeMarkers.first(where: { $0.id == id }).map { [$0.coordinate] } ?? []
         case .move(let id):
-            coordinates = historicalRoutes.first(where: { $0.id == id.uuidString })?.coordinates ?? []
+            if routeDisplayMode == .rawOSLocationFixes {
+                coordinates = presentationCache.rawLocationFixes
+                    .filter { $0.moveID == id }
+                    .map(\.coordinate)
+            } else {
+                coordinates = historicalRoutes.first(where: { $0.id == id.uuidString })?.coordinates ?? []
+            }
         case .liveRoute:
             coordinates = liveRouteSnapshot?.coordinates ?? []
         case .sample:
@@ -2713,6 +2808,7 @@ struct DayMapStrip: View {
         DayMapPresentationCache(
             placeMarkers: [],
             routes: [],
+            rawLocationFixes: [],
             latestSampleCoordinate: coordinate,
             routeRefreshKey: "initial",
             placeRefreshKey: "initial",
@@ -2723,7 +2819,8 @@ struct DayMapStrip: View {
     private static func makePresentationCache(
         for dayTimeline: DayTimeline,
         source: DayPresentationSource,
-        generation: Int
+        generation: Int,
+        mode: TrackingRouteDisplayMode
     ) -> DayMapPresentationCache {
         let displayedMoves = displayedMoves(from: source)
         let sortedPlaces = mapPlaces(
@@ -2748,11 +2845,16 @@ struct DayMapStrip: View {
             "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
         } ?? "none"
 
-        let routes = renderedRoutes(source: source, displayedMoves: displayedMoves)
+        let routes = RawLocationFixPresentation.drawsConnectingGeometry(in: mode)
+            ? renderedRoutes(source: source, displayedMoves: displayedMoves)
+            : []
+        let rawLocationFixes = RawLocationFixPresentation.orderedOSFixes(from: source.visibleSamples)
+            .map(RawLocationFixMarker.init)
 
         return DayMapPresentationCache(
             placeMarkers: placeMarkers,
             routes: routes,
+            rawLocationFixes: rawLocationFixes,
             latestSampleCoordinate: latestSample?.coordinate,
             routeRefreshKey: "\(dayTimeline.dayKey)|\(generation)",
             placeRefreshKey: placeRefreshKey,

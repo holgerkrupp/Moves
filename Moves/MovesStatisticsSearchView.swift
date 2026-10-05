@@ -250,6 +250,9 @@ struct MovesStatisticsSnapshot {
         if let userLabel = normalized(place.userLabel) {
             return "user:\(userLabel)"
         }
+        if let regularPlaceName = normalized(place.regularPlaceName) {
+            return "regular:\(regularPlaceName)"
+        }
         if let autoLabel = normalized(place.autoLabel) {
             return "auto:\(autoLabel)"
         }

@@ -531,6 +531,9 @@ final class MovesSyncDiagnostics: ObservableObject {
             let details = Self.errorDetails(for: error, stage: stage(for: name))
             let retryAfter = details.retryAfterSeconds.map { " retry-after=\(Int(ceil($0)))s" } ?? ""
             lines.append("\(name): \(details.disposition.title) — \(details.message) [\(details.domain ?? "unknown")\(details.code.map { ":\($0)" } ?? "")\(retryAfter)]")
+            for cause in details.causes ?? [] {
+                lines.append("  Cause: \(cause.domain):\(cause.code) — \(cause.summary)\(cause.count > 1 ? " (×\(cause.count))" : "")")
+            }
         }
 
         if monitorErrors.allSatisfy({ $0.1 == nil }), let details = lastErrorDetails {

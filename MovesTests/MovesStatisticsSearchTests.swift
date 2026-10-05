@@ -112,7 +112,7 @@ final class MovesStatisticsSearchTests: XCTestCase {
         XCTAssertTrue(location.contains(CLLocationCoordinate2D(latitude: 53.5520, longitude: 9.9900)))
     }
 
-    func testRenamingKnownLocationUpdatesMatchingLabelsWithoutOverwritingCustomLabels() {
+    func testRegularPlaceReconciliationKeepsManualLabelsSeparate() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let matchingOldLabel = makePlace(title: "Office", arrival: start, departure: nil)
         let matchingCustomLabel = makePlace(title: "Customer Meeting", arrival: start, departure: nil)
@@ -123,14 +123,54 @@ final class MovesStatisticsSearchTests: XCTestCase {
             radiusMeters: 150
         )
 
-        KnownLocationLabeler.apply(
+        KnownLocationLabeler.reconcile(
             location: location,
-            previousName: "Office",
+            replacedID: nil,
+            definitions: [location],
             to: [matchingOldLabel, matchingCustomLabel]
         )
 
-        XCTAssertEqual(matchingOldLabel.userLabel, "Work")
+        XCTAssertNil(matchingOldLabel.userLabel)
+        XCTAssertEqual(matchingOldLabel.regularPlaceName, "Work")
         XCTAssertEqual(matchingCustomLabel.userLabel, "Customer Meeting")
+        XCTAssertNil(matchingCustomLabel.regularPlaceName)
+    }
+
+    func testRegularPlaceMatcherRequiresObservationAccuracyToFitInsideRadius() {
+        let home = KnownLocation(name: "Home", latitude: 53.55, longitude: 9.99, radiusMeters: 120)
+        let inside = CLLocationCoordinate2D(latitude: 53.5502, longitude: 9.99)
+        XCTAssertEqual(RegularPlaceMatcher.match(coordinate: inside, accuracy: 10, among: [home])?.id, home.id)
+        XCTAssertNil(RegularPlaceMatcher.match(coordinate: inside, accuracy: 100, among: [home]))
+        XCTAssertNil(RegularPlaceMatcher.match(coordinate: inside, accuracy: -1, among: [home]))
+    }
+
+    func testOverlappingRegularPlacesChooseNearestWithStableTieBreak() {
+        let center = CLLocationCoordinate2D(latitude: 53.55, longitude: 9.99)
+        let farther = KnownLocation(name: "Farther", latitude: 53.5504, longitude: 9.99, radiusMeters: 200)
+        let nearer = KnownLocation(name: "Nearer", latitude: 53.5501, longitude: 9.99, radiusMeters: 200)
+        XCTAssertEqual(RegularPlaceMatcher.match(coordinate: center, accuracy: 5, among: [farther, nearer])?.id, nearer.id)
+    }
+
+    func testRegularPlaceRadiusShrinkClearsOnlyItsAutomaticAssignment() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let automatic = makePlace(title: "", arrival: start, departure: nil)
+        automatic.latitude = 53.551
+        automatic.longitude = 9.99
+        automatic.horizontalAccuracy = 5
+        let manual = makePlace(title: "Home", arrival: start, departure: nil)
+        manual.latitude = 53.551
+        manual.longitude = 9.99
+        manual.horizontalAccuracy = 5
+        let home = KnownLocation(name: "Home", latitude: 53.55, longitude: 9.99, radiusMeters: 200)
+        automatic.regularPlaceID = home.id
+        automatic.regularPlaceName = home.name
+
+        home.radiusMeters = 50
+        KnownLocationLabeler.reconcile(location: home, replacedID: home.id, definitions: [home], to: [automatic, manual])
+
+        XCTAssertNil(automatic.regularPlaceID)
+        XCTAssertNil(automatic.regularPlaceName)
+        XCTAssertEqual(manual.userLabel, "Home")
     }
 
     @MainActor
@@ -168,7 +208,40 @@ final class MovesStatisticsSearchTests: XCTestCase {
 
         let savedPlace = try repository.addOrUpdateVisit(from: visit)
 
-        XCTAssertEqual(savedPlace.userLabel, "Home")
+        XCTAssertNil(savedPlace.userLabel)
+        XCTAssertEqual(savedPlace.regularPlaceName, "Home")
+    }
+
+    @MainActor
+    func testManualVisitLabelDoesNotSeedFutureRegularPlaceInference() throws {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let context = ModelContext(container)
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        context.insert(VisitPlace(
+            arrivalDate: start,
+            departureDate: start.addingTimeInterval(600),
+            latitude: 53.5500,
+            longitude: 9.9900,
+            horizontalAccuracy: 5,
+            userLabel: "Home"
+        ))
+        try context.save()
+
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let visit = MockVisit(
+            coordinate: CLLocationCoordinate2D(latitude: 53.5510, longitude: 9.9900),
+            horizontalAccuracy: 5,
+            arrivalDate: start.addingTimeInterval(3_600),
+            departureDate: start.addingTimeInterval(4_200)
+        )
+
+        let savedPlace = try repository.addOrUpdateVisit(from: visit)
+
+        XCTAssertNil(savedPlace.userLabel)
+        XCTAssertNil(savedPlace.regularPlaceName)
+        XCTAssertNil(savedPlace.regularPlaceID)
     }
 
     func testMostVisitedLocationsAggregateRepeatedLabelsAndDurations() throws {

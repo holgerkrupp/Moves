@@ -73,6 +73,16 @@
         }
       }
     },
+    "%@ error %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ error %2$lld"
+          }
+        }
+      }
+    },
     "%@, %@" : {
       "localizations" : {
         "en" : {
@@ -149,6 +159,16 @@
     "%lld matching route(s)" : {
 
     },
+    "%lld matching visits · %@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld matching visits · %2$@, %3$@"
+          }
+        }
+      }
+    },
     "%lld more import%@ in the queue" : {
       "localizations" : {
         "en" : {
@@ -218,6 +238,9 @@
         }
       }
     },
+    "%lld visits · Save a name to make this a Regular Place" : {
+
+    },
     "+%@ more" : {
 
     },
@@ -261,6 +284,9 @@
 
     },
     "Activity" : {
+
+    },
+    "Add Regular Place" : {
 
     },
     "Adjust the filters to preview imported data." : {
@@ -344,6 +370,9 @@
     "Before deduplication, Moves creates a local snapshot so you can restore the previous state with one tap." : {
 
     },
+    "Blue dots are recorded GPS points; they cannot be moved." : {
+
+    },
     "Both tools open at %@. Choose another day or period inside the tool whenever you need it." : {
 
     },
@@ -361,6 +390,16 @@
     },
     "Captured location" : {
 
+    },
+    "Cause: %@ error %lld — %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Cause: %1$@ error %2$lld — %3$@"
+          }
+        }
+      }
     },
     "Change Transport" : {
 
@@ -479,7 +518,7 @@
     "Create & Share" : {
 
     },
-    "Create Location" : {
+    "Create Regular Place" : {
 
     },
     "Created" : {
@@ -624,6 +663,9 @@
 
     },
     "Done" : {
+
+    },
+    "Drag the map to reposition the center, or choose a recorded visit below." : {
 
     },
     "Drag the route line to adjust it" : {
@@ -1001,6 +1043,9 @@
     "Latitude" : {
 
     },
+    "Legacy labels to review" : {
+
+    },
     "Library" : {
 
     },
@@ -1011,6 +1056,9 @@
 
     },
     "Listen for location changes" : {
+
+    },
+    "Live Real Route Tracking location fix %lld" : {
 
     },
     "Loading visit history…" : {
@@ -1027,6 +1075,19 @@
     },
     "Location access was denied. Open Settings to allow Moves to record visits and movement on this device." : {
 
+    },
+    "Location fix: %@" : {
+
+    },
+    "Location fix: %@, %@, accuracy %lld meters" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Location fix: %1$@, %2$@, accuracy %3$lld meters"
+          }
+        }
+      }
     },
     "Location name" : {
 
@@ -1161,6 +1222,9 @@
     "Moves will stop scanning this folder. Already imported timeline data will remain." : {
 
     },
+    "Named Regular Places" : {
+
+    },
     "Nearby moves" : {
 
     },
@@ -1227,6 +1291,9 @@
     "No recorded visits fall inside the current proximity circle." : {
 
     },
+    "No Regular Places" : {
+
+    },
     "No saved place" : {
 
     },
@@ -1261,6 +1328,9 @@
 
     },
     "Observed" : {
+
+    },
+    "Often Visited · Unnamed" : {
 
     },
     "OK" : {
@@ -1302,6 +1372,9 @@
     "Overall progress" : {
 
     },
+    "Overlaps another Regular Place" : {
+
+    },
     "Page %lld of %lld" : {
       "localizations" : {
         "en" : {
@@ -1331,6 +1404,9 @@
 
     },
     "Places, moves, and edit controls can be swapped to the left for comfortable one-handed use." : {
+
+    },
+    "Precise Location is off. iOS may reduce route detail." : {
 
     },
     "Preparing GPX export…" : {
@@ -1396,7 +1472,13 @@
     "Recorded days" : {
 
     },
+    "Recorded GPS anchor" : {
+
+    },
     "Recorded visits remain in your timeline. Only the saved name and proximity area are removed." : {
+
+    },
+    "Regular Places" : {
 
     },
     "Remarks" : {
@@ -1417,6 +1499,9 @@
     "Remove imported routes?" : {
 
     },
+    "Remove label" : {
+
+    },
     "Remove matching imported data" : {
 
     },
@@ -1432,6 +1517,9 @@
           }
         }
       }
+    },
+    "Repeated visits without a name will appear here." : {
+
     },
     "Reports whether real route and background tracking are active." : {
 
@@ -1466,6 +1554,9 @@
     "Route" : {
 
     },
+    "Route display" : {
+
+    },
     "Route File Import" : {
 
     },
@@ -1488,6 +1579,12 @@
 
     },
     "Save Changes" : {
+
+    },
+    "Save places such as Home or Work to recognize future visits." : {
+
+    },
+    "Saving a name also creates or updates a Regular Place for future visits." : {
 
     },
     "Search" : {
@@ -1627,6 +1724,12 @@
 
     },
     "Shows move details and raw location data" : {
+
+    },
+    "Shows only individual locations reported by iOS. Gaps are intentional: Moves did not receive enough fixes to know the path. Background tracking can look sparse." : {
+
+    },
+    "Shows the normal reconstructed routes from your location evidence. This is the default display mode." : {
 
     },
     "Shrink map" : {
@@ -1794,6 +1897,9 @@
     "These safeguards can end the session early if power gets tight." : {
 
     },
+    "These visits have a label matching a Regular Place name but are outside its saved radius. Keep labels that you assigned manually; remove only labels that were propagated by mistake." : {
+
+    },
     "This also removes unused generated endpoint places and empty imported days. Non-imported samples are preserved." : {
 
     },
@@ -1869,6 +1975,9 @@
     "Tracking" : {
 
     },
+    "Tracking diagnostics" : {
+
+    },
     "Tracking Duration" : {
 
     },
@@ -1930,6 +2039,9 @@
 
     },
     "Use this device for tracking?" : {
+
+    },
+    "Use visit at %@ as Regular Place center" : {
 
     },
     "Used by Places Map, All Tracks, Heat Map, and Calendar." : {
