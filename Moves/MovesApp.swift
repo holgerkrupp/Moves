@@ -13,6 +13,82 @@ import CloudKitSyncMonitor
 import UIKit
 #endif
 import UserNotifications
+import OSLog
+
+enum MovesStartupInstrumentation {
+    static let signposter = OSSignposter(
+        subsystem: "de.holgerkrupp.Moves",
+        category: "Startup"
+    )
+
+    static func event(_ name: StaticString) {
+        signposter.emitEvent(name)
+        #if DEBUG
+        let eventName = String(describing: name)
+        let key = "Moves.startup.counter.\(eventName)"
+        UserDefaults.standard.set(UserDefaults.standard.integer(forKey: key) + 1, forKey: key)
+        UserDefaults.standard.set(ProcessInfo.processInfo.systemUptime, forKey: "Moves.startup.time.\(eventName)")
+        #endif
+    }
+
+    #if DEBUG
+    static func beginLaunch() {
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix("Moves.startup.counter.") || key.hasPrefix("Moves.startup.time.") {
+            defaults.removeObject(forKey: key)
+        }
+        event("appInit")
+    }
+    #endif
+}
+
+@MainActor
+enum MovesStartupMilestone {
+    private(set) static var firstTimelineInteractive = false
+    private(set) static var deferredMaintenanceComplete = false
+    private static var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private static var maintenanceWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+
+    static func markFirstTimelineInteractive() {
+        guard !firstTimelineInteractive else { return }
+        firstTimelineInteractive = true
+        MovesStartupInstrumentation.event("firstTimelineInteractive")
+        let pending = Array(waiters.values)
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+
+    static func waitForFirstTimelineInteractive() async {
+        guard !firstTimelineInteractive else { return }
+        await withCheckedContinuation { continuation in
+            if firstTimelineInteractive {
+                continuation.resume()
+            } else {
+                waiters[UUID()] = continuation
+            }
+        }
+    }
+
+    static func markDeferredMaintenanceComplete() {
+        guard !deferredMaintenanceComplete else { return }
+        deferredMaintenanceComplete = true
+        let pending = Array(maintenanceWaiters.values)
+        maintenanceWaiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+
+    static func waitForDeferredMaintenanceComplete() async {
+        guard !deferredMaintenanceComplete else { return }
+        await withCheckedContinuation { continuation in
+            if deferredMaintenanceComplete {
+                continuation.resume()
+            } else {
+                maintenanceWaiters[UUID()] = continuation
+            }
+        }
+    }
+}
 
 final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
@@ -113,6 +189,11 @@ struct MovesApp: App {
     @StateObject private var runtime = MovesAppRuntime()
 
     init() {
+        #if DEBUG
+        MovesStartupInstrumentation.beginLaunch()
+        #else
+        MovesStartupInstrumentation.event("appInit")
+        #endif
         SyncMonitor.default.startMonitoring()
     }
 
@@ -133,6 +214,7 @@ struct MovesApp: App {
     }
 
     nonisolated static func ensureCurrentDayExists(in container: ModelContainer) throws {
+        MovesStartupInstrumentation.event("currentDayLookup")
         let context = ModelContext(container)
         let todayStart = Calendar.current.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
@@ -146,6 +228,7 @@ struct MovesApp: App {
         guard try context.fetch(descriptor).isEmpty else { return }
         context.insert(DayTimeline(dayStart: todayStart))
         try context.save()
+        MovesStartupInstrumentation.event("currentDayCreated")
     }
 
     var body: some Scene {
@@ -182,8 +265,16 @@ struct MovesApp: App {
             MovesCommands()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            startActiveServices()
+            if newPhase == .active {
+                startActiveServices()
+                if MovesStartupMilestone.firstTimelineInteractive,
+                   !MovesStartupMilestone.deferredMaintenanceComplete {
+                    startDeferredServices()
+                }
+            } else {
+                runtime.didStartActiveServices = false
+                runtime.cancelDeferredMaintenance()
+            }
         }
     }
 
@@ -216,44 +307,70 @@ struct MovesApp: App {
         .task {
             startActiveServices()
         }
+        .task {
+            await MovesStartupMilestone.waitForFirstTimelineInteractive()
+            guard !Task.isCancelled else { return }
+            startDeferredServices()
+        }
     }
 
     private func startActiveServices() {
         guard scenePhase == .active, runtime.isReady else { return }
-        if runtime.didStartActiveServices {
-            runtime.captureManager?.retryPendingRouteMatches()
-            return
-        }
+        runtime.configureIntentRuntime()
+        guard !runtime.didStartActiveServices else { return }
         runtime.didStartActiveServices = true
 
+        guard let captureManager = runtime.captureManager,
+              let multiDevicePresenceManager = runtime.multiDevicePresenceManager else { return }
+
+        MovesStartupInstrumentation.event("activeServicesStart")
+        Task {
+            if captureManager.isLocationTrackingAvailable {
+                multiDevicePresenceManager.refreshPresence()
+                await captureManager.start()
+            }
+        }
+    }
+
+    private func startDeferredServices() {
+        guard scenePhase == .active,
+              !MovesStartupMilestone.deferredMaintenanceComplete,
+              !runtime.didStartDeferredServices,
+              let captureManager = runtime.captureManager,
+              let healthWorkoutRouteAutoImporter = runtime.healthWorkoutRouteAutoImporter,
+              let cloudDataPresencePublisher = runtime.cloudDataPresencePublisher,
+              let locationServiceSyncManager = runtime.locationServiceSyncManager,
+              let container = runtime.container else { return }
+
+        runtime.startDeferredRuntimeServices()
+        cloudDataPresencePublisher.startObserving()
+        locationServiceSyncManager.startObserving()
+        runtime.importCoordinator?.restorePersistedStateIfNeeded()
+        runtime.routeFileImporter?.restorePersistedStateIfNeeded()
+        runtime.importedRouteDataSummary?.startObserving()
+        MovesStartupInstrumentation.event("deferredMaintenanceStart")
         DailyTimelineBackup.scheduleNextRun()
         ShareMapAggregateBackgroundTask.scheduleNextRun()
         RouteFileImportBackgroundTask.schedule()
         RouteWatchFolderBackgroundTask.schedule()
         ExplorationPreparationBackgroundTask.schedule()
         runtime.routeWatchFolderManager?.scanIfNeeded()
-
-        guard let captureManager = runtime.captureManager,
-              let multiDevicePresenceManager = runtime.multiDevicePresenceManager,
-              let healthWorkoutRouteAutoImporter = runtime.healthWorkoutRouteAutoImporter,
-              let cloudDataPresencePublisher = runtime.cloudDataPresencePublisher,
-              let locationServiceSyncManager = runtime.locationServiceSyncManager,
-              let container = runtime.container else { return }
-
-        Task {
-            if captureManager.isLocationTrackingAvailable {
-                multiDevicePresenceManager.refreshPresence()
-                await captureManager.start()
-                await captureManager.refreshHistoricalBackfill()
-                captureManager.retryPendingRouteMatches()
-            }
+        runtime.deferredMaintenanceTask = Task(priority: .utility) {
+            await captureManager.refreshHistoricalBackfill()
+            guard !Task.isCancelled else { return }
+            captureManager.retryPendingRouteMatches()
             healthWorkoutRouteAutoImporter.refreshInterruptedHistoricalImportState()
             await healthWorkoutRouteAutoImporter.startIfNeeded()
+            guard !Task.isCancelled else { return }
             await cloudDataPresencePublisher.publishNow()
+            guard !Task.isCancelled else { return }
             await locationServiceSyncManager.syncNewSamplesIfEnabled()
-        }
-        Task(priority: .utility) {
+            guard !Task.isCancelled else { return }
             await ImportedTransportModeRefinement.run(in: container)
+            guard !Task.isCancelled else { return }
+            runtime.startDeferredDiagnostics()
+            MovesStartupInstrumentation.event("deferredMaintenanceEnd")
+            MovesStartupMilestone.markDeferredMaintenanceComplete()
         }
     }
 }
@@ -401,6 +518,8 @@ final class MovesAppRuntime: ObservableObject {
     private(set) var importedRouteDataSummary: ImportedRouteDataSummaryStore?
 
     private var prepareTask: Task<Void, Never>?
+    private(set) var didStartDeferredServices = false
+    var deferredMaintenanceTask: Task<Void, Never>?
     private var retryObserver: NSObjectProtocol?
     private let applicationContainerFactory: ContainerFactory
     private let localFallbackContainerFactory: ContainerFactory
@@ -455,6 +574,38 @@ final class MovesAppRuntime: ObservableObject {
         await prepare()
     }
 
+    func startDeferredRuntimeServices() {
+        guard !didStartDeferredServices else { return }
+        didStartDeferredServices = true
+        if container != nil {
+            MovesAppShortcuts.updateAppShortcutParameters()
+        }
+    }
+
+    func configureIntentRuntime() {
+        guard !didConfigureIntentRuntime,
+              let container,
+              let captureManager else { return }
+        didConfigureIntentRuntime = true
+        MovesIntentRuntime.shared.configure(
+            modelContainer: container,
+            captureManager: captureManager
+        )
+    }
+
+    private(set) var didConfigureIntentRuntime = false
+
+    func startDeferredDiagnostics() {
+        syncDiagnostics?.startObservingTimeline()
+    }
+
+    func cancelDeferredMaintenance() {
+        deferredMaintenanceTask?.cancel()
+        deferredMaintenanceTask = nil
+        didStartDeferredServices = false
+        syncDiagnostics?.suspendTimelineObservation()
+    }
+
     func prepare() async {
         guard preparationState == .loading else { return }
         if let prepareTask {
@@ -467,12 +618,24 @@ final class MovesAppRuntime: ObservableObject {
             defer { self.prepareTask = nil }
             var attemptedMode = MovesStoreOpenMode.cloudKit
             do {
+                let preparationInterval = MovesStartupInstrumentation.signposter.beginInterval("runtimePreparation")
+                defer { MovesStartupInstrumentation.signposter.endInterval("runtimePreparation", preparationInterval) }
                 let container: ModelContainer
                 do {
-                    let factory = self.applicationContainerFactory
-                    container = try await Task.detached(priority: .userInitiated) {
-                        try factory()
-                    }.value
+                    MovesStartupInstrumentation.event("modelContainerOpenStart")
+                    let containerOpenState = MovesStartupInstrumentation.signposter.beginInterval("modelContainerOpen")
+                    do {
+                        let factory = self.applicationContainerFactory
+                        container = try await Task.detached(priority: .userInitiated) {
+                            try factory()
+                        }.value
+                    } catch {
+                        MovesStartupInstrumentation.signposter.endInterval("modelContainerOpen", containerOpenState)
+                        throw error
+                    }
+                    MovesStartupInstrumentation.event("modelContainerOpenEnd")
+                    MovesStartupInstrumentation.signposter.endInterval("modelContainerOpen", containerOpenState)
+                    MovesStartupInstrumentation.event("modelContainerReady")
                     MovesStoreRecovery.clear()
                     self.storeOpenFailure = nil
                 } catch {
@@ -525,11 +688,6 @@ final class MovesAppRuntime: ObservableObject {
                     self.routeWatchFolderManager = RouteWatchFolderManager(importer: routeFileImporter)
                     self.importedRouteDataSummary = ImportedRouteDataSummaryStore(modelContainer: container)
 
-                    MovesIntentRuntime.shared.configure(
-                        modelContainer: container,
-                        captureManager: captureManager
-                    )
-                    MovesAppShortcuts.updateAppShortcutParameters()
                 }
 
                 let syncDiagnostics = self.diagnosticsFactory(container)
@@ -537,7 +695,7 @@ final class MovesAppRuntime: ObservableObject {
                 self.container = container
                 isReady = true
                 preparationState = .ready
-                syncDiagnostics.startObservingTimeline()
+                MovesStartupInstrumentation.event("runtimeReady")
             } catch {
                 let failure = MovesStoreRecovery.record(
                     error,
@@ -552,6 +710,8 @@ final class MovesAppRuntime: ObservableObject {
     }
 
     private func resetPreparedState() {
+        deferredMaintenanceTask?.cancel()
+        deferredMaintenanceTask = nil
         syncDiagnostics?.suspendTimelineObservation()
         container = nil
         captureManager = nil
@@ -566,6 +726,8 @@ final class MovesAppRuntime: ObservableObject {
         routeWatchFolderManager = nil
         importedRouteDataSummary = nil
         didStartActiveServices = false
+        didConfigureIntentRuntime = false
+        didStartDeferredServices = false
         isReady = false
     }
 }

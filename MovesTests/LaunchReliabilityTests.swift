@@ -248,9 +248,35 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertEqual(runtime.preparationState, .ready)
         XCTAssertTrue(runtime.isReady)
         XCTAssertIdentical(runtime.container, container)
+        let startedBeforeDeferredPhase = await tracker.started
+        XCTAssertFalse(startedBeforeDeferredPhase)
+        runtime.startDeferredRuntimeServices()
+        runtime.startDeferredDiagnostics()
         let didStart = await waitUntil { await tracker.started }
         XCTAssertTrue(didStart)
         XCTAssertNil(runtime.syncDiagnostics?.latestSnapshot)
+    }
+
+    func testInitialTodaySelectionUsesOneBoundedWindowLoadWithTenThousandDays() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let today = Calendar.current.startOfDay(for: .now)
+        for offset in 0..<10_000 {
+            let date = Calendar.current.date(byAdding: .day, value: -offset, to: today)!
+            context.insert(DayTimeline(dayStart: date))
+        }
+        try context.save()
+
+        let window = TimelineDayWindowStore()
+        window.loadInitial(using: context)
+        let selected = window.selectLoadedDay(dayKey: DayTimeline.makeDayKey(for: today))
+
+        XCTAssertTrue(selected)
+        XCTAssertEqual(window.pagerDays.count, TimelineDayWindowStore.pagerWindowSize)
+        XCTAssertEqual(window.recentDays.count, TimelineDayWindowStore.recentSidebarWindowSize)
+        XCTAssertEqual(window.launchQueryCounts.initialRecentWindowFetches, 1)
+        XCTAssertEqual(window.launchQueryCounts.explicitWindowReloads, 0)
+        XCTAssertEqual(window.launchQueryCounts.loadedTodaySelections, 1)
     }
 
     func testNormalStartupDoesNotUseFallback() async throws {

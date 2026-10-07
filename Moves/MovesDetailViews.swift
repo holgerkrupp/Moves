@@ -256,6 +256,7 @@ struct PlaceMapDetailView: View {
         do {
             try modelContext.save()
             NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
+            TimelineMutationNotifier.didChange(dayKey: place.dayTimeline?.dayKey, objectID: place.id)
         } catch {
             print("Failed to save place label: \(error.localizedDescription)")
         }
@@ -268,6 +269,7 @@ struct PlaceMapDetailView: View {
         do {
             try modelContext.save()
             NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
+            TimelineMutationNotifier.didChange(dayKey: place.dayTimeline?.dayKey, objectID: place.id)
         } catch {
             modelContext.rollback()
             draftComment = place.comment ?? ""
@@ -1128,10 +1130,7 @@ struct MoveMapDetailView: View {
             if let dayKey = segment.dayTimeline?.dayKey {
                 ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
             }
-            NotificationCenter.default.post(
-                name: .movesMoveDataDidChange,
-                object: segment.id
-            )
+            TimelineMutationNotifier.didChange(dayKey: segment.dayTimeline?.dayKey, objectID: segment.id)
             markMapAggregateDirty(for: segment)
             Task { @MainActor in
                 await refreshRouteCoordinates()
@@ -1159,10 +1158,7 @@ struct MoveMapDetailView: View {
         if modelContext.hasChanges {
             do {
                 try modelContext.save()
-                NotificationCenter.default.post(
-                    name: .movesMoveDataDidChange,
-                    object: segment.id
-                )
+                TimelineMutationNotifier.didChange(dayKey: segment.dayTimeline?.dayKey, objectID: segment.id)
                 markMapAggregateDirty(for: segment)
             } catch {
                 print("Failed to persist matched route cache: \(error.localizedDescription)")
@@ -1261,6 +1257,7 @@ struct MoveMapDetailView: View {
 
             do {
                 try modelContext.save()
+                TimelineMutationNotifier.didChange(dayKey: segment.dayTimeline?.dayKey, objectID: segment.id)
             } catch {
                 modelContext.rollback()
                 routeCoordinates = segment.manualRouteCoordinates ?? baseRoute
@@ -1341,6 +1338,7 @@ struct MoveMapDetailView: View {
         do {
             try modelContext.save()
             markMapAggregateDirty(for: segment)
+            TimelineMutationNotifier.didChange(dayKey: segment.dayTimeline?.dayKey, objectID: segment.id)
             if let dayKey = segment.dayTimeline?.dayKey {
                 ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
             }

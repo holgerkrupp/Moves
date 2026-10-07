@@ -504,12 +504,23 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
     private var processingEnabled = false
     private var isDirty = true
     private var notificationTasks: [Task<Void, Never>] = []
+    private var hasStarted = false
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
-        self.summary = Self.loadCachedSummary()
-        self.daySummaries = Self.loadCachedDaySummaries()
+        self.summary = .empty
+        self.daySummaries = [:]
+    }
+
+    func startObserving() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        summary = Self.loadCachedSummary()
+        daySummaries = Self.loadCachedDaySummaries()
         observeDataChanges()
+        if processingEnabled, isDirty {
+            refresh()
+        }
     }
 
     deinit {
@@ -568,7 +579,7 @@ final class ImportedRouteDataSummaryStore: ObservableObject {
             return
         }
 
-        if isDirty {
+        if hasStarted, isDirty {
             refresh()
         }
     }
@@ -1204,6 +1215,7 @@ final class RouteFileImporter: ObservableObject {
     private var activeJobID: UUID?
     private var importTask: Task<Void, Never>?
     private var shouldPause = false
+    private var didRestoreLegacyState = false
 
     /// Presentation compatibility for the existing Settings screen. The coordinator's
     /// durable recovery records are canonical; this projection keeps older UI components
@@ -1233,8 +1245,17 @@ final class RouteFileImporter: ObservableObject {
     init(modelContext: ModelContext, importCoordinator: ImportCoordinator) {
         self.modelContainer = modelContext.container
         self.importCoordinator = importCoordinator
-        self.failedImports = RouteFileImportStore.failedImports
-        self.failureReports = RouteFileImportStore.failureReports
+        self.failedImports = []
+        self.failureReports = []
+        state = .idle
+    }
+
+    func restorePersistedStateIfNeeded() {
+        guard !didRestoreLegacyState else { return }
+        didRestoreLegacyState = true
+        importCoordinator.restorePersistedStateIfNeeded()
+        failedImports = RouteFileImportStore.failedImports
+        failureReports = RouteFileImportStore.failureReports
         for item in failedImports where !importCoordinator.recoveryItems.contains(where: { $0.id == item.id }) {
             try? importCoordinator.addRecovery(ImportRecoveryItem(
                 id: item.id, displayName: item.originalFileName, originalFileName: item.originalFileName,
@@ -1286,6 +1307,7 @@ final class RouteFileImporter: ObservableObject {
 
     @discardableResult
     func start(urls: [URL], configuration: RouteFileImportConfiguration) -> Bool {
+        restorePersistedStateIfNeeded()
         guard !urls.isEmpty else {
             lastErrorMessage = "No route files were selected."
             return false

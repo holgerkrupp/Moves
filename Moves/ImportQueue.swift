@@ -319,10 +319,18 @@ final class ImportCoordinator: ObservableObject {
     private weak var routeFileImporter: RouteFileImporter?
     private var storeChangeObserver: AnyCancellable?
     private var finishedRemovalTask: Task<Void, Never>?
+    private var hasRestoredPersistedState = false
 
     init(store: ImportQueueStore = ImportQueueStore(), recoveryStore: ImportRecoveryStore = ImportRecoveryStore()) {
         self.store = store
         self.recoveryStore = recoveryStore
+        snapshot = ImportQueueSnapshot(jobs: [])
+        recoveryItems = []
+    }
+
+    func restorePersistedStateIfNeeded() {
+        guard !hasRestoredPersistedState else { return }
+        hasRestoredPersistedState = true
         var restoredJobs: [ImportJobRecord] = []
         do {
             restoredJobs = try store.load()
@@ -368,6 +376,7 @@ final class ImportCoordinator: ObservableObject {
 
     @discardableResult
     func enqueueRouteFiles(_ urls: [URL], configuration: RouteFileImportConfiguration) -> Bool {
+        restorePersistedStateIfNeeded()
         guard !urls.isEmpty else { return false }
         guard let routeFileImporter else {
             lastErrorMessage = "The route-file importer is unavailable. Close and reopen Moves, then try again."
@@ -388,6 +397,7 @@ final class ImportCoordinator: ObservableObject {
 
     @discardableResult
     func enqueue(_ job: ImportJobRecord) throws -> UUID {
+        restorePersistedStateIfNeeded()
         snapshot.jobs.append(job)
         try persist()
         return job.id

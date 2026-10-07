@@ -105,16 +105,21 @@ enum ImportedTransportModeInference {
 
 @ModelActor
 actor ImportedTransportModeInferenceWorker {
+    private static let fetchBatchSize = 200
+    private static let saveBatchSize = 100
+
     /// Revisits existing imported moves. It never changes an explicit transport choice and
     /// deliberately leaves weak evidence as Unknown.
     func refineUnknownImportedMoves() async -> Int {
-        let moves: [MoveSegment]
+        let moves: FetchResultsCollection<MoveSegment>
         do {
             let descriptor = FetchDescriptor<MoveSegment>(
                 predicate: #Predicate { $0.transportModeRawValue == "unknown" },
                 sortBy: [SortDescriptor(\MoveSegment.startDate)]
             )
-            moves = try modelContext.fetch(descriptor)
+            // SwiftData fetch batching bounds how many model rows are materialized
+            // at once while keeping a stable sort order and avoiding OFFSET paging.
+            moves = try modelContext.fetch(descriptor, batchSize: Self.fetchBatchSize)
         } catch {
             return 0
         }
@@ -143,7 +148,7 @@ actor ImportedTransportModeInferenceWorker {
             move.clearCachedRouteCoordinates()
             changedCount += 1
 
-            if changedCount.isMultiple(of: 100) {
+            if changedCount.isMultiple(of: Self.saveBatchSize) {
                 try? modelContext.save()
                 await Task.yield()
             }

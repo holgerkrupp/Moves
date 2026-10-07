@@ -19,6 +19,7 @@ final class MovesCloudDataPresencePublisher: ObservableObject {
     private let keyValueStore: CloudDataPresenceKeyValueStore
     private var pendingPublishTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
+    private var hasStarted = false
 
     init(
         modelContainer: ModelContainer,
@@ -26,6 +27,11 @@ final class MovesCloudDataPresencePublisher: ObservableObject {
     ) {
         self.modelContainer = modelContainer
         self.keyValueStore = keyValueStore
+    }
+
+    func startObserving() {
+        guard !hasStarted else { return }
+        hasStarted = true
         observeChanges()
         refreshRemotePresence()
     }
@@ -58,7 +64,9 @@ final class MovesCloudDataPresencePublisher: ObservableObject {
         let context = ModelContext(modelContainer)
 
         do {
+            MovesStartupInstrumentation.event("cloudPresenceCountFetch")
             let placeCount = try context.fetchCount(FetchDescriptor<VisitPlace>())
+            MovesStartupInstrumentation.event("cloudPresenceCountFetch")
             let moveCount = try context.fetchCount(FetchDescriptor<MoveSegment>())
             let updatedAt = Date()
             let summary = CloudDataPresenceStore.publish(

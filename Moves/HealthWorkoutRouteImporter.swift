@@ -580,6 +580,7 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
     private var historicalImporter: HealthWorkoutRouteImporter?
     private var historicalImportID = UUID()
     private var observerStartDate: Date?
+    private var hasStartedObservingSettings = false
     private let automaticImportDaysBack = 3
     private let automaticImportDelay: Duration = .seconds(1)
     private let delayedRouteFollowUpDelay: Duration = .seconds(20)
@@ -590,6 +591,11 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
+    }
+
+    private func startObservingSettingsIfNeeded() {
+        guard !hasStartedObservingSettings else { return }
+        hasStartedObservingSettings = true
         lastAutomaticImportAt = HealthWorkoutRouteImportSettings.lastAutomaticImportAt
         settingsObserver = NotificationCenter.default.addObserver(
             forName: HealthWorkoutRouteImportSettings.didChangeNotification,
@@ -680,6 +686,7 @@ final class HealthWorkoutRouteAutoImportManager: ObservableObject {
     }
 
     func startIfNeeded() async {
+        startObservingSettingsIfNeeded()
         guard HealthWorkoutRouteImportSettings.isEnabled else {
             stopObserving()
             return

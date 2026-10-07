@@ -3,6 +3,95 @@ import CoreLocation
 import SwiftData
 @testable import Moves
 
+@MainActor
+final class TimelineMutationNotifierTests: XCTestCase {
+    func testPlaceLabelChangePublishesAffectedDayAfterSave() throws {
+        let (container, context, day, place) = try makeFixture()
+        _ = container
+        let dayKey = day.dayKey
+        let notification = expectation(forNotification: .movesMoveDataDidChange, object: nil) { notification in
+            XCTAssertEqual(notification.userInfo?["dayKey"] as? String, dayKey)
+            return true
+        }
+        place.userLabel = "New name"
+        try context.save()
+
+        TimelineMutationNotifier.didChange(dayKey: day.dayKey, objectID: place.id)
+        wait(for: [notification], timeout: 1)
+        XCTAssertEqual(place.userLabel, "New name")
+    }
+
+    func testManualRouteChangePublishesAffectedDayAfterSave() throws {
+        let (container, context, day, _, move) = try makeFixtureWithMove()
+        _ = container
+        let dayKey = day.dayKey
+        let notification = expectation(forNotification: .movesMoveDataDidChange, object: nil) { notification in
+            XCTAssertEqual(notification.userInfo?["dayKey"] as? String, dayKey)
+            return true
+        }
+        let coordinates = [
+            CLLocationCoordinate2D(latitude: 52.5, longitude: 13.4),
+            CLLocationCoordinate2D(latitude: 52.6, longitude: 13.5),
+        ]
+        move.storeManualRouteCoordinates(coordinates)
+        try context.save()
+
+        TimelineMutationNotifier.didChange(dayKey: day.dayKey, objectID: move.id)
+        wait(for: [notification], timeout: 1)
+        XCTAssertEqual(move.manualRouteCoordinates?.count, 2)
+    }
+
+    private func makeFixture() throws -> (ModelContainer, ModelContext, DayTimeline, VisitPlace) {
+        let (container, day) = try makeContainer()
+        let place = VisitPlace(
+            arrivalDate: day.dayStart,
+            departureDate: nil,
+            latitude: 52.5,
+            longitude: 13.4,
+            horizontalAccuracy: 10
+        )
+        place.dayTimeline = day
+        container.mainContext.insert(day)
+        container.mainContext.insert(place)
+        try container.mainContext.save()
+        return (container, container.mainContext, day, place)
+    }
+
+    private func makeFixtureWithMove() throws -> (ModelContainer, ModelContext, DayTimeline, VisitPlace, MoveSegment) {
+        let (container, day) = try makeContainer()
+        let place = VisitPlace(
+            arrivalDate: day.dayStart,
+            departureDate: day.dayStart.addingTimeInterval(600),
+            latitude: 52.5,
+            longitude: 13.4,
+            horizontalAccuracy: 10
+        )
+        let move = MoveSegment(
+            dedupeKey: "timeline-mutation-test",
+            startDate: day.dayStart.addingTimeInterval(600),
+            endDate: day.dayStart.addingTimeInterval(1_200),
+            transportMode: .walking,
+            distanceMeters: 1_000,
+            stepCount: nil
+        )
+        place.dayTimeline = day
+        move.dayTimeline = day
+        container.mainContext.insert(day)
+        container.mainContext.insert(place)
+        container.mainContext.insert(move)
+        try container.mainContext.save()
+        return (container, container.mainContext, day, place, move)
+    }
+
+    private func makeContainer() throws -> (ModelContainer, DayTimeline) {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let day = DayTimeline(dayStart: Date(timeIntervalSince1970: 1_790_000_000))
+        return (container, day)
+    }
+}
+
 final class MockVisit: CLVisit {
     private let mockedCoordinate: CLLocationCoordinate2D
     private let mockedHorizontalAccuracy: CLLocationAccuracy

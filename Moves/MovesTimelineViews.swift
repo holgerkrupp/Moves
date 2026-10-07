@@ -332,25 +332,36 @@ struct DayTimelinePageContent: View {
         }
         .id(dayTimeline.dayKey)
         .ignoresSafeArea(.container, edges: .bottom)
+        .onAppear {
+            guard isActive else { return }
+            MovesStartupInstrumentation.event("firstContentViewConstruction")
+        }
         .task(id: provisionalSampleLookupKey) {
             await resolveProvisionalSampleTitle()
         }
         .task(id: "presentation|\(presentationRefreshKey)") {
             guard !Task.isCancelled else { return }
+            MovesStartupInstrumentation.event("selectedDayPresentationStart")
             if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey) {
                 presentationCache = cached
                 importedDataStatus = cached.hasImportedRouteData
+                MovesStartupInstrumentation.event("selectedDayPresentationEnd")
+                markTimelineInteractiveIfNeeded()
                 return
             }
 
+            let state = MovesStartupInstrumentation.signposter.beginInterval("selectedDayPresentationFetchAndBuild")
             let source = DayPresentationSourceCache.source(
                 for: dayTimeline,
                 generation: presentationGeneration
             )
             importedDataStatus = source.hasImportedRouteData
             let cache = Self.makePresentationCache(for: dayTimeline, source: source)
+            MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
             DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey)
             presentationCache = cache
+            MovesStartupInstrumentation.event("selectedDayPresentationEnd")
+            markTimelineInteractiveIfNeeded()
         }
         .task {
             for await _ in NotificationCenter.default.notifications(
@@ -369,11 +380,13 @@ struct DayTimelinePageContent: View {
             }
         }
         .task {
-            for await _ in NotificationCenter.default.notifications(
+            for await notification in NotificationCenter.default.notifications(
                 named: .movesMoveDataDidChange
             ) {
                 guard !Task.isCancelled else { return }
-                TimelinePresentationCacheInvalidator.invalidateAll()
+                TimelinePresentationCacheInvalidator.invalidate(
+                    dayKey: notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
+                )
                 presentationGeneration &+= 1
             }
         }
@@ -420,6 +433,11 @@ struct DayTimelinePageContent: View {
                 }
             }
         }
+    }
+
+    private func markTimelineInteractiveIfNeeded() {
+        guard isActive else { return }
+        MovesStartupMilestone.markFirstTimelineInteractive()
     }
 
     private var macContent: some View {
@@ -885,7 +903,12 @@ private struct TimelineEntryContextMenu: ViewModifier {
 
                     Button("Reset Route Edits", systemImage: "arrow.uturn.backward") {
                         move.clearManualRouteCoordinates()
-                        try? modelContext.save()
+                        do {
+                            try modelContext.save()
+                            TimelineMutationNotifier.didChange(dayKey: move.dayTimeline?.dayKey, objectID: move.id)
+                        } catch {
+                            modelContext.rollback()
+                        }
                     }
                     .disabled(!move.hasManualRouteCoordinates)
 
@@ -899,10 +922,7 @@ private struct TimelineEntryContextMenu: ViewModifier {
                                     if let dayKey = move.dayTimeline?.dayKey {
                                         ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
                                     }
-                                    NotificationCenter.default.post(
-                                        name: .movesMoveDataDidChange,
-                                        object: move.id
-                                    )
+                                    TimelineMutationNotifier.didChange(dayKey: move.dayTimeline?.dayKey, objectID: move.id)
                                 } catch {
                                     modelContext.rollback()
                                 }
@@ -1000,7 +1020,12 @@ private struct TimelineEntryContextMenu: ViewModifier {
         }
 
         modelContext.insert(duplicate)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            TimelineMutationNotifier.didChange(dayKey: duplicate.dayTimeline?.dayKey, objectID: duplicate.id)
+        } catch {
+            modelContext.rollback()
+        }
     }
 
     private func simplifyRoute(for move: MoveSegment) {
@@ -1019,7 +1044,12 @@ private struct TimelineEntryContextMenu: ViewModifier {
         guard simplified.count < coordinates.count else { return }
 
         move.storeManualRouteCoordinates(simplified)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            TimelineMutationNotifier.didChange(dayKey: move.dayTimeline?.dayKey, objectID: move.id)
+        } catch {
+            modelContext.rollback()
+        }
     }
 
     private func routeCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
@@ -1390,6 +1420,7 @@ private struct DayPresentationSource {
         }
 
         do {
+            MovesStartupInstrumentation.event("todayMoveFetch")
             var moveDescriptor = FetchDescriptor<MoveSegment>(
                 predicate: movePredicate,
                 sortBy: [SortDescriptor(\MoveSegment.endDate, order: .reverse)]
@@ -1418,7 +1449,9 @@ private struct DayPresentationSource {
             importedDescriptor.fetchLimit = 1
 
             let fetchedMoves = try context.fetch(moveDescriptor)
+            MovesStartupInstrumentation.event("todayPlaceFetch")
             let fetchedPlaces = try context.fetch(placeDescriptor)
+            MovesStartupInstrumentation.event("todayLocationSampleFetch")
             let fetchedSamples = try context.fetch(sampleDescriptor)
             let moves = loadAll
                 ? fetchedMoves
@@ -1509,6 +1542,11 @@ private enum DayPresentationSourceCache {
         keysInUseOrder.removeAll(keepingCapacity: true)
     }
 
+    static func remove(dayKey: String) {
+        entries = entries.filter { !$0.key.hasPrefix("\(dayKey)|") }
+        keysInUseOrder.removeAll { $0.hasPrefix("\(dayKey)|") }
+    }
+
     private static func markRecentlyUsed(_ key: String) {
         keysInUseOrder.removeAll { $0 == key }
         keysInUseOrder.append(key)
@@ -1549,6 +1587,11 @@ private enum DayTimelinePresentationCacheStore {
     static func removeAll() {
         entries.removeAll(keepingCapacity: true)
         keysInUseOrder.removeAll(keepingCapacity: true)
+    }
+
+    static func remove(dayKey: String) {
+        entries.removeValue(forKey: dayKey)
+        keysInUseOrder.removeAll { $0 == dayKey }
     }
 
     private static func markRecentlyUsed(_ key: String) {
@@ -1830,6 +1873,11 @@ private enum DayMapPresentationCacheStore {
         keysInUseOrder.removeAll(keepingCapacity: true)
     }
 
+    static func remove(dayKey: String) {
+        entries = entries.filter { !$0.key.hasPrefix("\(dayKey)|") }
+        keysInUseOrder.removeAll { $0.hasPrefix("\(dayKey)|") }
+    }
+
     private static func markRecentlyUsed(_ key: String) {
         keysInUseOrder.removeAll { $0 == key }
         keysInUseOrder.append(key)
@@ -1931,6 +1979,18 @@ private enum DayMapSnapshotCache {
 
 @MainActor
 enum TimelinePresentationCacheInvalidator {
+    static func invalidate(dayKey: String?) {
+        guard let dayKey else {
+            invalidateAll()
+            return
+        }
+        DayPresentationSourceCache.remove(dayKey: dayKey)
+        DayTimelinePresentationCacheStore.remove(dayKey: dayKey)
+        DayMapPresentationCacheStore.remove(dayKey: dayKey)
+        // Snapshot keys include the day but are opaque hashes, so clear this small memory cache.
+        DayMapSnapshotCache.removeAll()
+    }
+
     static func invalidateAll() {
         DayPresentationSourceCache.removeAll()
         DayTimelinePresentationCacheStore.removeAll()
@@ -2130,22 +2190,26 @@ struct DayMapStrip: View {
                 }
             }
             .task {
-                for await _ in NotificationCenter.default.notifications(
+                for await notification in NotificationCenter.default.notifications(
                     named: .movesMoveDataDidChange
                 ) {
                     guard !Task.isCancelled else { return }
                     presentationGeneration &+= 1
-                    DayMapPresentationCacheStore.removeAll()
-                    DayPresentationSourceCache.removeAll()
+                    TimelinePresentationCacheInvalidator.invalidate(
+                        dayKey: notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
+                    )
                 }
             }
             .task(id: "presentation|\(presentationRefreshKey)") {
                 guard !Task.isCancelled else { return }
+                MovesStartupInstrumentation.event("selectedDayMapPresentationStart")
                 let rawMode = routeDisplayMode == .rawOSLocationFixes
                 if let cached = DayMapPresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode) {
                     applyPresentation(cached)
+                    MovesStartupInstrumentation.event("selectedDayMapPresentationEnd")
                     return
                 }
+                let state = MovesStartupInstrumentation.signposter.beginInterval("selectedDayMapPresentationFetchAndBuild")
                 let source = DayPresentationSourceCache.source(
                     for: dayTimeline,
                     generation: presentationGeneration,
@@ -2162,7 +2226,9 @@ struct DayMapStrip: View {
                     for: dayTimeline.dayKey,
                     rawMode: rawMode
                 )
+                MovesStartupInstrumentation.signposter.endInterval("selectedDayMapPresentationFetchAndBuild", state)
                 applyPresentation(cache)
+                MovesStartupInstrumentation.event("selectedDayMapPresentationEnd")
             }
             .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)|\(routeDisplayMode.rawValue)") {
                 guard isActive, RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode), !Task.isCancelled else { return }

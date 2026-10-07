@@ -359,21 +359,45 @@ final class TimelineDayWindowStore: ObservableObject {
     static let pagerWindowSize = 5
     static let recentSidebarWindowSize = 60
 
+    struct LaunchQueryCounts: Equatable {
+        var initialRecentWindowFetches = 0
+        var explicitWindowReloads = 0
+        var loadedTodaySelections = 0
+    }
+
     @Published private(set) var pagerDays: [DayTimeline] = []
     @Published private(set) var recentDays: [DayTimeline] = []
     @Published private(set) var hasOlderDays = false
     @Published private(set) var hasNewerDays = false
+    private(set) var launchQueryCounts = LaunchQueryCounts()
 
     private var modelContext: ModelContext?
 
     func loadInitial(using modelContext: ModelContext) {
+        MovesStartupInstrumentation.event("initialTimelineWindowLoadStart")
+        let state = MovesStartupInstrumentation.signposter.beginInterval("initialTimelineWindowLoad")
         self.modelContext = modelContext
-        guard pagerDays.isEmpty else { return }
+        guard pagerDays.isEmpty else {
+            MovesStartupInstrumentation.signposter.endInterval("initialTimelineWindowLoad", state)
+            return
+        }
+        launchQueryCounts.initialRecentWindowFetches += 1
         reloadLatest()
+        MovesStartupInstrumentation.event("initialTimelineWindowLoadEnd")
+        MovesStartupInstrumentation.signposter.endInterval("initialTimelineWindowLoad", state)
+    }
+
+    /// Selects a day already included in the bounded pager without issuing another query.
+    @discardableResult
+    func selectLoadedDay(dayKey: String) -> Bool {
+        guard pagerDays.contains(where: { $0.dayKey == dayKey }) else { return false }
+        launchQueryCounts.loadedTodaySelections += 1
+        return true
     }
 
     func reloadLatest() {
         guard let modelContext else { return }
+        MovesStartupInstrumentation.event("dayTimelineRecentWindowFetch")
 
         do {
             var descriptor = FetchDescriptor<DayTimeline>(
@@ -406,6 +430,8 @@ final class TimelineDayWindowStore: ObservableObject {
     @discardableResult
     func loadWindow(around date: Date, refreshRecentDays: Bool = false) -> Bool {
         guard let modelContext else { return false }
+        launchQueryCounts.explicitWindowReloads += 1
+        MovesStartupInstrumentation.event("dayTimelineExplicitWindowReload")
 
         do {
             let center = try nearestDay(to: date, in: modelContext)
@@ -645,6 +671,7 @@ struct ContentView: View {
     @State private var isShowingDayDeletionError = false
     @StateObject private var timelineScreenshotService = TimelineScreenshotServiceCoordinator()
     @State private var spotlightTask: Task<Void, Never>?
+    @State private var lastForegroundDayKey = ""
 
     /// Keep this projection relationship-free. Checking `hasRecordedActivity` here would
     /// materialize every imported place/move/sample collection before the first map frame.
@@ -823,14 +850,6 @@ struct ContentView: View {
             Text(dayDeletionErrorMessage)
         }
         .task {
-            guard !ProcessInfo.processInfo.isRunningForPreviews else { return }
-            if captureManager.isLocationTrackingAvailable {
-                multiDevicePresenceManager.refreshPresence()
-                await captureManager.start()
-                await repairRecentMoveGapsIfNeeded()
-            }
-        }
-        .task {
             // Do not derive these maintenance triggers from the complete timeline. A bulk
             // import can contain tens of thousands of related records, and evaluating a
             // body-level signature would materialize and sort all of them on the main actor.
@@ -868,28 +887,41 @@ struct ContentView: View {
             }
         }
         .task {
-            for await _ in NotificationCenter.default.notifications(
+            for await notification in NotificationCenter.default.notifications(
                 named: .movesMoveDataDidChange
             ) {
                 guard !Task.isCancelled else { return }
-                TimelinePresentationCacheInvalidator.invalidateAll()
-                timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                let changedDayKey = notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
+                TimelinePresentationCacheInvalidator.invalidate(dayKey: changedDayKey)
+                if changedDayKey == nil || changedDayKey == selectedDayKey {
+                    timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                }
                 cloudDataPresencePublisher.publishSoon()
             }
         }
         .onAppear {
             timelineWindow.loadInitial(using: modelContext)
-            openCurrentDay()
+            let todayKey = DayTimeline.makeDayKey(for: Calendar.current.startOfDay(for: .now))
+            lastForegroundDayKey = todayKey
+            if timelineWindow.selectLoadedDay(dayKey: todayKey) {
+                selectDay(dayKey: todayKey)
+                MovesStartupInstrumentation.event("todaySelectedFromInitialWindow")
+            } else {
+                openCurrentDay()
+            }
             modelContext.undoManager = undoController.manager
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await MovesStartupMilestone.waitForFirstTimelineInteractive()
+            await MovesStartupMilestone.waitForDeferredMaintenanceComplete()
+            guard !Task.isCancelled, scenePhase == .active else { return }
+            MovesStartupInstrumentation.event("deferredTimelineMaintenanceStart")
+            await repairRecentMoveGapsIfNeeded()
+            repairDuplicateDayTimelinesIfNeeded()
             refreshSpotlightIndex()
             cloudDataPresencePublisher.publishSoon()
-        }
-        .task {
-            // Historical cleanup is maintenance, not a launch prerequisite. Defer its
-            // unbounded day-key check until the pager has had time to become interactive.
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            repairDuplicateDayTimelinesIfNeeded()
+            MovesStartupInstrumentation.event("deferredTimelineMaintenanceEnd")
         }
         .onChange(of: recordedDaySignature) { _, _ in
             syncSelectedDayIfNeeded()
@@ -902,12 +934,15 @@ struct ContentView: View {
                 return
             }
             importedRouteDataSummary.setProcessingEnabled(true)
-            if captureManager.isLocationTrackingAvailable {
-                multiDevicePresenceManager.refreshPresence()
-            }
+            let todayKey = DayTimeline.makeDayKey(for: Calendar.current.startOfDay(for: .now))
+            guard !lastForegroundDayKey.isEmpty, lastForegroundDayKey != todayKey else { return }
             ensureCurrentDayExists()
-            refreshSpotlightIndex()
-            cloudDataPresencePublisher.publishSoon()
+            if selectedDayKey == lastForegroundDayKey {
+                openCurrentDay()
+            } else if !timelineWindow.selectLoadedDay(dayKey: todayKey) {
+                timelineWindow.reloadLatest()
+            }
+            lastForegroundDayKey = todayKey
         }
         .onOpenURL(perform: handleDeepLink)
         .dropDestination(for: RouteFileDropItem.self) { items, _ in
@@ -1365,28 +1400,41 @@ struct ContentView: View {
         let todayStart = calendar.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
 
+        if timelineWindow.selectLoadedDay(dayKey: todayKey) {
+            selectDay(dayKey: todayKey)
+            MovesStartupInstrumentation.event("todaySelectedFromLoadedWindow")
+            return
+        }
+
+        let lookupState = MovesStartupInstrumentation.signposter.beginInterval("currentDayFallbackLookup")
         ensureCurrentDayExists()
         _ = timelineWindow.loadWindow(around: todayStart, refreshRecentDays: true)
+        MovesStartupInstrumentation.signposter.endInterval("currentDayFallbackLookup", lookupState)
 
         #if targetEnvironment(macCatalyst)
         // Catalyst is a review/import client. Never manufacture placeholder records while
         // CloudKit is still populating a fresh local store.
         if let todayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
-            selectedDayKey = todayKey
-            selectedPageIndex = todayIndex
+            selectDay(dayKey: todayKey, index: todayIndex)
         } else if let latestIndex = recordedDayTimelines.indices.last {
-            selectedDayKey = recordedDayTimelines[latestIndex].dayKey
-            selectedPageIndex = latestIndex
+            selectDay(dayKey: recordedDayTimelines[latestIndex].dayKey, index: latestIndex)
         }
         return
         #endif
 
         if let todayIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == todayKey }) {
-            selectedDayKey = todayKey
-            selectedPageIndex = todayIndex
+            selectDay(dayKey: todayKey, index: todayIndex)
         } else if let latestIndex = recordedDayTimelines.indices.last {
-            selectedDayKey = recordedDayTimelines[latestIndex].dayKey
-            selectedPageIndex = latestIndex
+            selectDay(dayKey: recordedDayTimelines[latestIndex].dayKey, index: latestIndex)
+        }
+    }
+
+    private func selectDay(dayKey: String, index: Int? = nil) {
+        selectedDayKey = dayKey
+        if let index {
+            selectedPageIndex = index
+        } else if let loadedIndex = recordedDayTimelines.firstIndex(where: { $0.dayKey == dayKey }) {
+            selectedPageIndex = loadedIndex
         }
     }
 
@@ -1401,6 +1449,7 @@ struct ContentView: View {
         #else
         let todayStart = Calendar.current.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
+        MovesStartupInstrumentation.event("currentDayLookup")
         var descriptor = FetchDescriptor<DayTimeline>(
             predicate: #Predicate { day in
                 day.dayKey == todayKey
@@ -1412,6 +1461,7 @@ struct ContentView: View {
         modelContext.insert(DayTimeline(dayStart: todayStart))
         do {
             try modelContext.save()
+            MovesStartupInstrumentation.event("currentDayCreated")
         } catch {
             print("Failed to create day timelines: \(error.localizedDescription)")
         }

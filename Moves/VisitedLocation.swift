@@ -3302,10 +3302,12 @@ final class MultiDevicePresenceManager: ObservableObject {
     }
 
     func refreshPresence() {
+        MovesStartupInstrumentation.event("devicePresenceRefresh")
         let context = ModelContext(modelContainer)
         let currentIdentifier = DeviceIdentityStore.currentIdentifier
 
         do {
+            MovesStartupInstrumentation.event("devicePresenceFetch")
             let profiles = try context.fetch(FetchDescriptor<MovesDeviceProfile>())
             if let currentProfile = profiles.first(where: { $0.deviceIdentifier == currentIdentifier }) {
                 currentProfile.displayName = DeviceIdentityStore.displayName
@@ -3316,8 +3318,10 @@ final class MultiDevicePresenceManager: ObservableObject {
                     displayName: DeviceIdentityStore.displayName
                 ))
             }
+            MovesStartupInstrumentation.event("devicePresenceSave")
             try context.save()
 
+            MovesStartupInstrumentation.event("devicePresenceFetch")
             let refreshedProfiles = try context.fetch(FetchDescriptor<MovesDeviceProfile>())
             otherDeviceNames = refreshedProfiles
                 .filter { $0.deviceIdentifier != currentIdentifier }

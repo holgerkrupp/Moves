@@ -251,6 +251,7 @@ actor MovesSyncDiagnosticsSnapshotLoader {
 
     func load() throws -> MovesSyncTimelineSnapshot {
         try Task.checkCancellation()
+        MovesStartupInstrumentation.event("diagnosticsSnapshotQuery")
         let context = ModelContext(modelContainer)
         let placeCount = try context.fetchCount(FetchDescriptor<VisitPlace>())
         try Task.checkCancellation()
@@ -420,6 +421,7 @@ final class MovesSyncDiagnostics: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var observationTask: Task<Void, Never>?
     private var observationsEnabled = false
+    private var hasInstalledObservers = false
 
     init(
         modelContainer: ModelContainer,
@@ -435,11 +437,6 @@ final class MovesSyncDiagnostics: ObservableObject {
         self.observationDebounce = observationDebounce
         self.userDefaults = userDefaults
         self.notificationCenter = notificationCenter
-        if let data = userDefaults.data(forKey: Self.persistedEventsKey),
-           let stored = try? JSONDecoder().decode([Event].self, from: data) {
-            events = Array(stored.suffix(Self.maxEvents))
-        }
-        observeNotifications()
     }
 
     deinit {
@@ -447,9 +444,17 @@ final class MovesSyncDiagnostics: ObservableObject {
         observers.forEach(notificationCenter.removeObserver)
     }
 
-    /// Starts the auxiliary timeline snapshot after the app has published its
-    /// usable container. Calling this repeatedly is safe and coalesces work.
+    /// Starts auxiliary snapshot work after the first interactive Timeline. Calling
+    /// this repeatedly is safe and coalesces work.
     func startObservingTimeline() {
+        if !hasInstalledObservers {
+            hasInstalledObservers = true
+            if let data = userDefaults.data(forKey: Self.persistedEventsKey),
+               let stored = try? JSONDecoder().decode([Event].self, from: data) {
+                events = Array(stored.suffix(Self.maxEvents))
+            }
+            observeNotifications()
+        }
         observationsEnabled = true
         scheduleTimelineObservation(reason: "startup", debounce: false)
     }

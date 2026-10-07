@@ -204,6 +204,17 @@ struct MovesSettingsView: View {
 #if DEBUG
                 Section {
                     NavigationLink {
+                        StartupPerformanceDebugView()
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Startup Performance",
+                            subtitle: "Launch phases, counters, and large-history check",
+                            systemImage: "speedometer",
+                            tint: .green
+                        )
+                    }
+
+                    NavigationLink {
                         ExplorationDebugView()
                     } label: {
                         SettingsMenuRow(
@@ -526,6 +537,198 @@ private struct SettingsMenuRow: View {
         .padding(.vertical, 3)
     }
 }
+
+#if DEBUG
+private struct StartupPerformanceDebugView: View {
+    private static let events = [
+        "appInit", "modelContainerOpenStart", "modelContainerOpenEnd", "modelContainerReady", "currentDayLookup",
+        "currentDayCreated", "runtimeReady", "firstContentViewConstruction",
+        "initialTimelineWindowLoadStart", "initialTimelineWindowLoadEnd", "todaySelectedFromInitialWindow",
+        "selectedDayPresentationStart", "selectedDayPresentationEnd",
+        "selectedDayMapPresentationStart", "selectedDayMapPresentationEnd",
+        "firstTimelineInteractive", "activeServicesStart", "deferredMaintenanceStart",
+        "deferredMaintenanceEnd", "todayMoveFetch", "todayPlaceFetch",
+        "todayLocationSampleFetch", "devicePresenceRefresh", "devicePresenceFetch",
+        "devicePresenceSave", "diagnosticsSnapshotQuery"
+    ]
+
+    @State private var benchmark: StartupHistoryBenchmarkResult?
+    @State private var isRunningBenchmark = false
+    @State private var benchmarkError: String?
+
+    var body: some View {
+        List {
+            Section("Last Launch") {
+                metric("App init → interactive Timeline", interval: "appInit", to: "firstTimelineInteractive")
+                metric("Container open", interval: "modelContainerOpenStart", to: "modelContainerOpenEnd")
+                metric("Initial bounded day window", interval: "initialTimelineWindowLoadStart", to: "initialTimelineWindowLoadEnd")
+                metric("Selected-day presentation", interval: "selectedDayPresentationStart", to: "selectedDayPresentationEnd")
+                metric("Selected-day map", interval: "selectedDayMapPresentationStart", to: "selectedDayMapPresentationEnd")
+                metric("Container ready → interactive", interval: "modelContainerReady", to: "firstTimelineInteractive")
+                metric("Interactive → maintenance complete", interval: "firstTimelineInteractive", to: "deferredMaintenanceEnd")
+                ForEach(Self.events, id: \.self) { event in
+                    let count = UserDefaults.standard.integer(forKey: "Moves.startup.counter.\(event)")
+                    if count > 0 {
+                        LabeledContent(event, value: "\(count)")
+                    }
+                }
+            }
+
+            Section("Structural Checks") {
+                structuralCheck("Initial recent-day load is bounded", count: "dayTimelineRecentWindowFetch", maximum: 1)
+                structuralCheck("Today fallback reloads", count: "dayTimelineExplicitWindowReload", maximum: 0)
+                structuralCheck("Presence startup owner", count: "devicePresenceRefresh", maximum: 1)
+                structuralCheck("Active-services startup owner", count: "activeServicesStart", maximum: 1)
+                structuralCheck("Today move fetch", count: "todayMoveFetch", maximum: 1)
+                structuralCheck("Today place fetch", count: "todayPlaceFetch", maximum: 1)
+                structuralCheck("Today sample fetch", count: "todayLocationSampleFetch", maximum: 1)
+                Text("Counters reset automatically at process launch. Open this screen after Today first becomes interactive.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Large History Fixture") {
+                Text("Creates 10,000 synthetic day records in a temporary in-memory store, then measures the same bounded newest-days query used by the Timeline pager and a day-key lookup. No personal timeline data is read or changed.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    Task { await runBenchmark() }
+                } label: {
+                    if isRunningBenchmark {
+                        Label("Measuring…", systemImage: "hourglass")
+                    } else {
+                        Label("Run 10,000-day check", systemImage: "play.fill")
+                    }
+                }
+                .disabled(isRunningBenchmark)
+
+                if let benchmark {
+                    LabeledContent("Fixture records", value: benchmark.recordCount.formatted())
+                    LabeledContent("Bounded pager rows", value: benchmark.boundedRowCount.formatted())
+                    LabeledContent("Fixture insert + save", value: benchmark.fixtureWriteMilliseconds.formatted(.number.precision(.fractionLength(1))) + " ms")
+                    LabeledContent("Newest 60 query", value: benchmark.boundedQueryMilliseconds.formatted(.number.precision(.fractionLength(1))) + " ms")
+                    LabeledContent("Warm newest 60 query", value: benchmark.warmBoundedQueryMilliseconds.formatted(.number.precision(.fractionLength(1))) + " ms")
+                    LabeledContent("Day-key lookup", value: benchmark.dayKeyQueryMilliseconds.formatted(.number.precision(.fractionLength(1))) + " ms")
+                    Label(benchmark.passed ? "Bounded result passed" : "Bounded result failed", systemImage: benchmark.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(benchmark.passed ? .green : .red)
+                }
+                if let benchmarkError {
+                    Text(benchmarkError).font(.footnote).foregroundStyle(.red)
+                }
+            }
+
+            Section("Schema Index Review") {
+                Text("The benchmark records baseline query timings without changing the CloudKit-backed schema. Add an index only after repeated device measurements show a material win and the production migration path is verified.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Reset startup measurements", role: .destructive) {
+                    for event in Self.events {
+                        UserDefaults.standard.removeObject(forKey: "Moves.startup.counter.\(event)")
+                        UserDefaults.standard.removeObject(forKey: "Moves.startup.time.\(event)")
+                    }
+                }
+            }
+        }
+        .navigationTitle("Startup Performance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private func metric(_ title: String, interval start: String, to end: String) -> some View {
+        let startTime = UserDefaults.standard.double(forKey: "Moves.startup.time.\(start)")
+        let endTime = UserDefaults.standard.double(forKey: "Moves.startup.time.\(end)")
+        if startTime > 0, endTime >= startTime {
+            LabeledContent(title, value: ((endTime - startTime) * 1_000).formatted(.number.precision(.fractionLength(1))) + " ms")
+        }
+    }
+
+    private func structuralCheck(_ title: String, count event: String, maximum: Int) -> some View {
+        let count = UserDefaults.standard.integer(forKey: "Moves.startup.counter.\(event)")
+        let passed = count <= maximum
+        return LabeledContent {
+            Label("\(count) / \(maximum)", systemImage: passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(passed ? .green : .red)
+        } label: {
+            Text(title)
+        }
+    }
+
+    @MainActor
+    private func runBenchmark() async {
+        isRunningBenchmark = true
+        benchmarkError = nil
+        defer { isRunningBenchmark = false }
+        do {
+            let container = try await Task.detached(priority: .utility) {
+                let container = try MovesTimelineStore.makeApplicationContainer(isStoredInMemoryOnly: true)
+                let worker = StartupHistoryBenchmarkWorker(modelContainer: container)
+                return try await worker.run()
+            }.value
+            benchmark = container
+        } catch {
+            benchmarkError = error.localizedDescription
+        }
+    }
+}
+
+private struct StartupHistoryBenchmarkResult: Sendable {
+    let recordCount: Int
+    let boundedRowCount: Int
+    let fixtureWriteMilliseconds: Double
+    let boundedQueryMilliseconds: Double
+    let warmBoundedQueryMilliseconds: Double
+    let dayKeyQueryMilliseconds: Double
+    let passed: Bool
+}
+
+@ModelActor
+private actor StartupHistoryBenchmarkWorker {
+    func run() throws -> StartupHistoryBenchmarkResult {
+        let recordCount = 10_000
+        let newestDay = Calendar.current.startOfDay(for: .now)
+        let start = Date.now
+        for offset in 0..<recordCount {
+            guard let date = Calendar.current.date(byAdding: .day, value: -offset, to: newestDay) else { continue }
+            modelContext.insert(DayTimeline(dayStart: date))
+        }
+        try modelContext.save()
+        let fixtureMilliseconds = Date.now.timeIntervalSince(start) * 1_000
+
+        var newestDescriptor = FetchDescriptor<DayTimeline>(sortBy: [SortDescriptor(\.dayStart, order: .reverse)])
+        newestDescriptor.fetchLimit = TimelineDayWindowStore.recentSidebarWindowSize
+        let queryStart = Date.now
+        let newestDays = try modelContext.fetch(newestDescriptor)
+        let boundedMilliseconds = Date.now.timeIntervalSince(queryStart) * 1_000
+        let warmQueryStart = Date.now
+        _ = try modelContext.fetch(newestDescriptor)
+        let warmBoundedMilliseconds = Date.now.timeIntervalSince(warmQueryStart) * 1_000
+
+        let newestKey = DayTimeline.makeDayKey(for: newestDay)
+        let dayPredicate = #Predicate<DayTimeline> { $0.dayKey == newestKey }
+        var dayDescriptor = FetchDescriptor<DayTimeline>(predicate: dayPredicate)
+        dayDescriptor.fetchLimit = 1
+        let lookupStart = Date.now
+        let matchingDay = try modelContext.fetch(dayDescriptor).first
+        let keyMilliseconds = Date.now.timeIntervalSince(lookupStart) * 1_000
+
+        return StartupHistoryBenchmarkResult(
+            recordCount: recordCount,
+            boundedRowCount: newestDays.count,
+            fixtureWriteMilliseconds: fixtureMilliseconds,
+            boundedQueryMilliseconds: boundedMilliseconds,
+            warmBoundedQueryMilliseconds: warmBoundedMilliseconds,
+            dayKeyQueryMilliseconds: keyMilliseconds,
+            passed: newestDays.count == TimelineDayWindowStore.recentSidebarWindowSize
+                && matchingDay?.dayKey == newestKey
+                && fixtureMilliseconds.isFinite
+        )
+    }
+}
+#endif
 
 private struct SettingsAppearanceDetailView: View {
     @Binding var showsBigMarkers: Bool

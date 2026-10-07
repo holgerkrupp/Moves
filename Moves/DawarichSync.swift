@@ -668,6 +668,7 @@ final class LocationServiceSyncManager: ObservableObject {
     private let crossDeviceWorkCoordinator: CrossDeviceWorkCoordinator
     private var notificationObserver: NSObjectProtocol?
     private var resyncRequested: Set<LocationService> = []
+    private var hasStartedObserving = false
     private static let batchSize = 100
     private static let moveFetchBatchSize = 100
 
@@ -683,6 +684,11 @@ final class LocationServiceSyncManager: ObservableObject {
             modelContainer: modelContainer,
             backend: .cloudKit
         )
+    }
+
+    func startObserving() {
+        guard !hasStartedObserving else { return }
+        hasStartedObserving = true
         migrateLegacyDawarichDefaultsIfNeeded()
         reloadSettings()
 

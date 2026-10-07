@@ -48,3 +48,23 @@ extension Notification.Name {
     static let movesCloudKitImportObserved = Notification.Name("Moves.cloudKitImportObserved")
     static let movesCloudKitRetryRequested = Notification.Name("Moves.cloudKitRetryRequested")
 }
+
+@MainActor
+enum TimelineMutationNotifier {
+    static let dayKeyUserInfoKey = "dayKey"
+
+    static func didChange(dayKey: String?, objectID: UUID? = nil) {
+        #if os(iOS)
+        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayKey)
+        #endif
+        var userInfo: [String: String] = [:]
+        if let dayKey {
+            userInfo[dayKeyUserInfoKey] = dayKey
+        }
+        NotificationCenter.default.post(
+            name: .movesMoveDataDidChange,
+            object: objectID,
+            userInfo: userInfo.isEmpty ? nil : userInfo
+        )
+    }
+}
