@@ -800,6 +800,13 @@ enum RawLocationFixPresentation {
             }
     }
 
+    /// A bounded, chronological list of genuine OS fixes for the interactive timeline.
+    /// Imported file routes and derived/interpolated points are not OS observations.
+    static func orderedTimelineFixes(from samples: [LocationSample], limit: Int) -> [LocationSample] {
+        guard limit > 0 else { return [] }
+        return Array(orderedOSFixes(from: samples).suffix(limit))
+    }
+
     static func drawsConnectingGeometry(in mode: TrackingRouteDisplayMode) -> Bool {
         mode == .reconstructed
     }

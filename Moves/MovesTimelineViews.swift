@@ -92,6 +92,7 @@ struct DayTimelinePageContent: View {
     private static let transientStopMaximumDuration: TimeInterval = 5 * 60
     private static let provisionalPlaceNameResolver = CLGeocoderPlaceNameResolver()
 
+    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
     @State private var provisionalSampleResolvedTitle: String?
     @State private var provisionalSampleResolvedKey: String?
     @State private var presentationCache: DayTimelinePresentationCache
@@ -116,7 +117,8 @@ struct DayTimelinePageContent: View {
         _mapSelection = mapSelection
         // Do not fault SwiftData relationships while SwiftUI constructs a page. A nearby
         // cache hit is still displayed immediately; misses are loaded by the task below.
-        let initialCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey)
+        let rawMode = UserDefaults.standard.string(forKey: TrackingRouteDisplayMode.storageKey) == TrackingRouteDisplayMode.rawOSLocationFixes.rawValue
+        let initialCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode)
             ?? Self.initialPresentationCache()
         _presentationCache = State(initialValue: initialCache)
     }
@@ -151,7 +153,8 @@ struct DayTimelinePageContent: View {
 
     private static func makePresentationCache(
         for dayTimeline: DayTimeline,
-        source: DayPresentationSource
+        source: DayPresentationSource,
+        mode: TrackingRouteDisplayMode
     ) -> DayTimelinePresentationCache {
         // Keep the complete import in SwiftData/iCloud, but bound the interactive phone
         // timeline to a recent window. Rendering one row and one map polyline per imported
@@ -185,7 +188,16 @@ struct DayTimelinePageContent: View {
             .map(TimelineEntry.place)
         let moves = displayedMoves.map(TimelineEntry.move)
         let latestSample = source.visibleSamples.max { $0.timestamp < $1.timestamp }
-        var entries = (places + moves).sorted { $0.startDate < $1.startDate }
+        let rawFixEntries: [TimelineEntry] = mode == .rawOSLocationFixes
+            ? RawLocationFixPresentation.orderedTimelineFixes(
+                from: source.visibleSamples,
+                limit: TimelinePresentationLimits.maxTimelineRawFixes
+            ).map { .rawFix($0) }
+            : []
+        var entries = (places + moves + rawFixEntries).sorted {
+            if $0.startDate == $1.startDate { return $0.id < $1.id }
+            return $0.startDate < $1.startDate
+        }
 
         if let firstMove = displayedMoves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
            let startPlace = firstMove.startPlace {
@@ -339,10 +351,11 @@ struct DayTimelinePageContent: View {
         .task(id: provisionalSampleLookupKey) {
             await resolveProvisionalSampleTitle()
         }
-        .task(id: "presentation|\(presentationRefreshKey)") {
+        .task(id: "presentation|\(presentationRefreshKey)|\(routeDisplayMode.rawValue)") {
             guard !Task.isCancelled else { return }
             MovesStartupInstrumentation.event("selectedDayPresentationStart")
-            if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey) {
+            let rawMode = routeDisplayMode == .rawOSLocationFixes
+            if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode) {
                 presentationCache = cached
                 importedDataStatus = cached.hasImportedRouteData
                 MovesStartupInstrumentation.event("selectedDayPresentationEnd")
@@ -356,9 +369,10 @@ struct DayTimelinePageContent: View {
                 generation: presentationGeneration
             )
             importedDataStatus = source.hasImportedRouteData
-            let cache = Self.makePresentationCache(for: dayTimeline, source: source)
+            let cache = Self.makePresentationCache(for: dayTimeline, source: source, mode: routeDisplayMode)
             MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
-            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey)
+            guard !Task.isCancelled else { return }
+            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey, rawMode: rawMode)
             presentationCache = cache
             MovesStartupInstrumentation.event("selectedDayPresentationEnd")
             markTimelineInteractiveIfNeeded()
@@ -393,8 +407,17 @@ struct DayTimelinePageContent: View {
         .onChange(of: dayTimeline.dayKey) { _, _ in
             presentationGeneration = 0
             importedDataStatus = nil
-            presentationCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey)
-                ?? Self.initialPresentationCache()
+            presentationCache = DayTimelinePresentationCacheStore.value(
+                for: dayTimeline.dayKey,
+                rawMode: routeDisplayMode == .rawOSLocationFixes
+            ) ?? Self.initialPresentationCache()
+            mapSelection = nil
+        }
+        .onChange(of: routeDisplayMode) { _, newMode in
+            presentationCache = DayTimelinePresentationCacheStore.value(
+                for: dayTimeline.dayKey,
+                rawMode: newMode == .rawOSLocationFixes
+            ) ?? Self.initialPresentationCache()
             mapSelection = nil
         }
         .sheet(isPresented: $isReviewingImportedData) {
@@ -618,8 +641,22 @@ struct DayTimelinePageContent: View {
     @ViewBuilder
     private func timelinePanel(usesSelection: Bool) -> some View {
         let rows = timelineRows
+        let rawFixCount = rows.reduce(into: 0) { count, row in
+            if case .rawFix = row.entry { count += 1 }
+        }
 
         VStack(spacing: 0) {
+            if routeDisplayMode == .rawOSLocationFixes,
+               rawFixCount >= TimelinePresentationLimits.maxTimelineRawFixes {
+                Text("Showing the latest \(TimelinePresentationLimits.maxTimelineRawFixes) loaded raw OS location fixes.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                Divider()
+            }
+
             if presentationCache.omittedMoveCount > 0 {
                 let moveCount = displayedMoveCount(in: rows)
                 Text("Showing the latest \(moveCount) of \(moveCount + presentationCache.omittedMoveCount) routes.")
@@ -751,7 +788,7 @@ struct DayTimelinePageContent: View {
             }
             .buttonStyle(.plain)
 
-        case .liveRoute, .start, .sample:
+        case .liveRoute, .start, .sample, .rawFix:
             EmptyView()
         }
     }
@@ -790,7 +827,7 @@ struct DayTimelinePageContent: View {
         case .start:
             StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
 
-        case .sample:
+        case .sample, .rawFix:
             StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
         }
     }
@@ -843,7 +880,8 @@ struct DayTimelinePageContent: View {
                     undoManager: undoController.manager
                 )
             case .move(let move): try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoController.manager)
-            case .sample(let sample, _, _): try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
+            case .sample(let sample, _, _), .rawFix(let sample):
+                try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
             case .liveRoute, .start: return
             }
             mapSelection = nil
@@ -951,7 +989,7 @@ private struct TimelineEntryContextMenu: ViewModifier {
                 Divider()
                 Button("Delete Place", systemImage: "trash", role: .destructive, action: requestDelete)
 
-            case .sample:
+            case .sample, .rawFix:
                 Button("Delete Sample", systemImage: "trash", role: .destructive, action: requestDelete)
 
             case .liveRoute, .start:
@@ -1218,6 +1256,7 @@ enum TimelinePresentationLimits {
     static let maxRouteSamplesPerMove = 500
     static let maxTimelineImportedMoves = 120
     static let maxTimelineMoves = 180
+    static let maxTimelineRawFixes = 500
     static let maxMapImportedMoves = 60
     static let maxMapMoves = 100
     static let maxMapPlaceMarkers = 160
@@ -1569,15 +1608,21 @@ private enum DayTimelinePresentationCacheStore {
     private static var keysInUseOrder: [String] = []
     private static let maximumEntryCount = 12
 
-    static func value(for key: String) -> DayTimelinePresentationCache? {
-        guard let entry = entries[key] else { return nil }
-        markRecentlyUsed(key)
+    private static func cacheKey(dayKey: String, rawMode: Bool) -> String {
+        "\(dayKey)|\(rawMode ? "raw" : "normal")"
+    }
+
+    static func value(for key: String, rawMode: Bool = false) -> DayTimelinePresentationCache? {
+        let storageKey = cacheKey(dayKey: key, rawMode: rawMode)
+        guard let entry = entries[storageKey] else { return nil }
+        markRecentlyUsed(storageKey)
         return entry
     }
 
-    static func store(_ entry: DayTimelinePresentationCache, for key: String) {
-        entries[key] = entry
-        markRecentlyUsed(key)
+    static func store(_ entry: DayTimelinePresentationCache, for key: String, rawMode: Bool = false) {
+        let storageKey = cacheKey(dayKey: key, rawMode: rawMode)
+        entries[storageKey] = entry
+        markRecentlyUsed(storageKey)
         while keysInUseOrder.count > maximumEntryCount {
             let oldest = keysInUseOrder.removeFirst()
             entries.removeValue(forKey: oldest)
@@ -1590,8 +1635,11 @@ private enum DayTimelinePresentationCacheStore {
     }
 
     static func remove(dayKey: String) {
-        entries.removeValue(forKey: dayKey)
-        keysInUseOrder.removeAll { $0 == dayKey }
+        for rawMode in [false, true] {
+            let storageKey = cacheKey(dayKey: dayKey, rawMode: rawMode)
+            entries.removeValue(forKey: storageKey)
+            keysInUseOrder.removeAll { $0 == storageKey }
+        }
     }
 
     private static func markRecentlyUsed(_ key: String) {
@@ -2326,6 +2374,7 @@ struct DayMapStrip: View {
     private var mapContent: some MapContent {
         if routeDisplayMode == .rawOSLocationFixes {
             ForEach(presentationCache.rawLocationFixes) { fix in
+                let isSelected = selection == .sample(fix.id)
                 Annotation(fix.description, coordinate: fix.coordinate, anchor: .center) {
                     Button {
                         selection = .sample(fix.id)
@@ -2334,8 +2383,8 @@ struct DayMapStrip: View {
                             .fill(fix.source == .routeTracking || fix.source == .watchRouteTracking
                                   ? MovesPalette.routeTracking
                                   : MovesPalette.start)
-                            .frame(width: 9, height: 9)
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                            .frame(width: isSelected ? 14 : 9, height: isSelected ? 14 : 9)
+                            .overlay(Circle().stroke(.white, lineWidth: isSelected ? 3 : 1.5))
                             .shadow(color: .black.opacity(0.25), radius: 2)
                     }
                     .buttonStyle(.plain)
@@ -2830,8 +2879,11 @@ struct DayMapStrip: View {
             }
         case .liveRoute:
             coordinates = liveRouteSnapshot?.coordinates ?? []
-        case .sample:
-            coordinates = latestSampleCoordinate.map { [$0] } ?? []
+        case .sample(let sampleID):
+            coordinates = presentationCache.rawLocationFixes
+                .first(where: { $0.id == sampleID })
+                .map { [$0.coordinate] }
+                ?? (latestSampleCoordinate.map { [$0] } ?? [])
         case nil:
             refreshCamera()
             return
@@ -3218,6 +3270,18 @@ struct TimelineRowPresentation: Identifiable, Equatable {
             iconTintKind = .start
             showsHealthSourceBadge = false
 
+        case .rawFix(let location):
+            clockText = Self.timeString(from: location.timestamp)
+            titleText = "OS location fix"
+            let accuracy = location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0
+                ? "±\(Int(location.horizontalAccuracy.rounded())) m"
+                : "accuracy unavailable"
+            subtitleText = "\(location.source.displayName)   \(location.timestamp.formatted(date: .omitted, time: .standard))   \(accuracy)"
+            tertiaryText = Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
+            iconName = "location.circle.fill"
+            iconTintKind = location.source.isRouteTrack ? .routeTracking : .start
+            showsHealthSourceBadge = false
+
         case .sample(let location, let sampleCount, let resolvedName):
             clockText = Self.timeString(from: location.timestamp)
             if let resolvedName,
@@ -3265,10 +3329,11 @@ enum TimelineEntry: Identifiable {
     case liveRoute(LiveRouteTrackingSnapshot)
     case start(place: VisitPlace, timestamp: Date)
     case sample(location: LocationSample, sampleCount: Int, resolvedName: String?)
+    case rawFix(LocationSample)
 
     var isDeletable: Bool {
         switch self {
-        case .place, .move, .sample: true
+        case .place, .move, .sample, .rawFix: true
         case .liveRoute, .start: false
         }
     }
@@ -3285,6 +3350,8 @@ enum TimelineEntry: Identifiable {
             return "start-\(place.id.uuidString)-\(timestamp.timeIntervalSince1970)"
         case .sample(let location, _, _):
             return "sample-\(location.dedupeKey)-\(location.timestamp.timeIntervalSince1970)"
+        case .rawFix(let location):
+            return "raw-fix-\(location.dedupeKey)-\(location.timestamp.timeIntervalSince1970)"
         }
     }
 
@@ -3298,7 +3365,7 @@ enum TimelineEntry: Identifiable {
             return .liveRoute(snapshot.id)
         case .start(let place, _):
             return .place(place.id)
-        case .sample(let location, _, _):
+        case .sample(let location, _, _), .rawFix(let location):
             return .sample(location.dedupeKey)
         }
     }
@@ -3313,7 +3380,7 @@ enum TimelineEntry: Identifiable {
             return snapshot.latestDate
         case .start(_, let timestamp):
             return timestamp
-        case .sample(let location, _, _):
+        case .sample(let location, _, _), .rawFix(let location):
             return location.timestamp
         }
     }
@@ -3328,7 +3395,7 @@ enum TimelineEntry: Identifiable {
             return Self.timeString(from: snapshot.latestDate)
         case .start(_, let timestamp):
             return Self.timeString(from: timestamp)
-        case .sample(let location, _, _):
+        case .sample(let location, _, _), .rawFix(let location):
             return Self.timeString(from: location.timestamp)
         }
     }
@@ -3345,6 +3412,8 @@ enum TimelineEntry: Identifiable {
             return "sunrise.fill"
         case .sample:
             return "mappin.circle.fill"
+        case .rawFix:
+            return "location.circle.fill"
         }
     }
 
@@ -3360,6 +3429,8 @@ enum TimelineEntry: Identifiable {
             return MovesPalette.start
         case .sample:
             return MovesPalette.place
+        case .rawFix(let location):
+            return location.source.isRouteTrack ? MovesPalette.routeTracking : MovesPalette.start
         }
     }
 
@@ -3384,6 +3455,8 @@ enum TimelineEntry: Identifiable {
             return "\(start) to \(end)"
         case .liveRoute:
             return "Live route tracking"
+        case .rawFix:
+            return "OS location fix"
         case .sample(let location, _, let resolvedName):
             if let resolvedName,
                !resolvedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -3428,6 +3501,11 @@ enum TimelineEntry: Identifiable {
             return "\(snapshot.sampleCount) live fixes   \(duration)   \(distance)"
         case .sample:
             return "In progress"
+        case .rawFix(let location):
+            let accuracy = location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0
+                ? "±\(Int(location.horizontalAccuracy.rounded())) m"
+                : "accuracy unavailable"
+            return "\(location.source.displayName)   \(location.timestamp.formatted(date: .omitted, time: .standard))   \(accuracy)"
         }
     }
 
@@ -3450,6 +3528,8 @@ enum TimelineEntry: Identifiable {
                 return "Tracking will start as soon as GPS provides the first fix."
             }
             return "Last update \(snapshot.latestDate.formatted(date: .omitted, time: .shortened))"
+        case .rawFix(let location):
+            return Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
         case .sample(_, let sampleCount, _):
             if sampleCount == 1 {
                 return "1 location sample captured"
