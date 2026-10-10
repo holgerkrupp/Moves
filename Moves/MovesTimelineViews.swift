@@ -3276,7 +3276,7 @@ struct TimelineRowPresentation: Identifiable, Equatable {
             let accuracy = location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0
                 ? "±\(Int(location.horizontalAccuracy.rounded())) m"
                 : "accuracy unavailable"
-            subtitleText = "\(location.source.displayName)   \(accuracy)"
+            subtitleText = "\(location.source.displayName)   \(location.timestamp.formatted(date: .omitted, time: .standard))   \(accuracy)"
             tertiaryText = Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
             iconName = "location.circle.fill"
             iconTintKind = location.source.isRouteTrack ? .routeTracking : .start
@@ -3505,7 +3505,7 @@ enum TimelineEntry: Identifiable {
             let accuracy = location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0
                 ? "±\(Int(location.horizontalAccuracy.rounded())) m"
                 : "accuracy unavailable"
-            return "\(location.source.displayName)   \(accuracy)"
+            return "\(location.source.displayName)   \(location.timestamp.formatted(date: .omitted, time: .standard))   \(accuracy)"
         }
     }
 
