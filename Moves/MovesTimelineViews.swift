@@ -92,6 +92,7 @@ struct DayTimelinePageContent: View {
     private static let transientStopMaximumDuration: TimeInterval = 5 * 60
     private static let provisionalPlaceNameResolver = CLGeocoderPlaceNameResolver()
 
+    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
     @State private var provisionalSampleResolvedTitle: String?
     @State private var provisionalSampleResolvedKey: String?
     @State private var presentationCache: DayTimelinePresentationCache
@@ -116,7 +117,8 @@ struct DayTimelinePageContent: View {
         _mapSelection = mapSelection
         // Do not fault SwiftData relationships while SwiftUI constructs a page. A nearby
         // cache hit is still displayed immediately; misses are loaded by the task below.
-        let initialCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey)
+        let rawMode = UserDefaults.standard.string(forKey: TrackingRouteDisplayMode.storageKey) == TrackingRouteDisplayMode.rawOSLocationFixes.rawValue
+        let initialCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode)
             ?? Self.initialPresentationCache()
         _presentationCache = State(initialValue: initialCache)
     }
@@ -151,7 +153,8 @@ struct DayTimelinePageContent: View {
 
     private static func makePresentationCache(
         for dayTimeline: DayTimeline,
-        source: DayPresentationSource
+        source: DayPresentationSource,
+        mode: TrackingRouteDisplayMode
     ) -> DayTimelinePresentationCache {
         // Keep the complete import in SwiftData/iCloud, but bound the interactive phone
         // timeline to a recent window. Rendering one row and one map polyline per imported
@@ -185,7 +188,16 @@ struct DayTimelinePageContent: View {
             .map(TimelineEntry.place)
         let moves = displayedMoves.map(TimelineEntry.move)
         let latestSample = source.visibleSamples.max { $0.timestamp < $1.timestamp }
-        var entries = (places + moves).sorted { $0.startDate < $1.startDate }
+        let rawFixEntries: [TimelineEntry] = mode == .rawOSLocationFixes
+            ? RawLocationFixPresentation.orderedTimelineFixes(
+                from: source.visibleSamples,
+                limit: TimelinePresentationLimits.maxTimelineRawFixes
+            ).map { .rawFix($0) }
+            : []
+        var entries = (places + moves + rawFixEntries).sorted {
+            if $0.startDate == $1.startDate { return $0.id < $1.id }
+            return $0.startDate < $1.startDate
+        }
 
         if let firstMove = displayedMoves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
            let startPlace = firstMove.startPlace {
@@ -339,10 +351,11 @@ struct DayTimelinePageContent: View {
         .task(id: provisionalSampleLookupKey) {
             await resolveProvisionalSampleTitle()
         }
-        .task(id: "presentation|\(presentationRefreshKey)") {
+        .task(id: "presentation|\(presentationRefreshKey)|\(routeDisplayMode.rawValue)") {
             guard !Task.isCancelled else { return }
             MovesStartupInstrumentation.event("selectedDayPresentationStart")
-            if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey) {
+            let rawMode = routeDisplayMode == .rawOSLocationFixes
+            if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode) {
                 presentationCache = cached
                 importedDataStatus = cached.hasImportedRouteData
                 MovesStartupInstrumentation.event("selectedDayPresentationEnd")
@@ -356,9 +369,9 @@ struct DayTimelinePageContent: View {
                 generation: presentationGeneration
             )
             importedDataStatus = source.hasImportedRouteData
-            let cache = Self.makePresentationCache(for: dayTimeline, source: source)
+            let cache = Self.makePresentationCache(for: dayTimeline, source: source, mode: routeDisplayMode)
             MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
-            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey)
+            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey, rawMode: rawMode)
             presentationCache = cache
             MovesStartupInstrumentation.event("selectedDayPresentationEnd")
             markTimelineInteractiveIfNeeded()
@@ -393,8 +406,10 @@ struct DayTimelinePageContent: View {
         .onChange(of: dayTimeline.dayKey) { _, _ in
             presentationGeneration = 0
             importedDataStatus = nil
-            presentationCache = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey)
-                ?? Self.initialPresentationCache()
+            presentationCache = DayTimelinePresentationCacheStore.value(
+                for: dayTimeline.dayKey,
+                rawMode: routeDisplayMode == .rawOSLocationFixes
+            ) ?? Self.initialPresentationCache()
             mapSelection = nil
         }
         .sheet(isPresented: $isReviewingImportedData) {
@@ -1218,6 +1233,7 @@ enum TimelinePresentationLimits {
     static let maxRouteSamplesPerMove = 500
     static let maxTimelineImportedMoves = 120
     static let maxTimelineMoves = 180
+    static let maxTimelineRawFixes = 500
     static let maxMapImportedMoves = 60
     static let maxMapMoves = 100
     static let maxMapPlaceMarkers = 160
@@ -1569,15 +1585,21 @@ private enum DayTimelinePresentationCacheStore {
     private static var keysInUseOrder: [String] = []
     private static let maximumEntryCount = 12
 
-    static func value(for key: String) -> DayTimelinePresentationCache? {
-        guard let entry = entries[key] else { return nil }
-        markRecentlyUsed(key)
+    private static func cacheKey(dayKey: String, rawMode: Bool) -> String {
+        "\(dayKey)|\(rawMode ? "raw" : "normal")"
+    }
+
+    static func value(for key: String, rawMode: Bool = false) -> DayTimelinePresentationCache? {
+        let storageKey = cacheKey(dayKey: key, rawMode: rawMode)
+        guard let entry = entries[storageKey] else { return nil }
+        markRecentlyUsed(storageKey)
         return entry
     }
 
-    static func store(_ entry: DayTimelinePresentationCache, for key: String) {
-        entries[key] = entry
-        markRecentlyUsed(key)
+    static func store(_ entry: DayTimelinePresentationCache, for key: String, rawMode: Bool = false) {
+        let storageKey = cacheKey(dayKey: key, rawMode: rawMode)
+        entries[storageKey] = entry
+        markRecentlyUsed(storageKey)
         while keysInUseOrder.count > maximumEntryCount {
             let oldest = keysInUseOrder.removeFirst()
             entries.removeValue(forKey: oldest)
@@ -1590,8 +1612,11 @@ private enum DayTimelinePresentationCacheStore {
     }
 
     static func remove(dayKey: String) {
-        entries.removeValue(forKey: dayKey)
-        keysInUseOrder.removeAll { $0 == dayKey }
+        for rawMode in [false, true] {
+            let storageKey = cacheKey(dayKey: dayKey, rawMode: rawMode)
+            entries.removeValue(forKey: storageKey)
+            keysInUseOrder.removeAll { $0 == storageKey }
+        }
     }
 
     private static func markRecentlyUsed(_ key: String) {
