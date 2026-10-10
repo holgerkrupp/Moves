@@ -99,7 +99,7 @@ struct MovesSettingsView: View {
                     } label: {
                         SettingsMenuRow(
                             title: "Appearance",
-                            subtitle: "Map markers, landscape controls, and app icon",
+                            subtitle: "Route display, map markers, and app icon",
                             systemImage: "paintpalette.fill",
                             tint: .blue
                         )
@@ -733,6 +733,7 @@ private actor StartupHistoryBenchmarkWorker {
 private struct SettingsAppearanceDetailView: View {
     @Binding var showsBigMarkers: Bool
     @Binding var controlsOnLeft: Bool
+    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
 
     var body: some View {
         ScrollView {
@@ -746,6 +747,20 @@ private struct SettingsAppearanceDetailView: View {
 
                     Toggle("Controls on left in landscape", isOn: $controlsOnLeft)
                     Text("Places, moves, and edit controls can be swapped to the left for comfortable one-handed use.")
+                        .settingsHelpText()
+                }
+
+                SettingsCard(title: "Location Display") {
+                    Picker("Route display", selection: $routeDisplayMode) {
+                        ForEach(TrackingRouteDisplayMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(routeDisplayMode == .rawOSLocationFixes
+                         ? "Show individual OS location fixes on the map and in the timeline. Gaps are intentional; no connecting routes are drawn."
+                         : "Show reconstructed routes alongside visits and movement in the timeline.")
                         .settingsHelpText()
                 }
 
@@ -1738,8 +1753,6 @@ private struct RouteTrackingSettingsSection: View {
     @State private var isShowingNotificationPermissionAlert = false
     @State private var isShowingLocationPermissionAlert = false
     @State private var diagnosticsCopied = false
-    @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
-
     init(captureManager: MovesLocationCaptureManager) {
         self.captureManager = captureManager
         _routeTrackingDuration = State(initialValue: captureManager.temporaryRouteTrackingDuration)
@@ -1878,18 +1891,6 @@ private struct RouteTrackingSettingsSection: View {
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
 
-                Picker("Route display", selection: $routeDisplayMode) {
-                    ForEach(TrackingRouteDisplayMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Text(routeDisplayMode == .rawOSLocationFixes
-                     ? "Shows only individual locations reported by iOS. Gaps are intentional: Moves did not receive enough fixes to know the path. Background tracking can look sparse."
-                     : "Shows the normal reconstructed routes from your location evidence. This is the default display mode.")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .panelSurface()
