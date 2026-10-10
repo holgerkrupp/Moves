@@ -338,6 +338,34 @@ final class TimelineRowPresentationTests: XCTestCase {
         XCTAssertEqual(samplePresentation.subtitleText, TimelineEntryPresentationValues(entry: sampleEntry).subtitleText)
         XCTAssertEqual(samplePresentation.tertiaryText, "3 location samples captured")
     }
+
+    func testRawFixTimelineRowShowsSourceAccuracyCoordinatesAndMapSelection() {
+        let date = Date(timeIntervalSince1970: 1_790_280_000)
+        let sample = LocationSample(
+            location: CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 53.465, longitude: 9.695),
+                altitude: 0,
+                horizontalAccuracy: 2,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: -1,
+                timestamp: date
+            ),
+            source: .routeTracking,
+            dedupeKey: "os-fix-example"
+        )
+
+        let entry = TimelineEntry.rawFix(sample)
+        let row = TimelineRowPresentation(entry: entry)
+
+        XCTAssertEqual(row.titleText, "OS location fix")
+        XCTAssertTrue(row.subtitleText.contains(sample.source.displayName))
+        XCTAssertTrue(row.subtitleText.contains("±2 m"))
+        XCTAssertEqual(row.tertiaryText, "53.46500, 9.69500")
+        XCTAssertEqual(row.iconTintKind, .routeTracking)
+        XCTAssertEqual(entry.startDate, date)
+        XCTAssertEqual(entry.mapSelection, .sample("os-fix-example"))
+    }
 }
 
 private struct TimelineEntryPresentationValues {
@@ -2007,6 +2035,21 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertFalse(RawLocationFixPresentation.schedulesRouteMatching(in: .rawOSLocationFixes))
         XCTAssertTrue(RawLocationFixPresentation.drawsConnectingGeometry(in: .reconstructed))
         XCTAssertTrue(RawLocationFixPresentation.schedulesRouteMatching(in: .reconstructed))
+    }
+
+    func testRawOSFixTimelineSelectionExcludesImportedDataAndKeepsLatestChronologically() {
+        let time = Date(timeIntervalSince1970: 1_710_000_000)
+        let samples = [
+            LocationSample(location: makeLocation(latitude: 41.3, longitude: -85, speed: -1, timestamp: time.addingTimeInterval(30)), source: .routeTracking, dedupeKey: "newest"),
+            LocationSample(location: makeLocation(latitude: 41.0, longitude: -85, speed: -1, timestamp: time), source: .significantChange, dedupeKey: "oldest"),
+            LocationSample(location: makeLocation(latitude: 41.2, longitude: -85, speed: -1, timestamp: time.addingTimeInterval(20)), source: .routeTracking, dedupeKey: "middle"),
+            LocationSample(location: makeLocation(latitude: 41.1, longitude: -85, speed: -1, timestamp: time.addingTimeInterval(10)), source: .fileRouteImport, dedupeKey: "imported")
+        ]
+
+        let selected = RawLocationFixPresentation.orderedTimelineFixes(from: samples, limit: 2)
+        XCTAssertEqual(selected.map(\.dedupeKey), ["middle", "newest"])
+        XCTAssertTrue(RawLocationFixPresentation.orderedTimelineFixes(from: samples, limit: 0).isEmpty)
+        XCTAssertEqual(RawLocationFixPresentation.orderedTimelineFixes(from: samples, limit: 10).count, 3)
     }
 
     func testRawLocationFixDisplayModeUsesPersistableDefaultOffValue() {
