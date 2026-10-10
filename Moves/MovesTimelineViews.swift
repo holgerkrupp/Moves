@@ -413,6 +413,13 @@ struct DayTimelinePageContent: View {
             ) ?? Self.initialPresentationCache()
             mapSelection = nil
         }
+        .onChange(of: routeDisplayMode) { _, newMode in
+            presentationCache = DayTimelinePresentationCacheStore.value(
+                for: dayTimeline.dayKey,
+                rawMode: newMode == .rawOSLocationFixes
+            ) ?? Self.initialPresentationCache()
+            mapSelection = nil
+        }
         .sheet(isPresented: $isReviewingImportedData) {
             NavigationStack {
                 ImportedRouteDataView(
