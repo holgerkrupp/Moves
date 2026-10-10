@@ -633,8 +633,22 @@ struct DayTimelinePageContent: View {
     @ViewBuilder
     private func timelinePanel(usesSelection: Bool) -> some View {
         let rows = timelineRows
+        let rawFixCount = rows.reduce(into: 0) { count, row in
+            if case .rawFix = row.entry { count += 1 }
+        }
 
         VStack(spacing: 0) {
+            if routeDisplayMode == .rawOSLocationFixes,
+               rawFixCount >= TimelinePresentationLimits.maxTimelineRawFixes {
+                Text("Showing the latest \(TimelinePresentationLimits.maxTimelineRawFixes) loaded raw OS location fixes.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                Divider()
+            }
+
             if presentationCache.omittedMoveCount > 0 {
                 let moveCount = displayedMoveCount(in: rows)
                 Text("Showing the latest \(moveCount) of \(moveCount + presentationCache.omittedMoveCount) routes.")
@@ -766,7 +780,7 @@ struct DayTimelinePageContent: View {
             }
             .buttonStyle(.plain)
 
-        case .liveRoute, .start, .sample:
+        case .liveRoute, .start, .sample, .rawFix:
             EmptyView()
         }
     }
@@ -805,7 +819,7 @@ struct DayTimelinePageContent: View {
         case .start:
             StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
 
-        case .sample:
+        case .sample, .rawFix:
             StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
         }
     }
@@ -858,7 +872,8 @@ struct DayTimelinePageContent: View {
                     undoManager: undoController.manager
                 )
             case .move(let move): try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoController.manager)
-            case .sample(let sample, _, _): try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
+            case .sample(let sample, _, _), .rawFix(let sample):
+                try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
             case .liveRoute, .start: return
             }
             mapSelection = nil
@@ -966,7 +981,7 @@ private struct TimelineEntryContextMenu: ViewModifier {
                 Divider()
                 Button("Delete Place", systemImage: "trash", role: .destructive, action: requestDelete)
 
-            case .sample:
+            case .sample, .rawFix:
                 Button("Delete Sample", systemImage: "trash", role: .destructive, action: requestDelete)
 
             case .liveRoute, .start:
@@ -2855,8 +2870,11 @@ struct DayMapStrip: View {
             }
         case .liveRoute:
             coordinates = liveRouteSnapshot?.coordinates ?? []
-        case .sample:
-            coordinates = latestSampleCoordinate.map { [$0] } ?? []
+        case .sample(let sampleID):
+            coordinates = presentationCache.rawLocationFixes
+                .first(where: { $0.id == sampleID })
+                .map { [$0.coordinate] }
+                ?? (latestSampleCoordinate.map { [$0] } ?? [])
         case nil:
             refreshCamera()
             return
@@ -3243,6 +3261,18 @@ struct TimelineRowPresentation: Identifiable, Equatable {
             iconTintKind = .start
             showsHealthSourceBadge = false
 
+        case .rawFix(let location):
+            clockText = Self.timeString(from: location.timestamp)
+            titleText = "OS location fix"
+            let accuracy = location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0
+                ? "±\(Int(location.horizontalAccuracy.rounded())) m"
+                : "accuracy unavailable"
+            subtitleText = "\(location.source.displayName)   \(accuracy)"
+            tertiaryText = Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
+            iconName = "location.circle.fill"
+            iconTintKind = location.source.isRouteTrack ? .routeTracking : .start
+            showsHealthSourceBadge = false
+
         case .sample(let location, let sampleCount, let resolvedName):
             clockText = Self.timeString(from: location.timestamp)
             if let resolvedName,
@@ -3290,10 +3320,11 @@ enum TimelineEntry: Identifiable {
     case liveRoute(LiveRouteTrackingSnapshot)
     case start(place: VisitPlace, timestamp: Date)
     case sample(location: LocationSample, sampleCount: Int, resolvedName: String?)
+    case rawFix(LocationSample)
 
     var isDeletable: Bool {
         switch self {
-        case .place, .move, .sample: true
+        case .place, .move, .sample, .rawFix: true
         case .liveRoute, .start: false
         }
     }
@@ -3310,6 +3341,8 @@ enum TimelineEntry: Identifiable {
             return "start-\(place.id.uuidString)-\(timestamp.timeIntervalSince1970)"
         case .sample(let location, _, _):
             return "sample-\(location.dedupeKey)-\(location.timestamp.timeIntervalSince1970)"
+        case .rawFix(let location):
+            return "raw-fix-\(location.dedupeKey)-\(location.timestamp.timeIntervalSince1970)"
         }
     }
 
@@ -3323,7 +3356,7 @@ enum TimelineEntry: Identifiable {
             return .liveRoute(snapshot.id)
         case .start(let place, _):
             return .place(place.id)
-        case .sample(let location, _, _):
+        case .sample(let location, _, _), .rawFix(let location):
             return .sample(location.dedupeKey)
         }
     }
@@ -3338,7 +3371,7 @@ enum TimelineEntry: Identifiable {
             return snapshot.latestDate
         case .start(_, let timestamp):
             return timestamp
-        case .sample(let location, _, _):
+        case .sample(let location, _, _), .rawFix(let location):
             return location.timestamp
         }
     }
@@ -3353,7 +3386,7 @@ enum TimelineEntry: Identifiable {
             return Self.timeString(from: snapshot.latestDate)
         case .start(_, let timestamp):
             return Self.timeString(from: timestamp)
-        case .sample(let location, _, _):
+        case .sample(let location, _, _), .rawFix(let location):
             return Self.timeString(from: location.timestamp)
         }
     }
@@ -3370,6 +3403,8 @@ enum TimelineEntry: Identifiable {
             return "sunrise.fill"
         case .sample:
             return "mappin.circle.fill"
+        case .rawFix:
+            return "location.circle.fill"
         }
     }
 
@@ -3385,6 +3420,8 @@ enum TimelineEntry: Identifiable {
             return MovesPalette.start
         case .sample:
             return MovesPalette.place
+        case .rawFix(let location):
+            return location.source.isRouteTrack ? MovesPalette.routeTracking : MovesPalette.start
         }
     }
 
@@ -3409,6 +3446,8 @@ enum TimelineEntry: Identifiable {
             return "\(start) to \(end)"
         case .liveRoute:
             return "Live route tracking"
+        case .rawFix:
+            return "OS location fix"
         case .sample(let location, _, let resolvedName):
             if let resolvedName,
                !resolvedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -3453,6 +3492,11 @@ enum TimelineEntry: Identifiable {
             return "\(snapshot.sampleCount) live fixes   \(duration)   \(distance)"
         case .sample:
             return "In progress"
+        case .rawFix(let location):
+            let accuracy = location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0
+                ? "±\(Int(location.horizontalAccuracy.rounded())) m"
+                : "accuracy unavailable"
+            return "\(location.source.displayName)   \(accuracy)"
         }
     }
 
@@ -3475,6 +3519,8 @@ enum TimelineEntry: Identifiable {
                 return "Tracking will start as soon as GPS provides the first fix."
             }
             return "Last update \(snapshot.latestDate.formatted(date: .omitted, time: .shortened))"
+        case .rawFix(let location):
+            return Self.coordinateString(location.latitude, location.longitude)
         case .sample(_, let sampleCount, _):
             if sampleCount == 1 {
                 return "1 location sample captured"
