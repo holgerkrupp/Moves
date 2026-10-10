@@ -371,6 +371,7 @@ struct DayTimelinePageContent: View {
             importedDataStatus = source.hasImportedRouteData
             let cache = Self.makePresentationCache(for: dayTimeline, source: source, mode: routeDisplayMode)
             MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
+            guard !Task.isCancelled else { return }
             DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey, rawMode: rawMode)
             presentationCache = cache
             MovesStartupInstrumentation.event("selectedDayPresentationEnd")
@@ -2366,6 +2367,7 @@ struct DayMapStrip: View {
     private var mapContent: some MapContent {
         if routeDisplayMode == .rawOSLocationFixes {
             ForEach(presentationCache.rawLocationFixes) { fix in
+                let isSelected = selection == .sample(fix.id)
                 Annotation(fix.description, coordinate: fix.coordinate, anchor: .center) {
                     Button {
                         selection = .sample(fix.id)
@@ -2374,8 +2376,8 @@ struct DayMapStrip: View {
                             .fill(fix.source == .routeTracking || fix.source == .watchRouteTracking
                                   ? MovesPalette.routeTracking
                                   : MovesPalette.start)
-                            .frame(width: 9, height: 9)
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                            .frame(width: isSelected ? 14 : 9, height: isSelected ? 14 : 9)
+                            .overlay(Circle().stroke(.white, lineWidth: isSelected ? 3 : 1.5))
                             .shadow(color: .black.opacity(0.25), radius: 2)
                     }
                     .buttonStyle(.plain)
@@ -3520,7 +3522,7 @@ enum TimelineEntry: Identifiable {
             }
             return "Last update \(snapshot.latestDate.formatted(date: .omitted, time: .shortened))"
         case .rawFix(let location):
-            return Self.coordinateString(location.latitude, location.longitude)
+            return Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
         case .sample(_, let sampleCount, _):
             if sampleCount == 1 {
                 return "1 location sample captured"
