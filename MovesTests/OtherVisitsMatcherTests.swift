@@ -105,6 +105,26 @@ final class OtherVisitsMatcherTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testAuthoritativeIdentityStillMatchesWhenCandidateCoordinateIsInvalid() {
+        let reference = visit(id: 1, day: 10, regularPlaceID: placeID)
+        let invalidAuthoritativeVisit = visit(
+            id: 2,
+            day: 9,
+            latitude: .nan,
+            longitude: 0,
+            accuracy: .nan,
+            regularPlaceID: placeID
+        )
+
+        let result = OtherVisitsMatcher.matchingVisits(
+            [invalidAuthoritativeVisit],
+            reference: reference,
+            regularPlace: definition()
+        )
+
+        XCTAssertEqual(result.map(\.id), [invalidAuthoritativeVisit.id])
+    }
+
     private func definition() -> RegularPlaceDefinitionDTO {
         RegularPlaceDefinitionDTO(id: placeID, name: "Home", latitude: 0, longitude: 0, radiusMeters: 100)
     }

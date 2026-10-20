@@ -357,7 +357,7 @@ private struct VisibleTimelinePage: Identifiable {
 @MainActor
 final class TimelineDayWindowStore: ObservableObject {
     static let pagerWindowSize = 5
-    static let recentSidebarWindowSize = 60
+    nonisolated static let recentSidebarWindowSize = 60
 
     struct LaunchQueryCounts: Equatable {
         var initialRecentWindowFetches = 0
