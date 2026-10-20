@@ -2073,7 +2073,7 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertTrue(dense.allSatisfy { $0.source == .routeTracking }, "Observed OS anchors retain their source provenance.")
     }
 
-    func testRawLocationFixModeKeepsEveryOSFixAndDisablesRoutePresentationAndMatching() {
+    func testRawLocationFixModeKeepsOSFixesAndSavedMoveRoutesSeparate() {
         let time = Date(timeIntervalSince1970: 1_710_000_000)
         let samples = [
             LocationSample(location: makeLocation(latitude: 41.1, longitude: -85.1, speed: 1, timestamp: time.addingTimeInterval(20)), source: .routeTracking, dedupeKey: "later"),
@@ -2086,9 +2086,20 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(fixes.map(\.dedupeKey), ["earlier", "later"])
         XCTAssertEqual(fixes.map(\.coordinate.latitude), [41.0, 41.1])
         XCTAssertFalse(RawLocationFixPresentation.drawsConnectingGeometry(in: .rawOSLocationFixes))
+        XCTAssertTrue(RawLocationFixPresentation.showsSavedMoveRoutes(in: .rawOSLocationFixes))
+        XCTAssertTrue(RawLocationFixPresentation.showsSavedMoveRoutes(in: .reconstructed))
         XCTAssertFalse(RawLocationFixPresentation.schedulesRouteMatching(in: .rawOSLocationFixes))
         XCTAssertTrue(RawLocationFixPresentation.drawsConnectingGeometry(in: .reconstructed))
         XCTAssertTrue(RawLocationFixPresentation.schedulesRouteMatching(in: .reconstructed))
+    }
+
+    func testMappedMoveRouteColorsUseTransportSpecificPalette() {
+        XCTAssertEqual(MovesPalette.transportColorAssetName(for: .walking), "MovesTransportWalking")
+        XCTAssertEqual(MovesPalette.transportColorAssetName(for: .cycling), "MovesTransportCycling")
+        XCTAssertEqual(MovesPalette.transportColorAssetName(for: .automotive), "MovesTransportAutomotive")
+        XCTAssertEqual(MovesPalette.transportColorAssetName(for: .train), "MovesTransportTrain")
+        XCTAssertEqual(MovesPalette.transportColorAssetName(for: .plane), "MovesTransportPlane")
+        XCTAssertEqual(MovesPalette.transportColorAssetName(for: .boat), "MovesTransportBoat")
     }
 
     func testRawOSFixTimelineSelectionExcludesImportedDataAndKeepsLatestChronologically() {

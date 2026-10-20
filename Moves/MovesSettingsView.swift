@@ -759,7 +759,7 @@ private struct SettingsAppearanceDetailView: View {
                     .pickerStyle(.menu)
 
                     Text(routeDisplayMode == .rawOSLocationFixes
-                         ? "Show individual OS location fixes on the map and in the timeline. Gaps are intentional; no connecting routes are drawn."
+                         ? "Show individual OS location fixes alongside saved move routes. Raw fixes are not connected to each other."
                          : "Show reconstructed routes alongside visits and movement in the timeline.")
                         .settingsHelpText()
                 }

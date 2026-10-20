@@ -265,9 +265,9 @@ struct RenderedRoute: Identifiable {
         }
 
         switch transportMode {
-        case .stationary, .walking, .running, .cycling, .automotive, .motorcycle, .unknown:
+        case .stationary, .unknown:
             return MovesPalette.move
-        case .swimming, .train, .plane, .boat:
+        case .walking, .running, .swimming, .cycling, .automotive, .motorcycle, .train, .plane, .boat:
             return MovesPalette.transport(transportMode)
         }
     }
@@ -814,6 +814,15 @@ enum RawLocationFixPresentation {
 
     static func drawsConnectingGeometry(in mode: TrackingRouteDisplayMode) -> Bool {
         mode == .reconstructed
+    }
+
+    /// Saved MoveSegments remain meaningful route geometry in raw-fix mode. This
+    /// setting only controls whether we connect loose OS fixes into a route.
+    static func showsSavedMoveRoutes(in mode: TrackingRouteDisplayMode) -> Bool {
+        switch mode {
+        case .reconstructed, .rawOSLocationFixes:
+            return true
+        }
     }
 
     static func schedulesRouteMatching(in mode: TrackingRouteDisplayMode) -> Bool {

@@ -2379,7 +2379,7 @@ private enum DayMapPresentationCacheStore {
 
 @MainActor
 private enum DayMapSnapshotCache {
-    private static let diskCacheVersion = "v1"
+    private static let diskCacheVersion = "v2"
     private static let maximumDiskEntryCount = 24
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -2569,10 +2569,11 @@ struct DayMapStrip: View {
     }
 
     private var historicalRouteCoordinates: [CLLocationCoordinate2D] {
-        guard RawLocationFixPresentation.drawsConnectingGeometry(in: routeDisplayMode) else {
-            return presentationCache.rawLocationFixes.map(\.coordinate)
-        }
-        return historicalRoutes.flatMap { $0.coordinates }
+        let moveCoordinates = RawLocationFixPresentation.showsSavedMoveRoutes(in: routeDisplayMode)
+            ? historicalRoutes.flatMap { $0.coordinates }
+            : []
+        guard routeDisplayMode == .rawOSLocationFixes else { return moveCoordinates }
+        return moveCoordinates + presentationCache.rawLocationFixes.map(\.coordinate)
     }
 
     private var cameraRefreshKey: String {
@@ -2760,7 +2761,7 @@ struct DayMapStrip: View {
                 MovesStartupInstrumentation.event("selectedDayMapPresentationEnd")
             }
             .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)|\(routeDisplayMode.rawValue)") {
-                guard isActive, RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode), !Task.isCancelled else { return }
+                guard isActive, !Task.isCancelled else { return }
                 guard let snapshot = try? await DayPresentationValueSourceCache.snapshot(
                     modelContainer: modelContext.container,
                     dayStart: dayTimeline.dayStart,
@@ -2893,7 +2894,7 @@ struct DayMapStrip: View {
                     }
                 }
             }
-        } else {
+        }
         ForEach(historicalRoutes) { route in
             let isSelected = isSelectedRoute(route)
             let dimsForOtherSelection = selection != nil && !isSelected
@@ -2930,7 +2931,6 @@ struct DayMapStrip: View {
                     MovesPalette.routeTracking.opacity(selection != nil && !isLiveRouteSelected ? 0.28 : 0.95),
                     lineWidth: isLiveRouteSelected ? 9 : 5
             )
-        }
         }
 
         ForEach(placeMarkers) { marker in
@@ -3330,9 +3330,12 @@ struct DayMapStrip: View {
         liveCoordinates: [CLLocationCoordinate2D] = [],
         mode: TrackingRouteDisplayMode = .reconstructed
     ) -> MKCoordinateRegion {
-        let displayCoordinates = RawLocationFixPresentation.drawsConnectingGeometry(in: mode)
+        let moveCoordinates = RawLocationFixPresentation.showsSavedMoveRoutes(in: mode)
             ? presentation.routes.flatMap(\.coordinates)
-            : presentation.rawLocationFixes.map(\.coordinate)
+            : []
+        let displayCoordinates = mode == .rawOSLocationFixes
+            ? moveCoordinates + presentation.rawLocationFixes.map(\.coordinate)
+            : moveCoordinates
         let coordinates = displayCoordinates
             + liveCoordinates
             + presentation.placeMarkers.map(\.coordinate)
@@ -3368,9 +3371,13 @@ struct DayMapStrip: View {
             coordinates = placeMarkers.first(where: { $0.id == id }).map { [$0.coordinate] } ?? []
         case .move(let id):
             if routeDisplayMode == .rawOSLocationFixes {
-                coordinates = presentationCache.rawLocationFixes
+                let rawFixCoordinates = presentationCache.rawLocationFixes
                     .filter { $0.moveID == id }
                     .map(\.coordinate)
+                let moveRouteCoordinates = historicalRoutes
+                    .first(where: { $0.id == id.uuidString })?
+                    .coordinates ?? []
+                coordinates = moveRouteCoordinates + rawFixCoordinates
             } else {
                 coordinates = historicalRoutes.first(where: { $0.id == id.uuidString })?.coordinates ?? []
             }
@@ -3454,7 +3461,7 @@ struct DayMapStrip: View {
             "\(Int(sample.timestamp.timeIntervalSince1970.rounded()))|\(sample.sourceRawValue)|\(Int((sample.latitude * 10_000).rounded()))|\(Int((sample.longitude * 10_000).rounded()))"
         } ?? "none"
 
-        let routes = RawLocationFixPresentation.drawsConnectingGeometry(in: mode)
+        let routes = RawLocationFixPresentation.showsSavedMoveRoutes(in: mode)
             ? renderedRoutes(source: source, displayedMoves: displayedMoves)
             : []
         let rawLocationFixes = TimelineMapRawFixPresentation.fixes(from: source.visibleSamples)
