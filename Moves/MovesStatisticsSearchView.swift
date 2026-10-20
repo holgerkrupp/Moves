@@ -569,8 +569,7 @@ struct MovesStatisticsSearchView: View {
                             NavigationLink {
                                 KnownLocationEditorView(
                                     knownLocation: knownLocation(for: location),
-                                    suggestedLocation: location,
-                                    allVisits: snapshot.visits
+                                    suggestedLocation: regularPlaceSummary(for: location)
                                 )
                             } label: {
                                 LocationSummaryRow(location: location, rank: index + 1)
@@ -748,8 +747,7 @@ struct MovesStatisticsSearchView: View {
                                 NavigationLink {
                                     KnownLocationEditorView(
                                         knownLocation: knownLocation(for: location),
-                                        suggestedLocation: location,
-                                        allVisits: snapshot.visits
+                                        suggestedLocation: regularPlaceSummary(for: location)
                                     )
                                 } label: {
                                     LocationSummaryRow(location: location, rank: nil)
@@ -846,6 +844,19 @@ struct MovesStatisticsSearchView: View {
             }
             return lhs.nearestDistance > rhs.nearestDistance
         }?.location
+    }
+
+    private func regularPlaceSummary(for summary: MovesLocationSummary) -> RegularPlaceSummaryDTO {
+        let representative = summary.visits.first
+        return RegularPlaceSummaryDTO(
+            id: summary.id,
+            title: summary.title,
+            latitude: representative?.latitude ?? 0,
+            longitude: representative?.longitude ?? 0,
+            visitCount: summary.visitCount,
+            totalDuration: summary.totalDuration,
+            latestArrivalDate: representative?.arrivalDate ?? .distantPast
+        )
     }
 
     @ViewBuilder
