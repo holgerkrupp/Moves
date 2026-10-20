@@ -88,17 +88,24 @@ final class RegularPlaceQueryWorkerTests: XCTestCase {
         let definitions = [RegularPlaceDefinitionDTO(oldLocation), RegularPlaceDefinitionDTO(overlap)]
         let worker = RegularPlaceQueryWorker(modelContainer: container)
         let counts = try await worker.counts(for: definitions)
-        let refreshNotification = expectation(forNotification: .movesVisitedPlaceDidChange, object: nil)
+        let expectedDayKey = DayTimeline.makeDayKey(for: automatic.arrivalDate)
+        let refreshNotification = expectation(forNotification: .movesVisitedPlaceDidChange, object: nil) { notification in
+            guard let dayKeys = notification.userInfo?["dayKeys"] as? [String] else { return false }
+            XCTAssertEqual(dayKeys, [expectedDayKey])
+            return true
+        }
         _ = try await worker.reconcile(location: definitions[0], replacedID: oldLocation.id,
                                        definitions: definitions, batchSize: 1)
         await fulfillment(of: [refreshNotification], timeout: 1)
 
         XCTAssertEqual(counts.first(where: { $0.regularPlaceID == oldLocation.id })?.count, 1)
-        XCTAssertEqual(automatic.regularPlaceID, overlap.id)
-        XCTAssertEqual(automatic.regularPlaceName, "Nearby")
-        XCTAssertEqual(manual.userLabel, "Client")
-        XCTAssertEqual(manual.comment, "Keep this note")
-        XCTAssertEqual(manual.regularPlaceID, oldLocation.id)
+        let reassigned = try await worker.visits(regularPlaceID: overlap.id).visits.first { $0.id == automatic.id }
+        let preserved = try await worker.visits(regularPlaceID: oldLocation.id).visits.first { $0.id == manual.id }
+        XCTAssertEqual(reassigned?.regularPlaceID, overlap.id)
+        XCTAssertEqual(reassigned?.regularPlaceName, "Nearby")
+        XCTAssertEqual(preserved?.userLabel, "Client")
+        XCTAssertEqual(preserved?.comment, "Keep this note")
+        XCTAssertEqual(preserved?.regularPlaceID, oldLocation.id)
     }
 
     @MainActor

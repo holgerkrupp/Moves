@@ -117,8 +117,9 @@ actor RegularPlaceQueryWorker {
         guard changed else { return true }
         visit.regularPlaceID = definition.id
         visit.regularPlaceName = definition.name
+        let dayKey = Self.dayKey(for: visit)
         try modelContext.save()
-        NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: visit.id)
+        Self.postVisitChanges(dayKeys: [dayKey], objectID: visit.id)
         return true
     }
 
@@ -388,6 +389,7 @@ actor RegularPlaceQueryWorker {
         let definitionsToUse = locations.contains(where: { $0.id == location.id }) ? locations : locations + [location]
         let pageSize = min(max(requestedBatchSize, 1), 1_000)
         var changedCount = 0
+        var changedDayKeys = Set<String>()
         let old = previousDefinition ?? location
         let oldLongitudeRadius = min(max(old.radiusMeters, 0) / (111_320 * max(abs(cos(old.latitude * .pi / 180)), 0.01)), 180)
         let newLongitudeRadius = min(max(location.radiusMeters, 0) / (111_320 * max(abs(cos(location.latitude * .pi / 180)), 0.01)), 180)
@@ -475,6 +477,7 @@ actor RegularPlaceQueryWorker {
                 }
                 if previousID != visit.regularPlaceID || previousName != visit.regularPlaceName {
                     changedCount += 1
+                    changedDayKeys.insert(Self.dayKey(for: visit))
                 }
             }
             try modelContext.save()
@@ -482,7 +485,7 @@ actor RegularPlaceQueryWorker {
             if batch.count < pageSize { break }
         }
         if changedCount > 0 {
-            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: nil)
+            Self.postVisitChanges(dayKeys: changedDayKeys)
         }
         return changedCount
     }
@@ -493,6 +496,7 @@ actor RegularPlaceQueryWorker {
         }
         let pageSize = min(max(requestedBatchSize, 1), 1_000)
         var changedCount = 0
+        var changedDayKeys = Set<String>()
         while true {
             try Task.checkCancellation()
             let predicate = #Predicate<VisitPlace> { $0.regularPlaceID == locationID }
@@ -506,6 +510,7 @@ actor RegularPlaceQueryWorker {
             for visit in batch {
                 try Task.checkCancellation()
                 guard visit.regularPlaceID == locationID else { continue }
+                changedDayKeys.insert(Self.dayKey(for: visit))
                 visit.regularPlaceID = nil
                 visit.regularPlaceName = nil
                 if visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
@@ -521,9 +526,22 @@ actor RegularPlaceQueryWorker {
             if batch.count < pageSize { break }
         }
         if changedCount > 0 {
-            NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: nil)
+            Self.postVisitChanges(dayKeys: changedDayKeys)
         }
         return changedCount
+    }
+
+    private static func dayKey(for visit: VisitPlace) -> String {
+        visit.dayTimeline?.dayKey ?? DayTimeline.makeDayKey(for: visit.arrivalDate)
+    }
+
+    private static func postVisitChanges(dayKeys: Set<String>, objectID: UUID? = nil) {
+        guard !dayKeys.isEmpty else { return }
+        NotificationCenter.default.post(
+            name: .movesVisitedPlaceDidChange,
+            object: objectID,
+            userInfo: ["dayKeys": dayKeys.sorted()]
+        )
     }
 
     private func page(descriptor: inout FetchDescriptor<VisitPlace>, offset: Int, limit: Int) throws -> RegularPlacePage {
