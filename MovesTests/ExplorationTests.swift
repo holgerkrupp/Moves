@@ -176,6 +176,7 @@ final class ExplorationTests: XCTestCase {
         checkpoint.startedAt = Date(timeIntervalSince1970: 0)
         checkpoint.totalDayCount = 100
         checkpoint.processedDayCount = 25
+        checkpoint.successfulRuntime = 3_600
         checkpoint.readiness = .partiallyReady
 
         let now = Date(timeIntervalSince1970: 3_600)
@@ -185,6 +186,32 @@ final class ExplorationTests: XCTestCase {
         XCTAssertEqual(statistics.progressFraction, 0.25)
         XCTAssertEqual(statistics.averageDaysPerHour, 25)
         XCTAssertEqual(statistics.estimatedCompletionDate, Date(timeIntervalSince1970: 14_400))
+    }
+
+    func testAntimeridianRasterizationUsesShortWrappedPath() throws {
+        let west = try FogRasterV1.address(for: CLLocationCoordinate2D(latitude: 10, longitude: 179.8)).cell
+        let east = try FogRasterV1.address(for: CLLocationCoordinate2D(latitude: 10, longitude: -179.8)).cell
+        let cells = FogRasterV1.cellsAlongLine(from: west, to: east)
+
+        XCTAssertLessThan(cells.count, 10_000)
+        XCTAssertEqual(cells.first, west)
+        XCTAssertEqual(cells.last, east)
+        XCTAssertTrue(cells.contains { $0.coordinate.x > FogRasterV1.globalCellDimension - 10_000 })
+        XCTAssertTrue(cells.contains { $0.coordinate.x < 10_000 })
+    }
+
+    func testSchedulingPolicyKeepsPendingOpportunityUnlessWorkIsEarlier() {
+        let now = Date(timeIntervalSince1970: 100)
+        XCTAssertFalse(ExplorationSchedulingPolicy.shouldReplace(existingEarliest: nil, desiredEarliest: now))
+        XCTAssertFalse(ExplorationSchedulingPolicy.shouldReplace(existingEarliest: now, desiredEarliest: now))
+        XCTAssertFalse(ExplorationSchedulingPolicy.shouldReplace(existingEarliest: now, desiredEarliest: now.addingTimeInterval(10)))
+        XCTAssertTrue(ExplorationSchedulingPolicy.shouldReplace(existingEarliest: now.addingTimeInterval(10), desiredEarliest: now))
+        XCTAssertTrue(ExplorationSchedulingPolicy.shouldReplace(
+            existingEarliest: now,
+            existingRequiresExternalPower: true,
+            desiredEarliest: now,
+            desiredRequiresExternalPower: false
+        ))
     }
 
     func testWorkQueuePrioritizesImportsAndRecoversExpiredLease() async throws {
@@ -219,6 +246,23 @@ final class ExplorationTests: XCTestCase {
         XCTAssertEqual(snapshot.queuedCount, 1)
         XCTAssertEqual(snapshot.processingCount, 0)
         XCTAssertEqual(snapshot.staleProcessingCount, 0)
+    }
+
+    func testWorkQueueRetryUsesBackoffWithoutBlockingOtherItems() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = ExplorationWorkQueue(rootURL: root)
+        let now = Date(timeIntervalSince1970: 30_000)
+        try await queue.enqueue(dayKeys: ["2022-08-14", "2022-08-15"], lane: .historical)
+        let claimed = try await queue.claim(maximum: 1, now: now)
+        let first = try XCTUnwrap(claimed.first)
+        try await queue.retry(first.id, error: "transient", now: now)
+
+        let snapshot = try await queue.snapshot(now: now.addingTimeInterval(1))
+        XCTAssertEqual(snapshot.queuedCount, 1)
+        XCTAssertEqual(snapshot.delayedCount, 1)
+        let next = try await queue.claim(maximum: 1, now: now.addingTimeInterval(1))
+        XCTAssertEqual(next.first?.dayKey, "2022-08-15")
     }
 
     func testDerivedStatisticsAreLatitudeAwareAndRebuildable() async throws {
@@ -488,6 +532,30 @@ final class ExplorationTests: XCTestCase {
         XCTAssertTrue(remainingShards.isEmpty)
         let remainingTravelEvidence = try await ExplorationTravelEvidenceStore(rootURL: root).load()
         XCTAssertEqual(remainingTravelEvidence.count, 1)
+    }
+
+    func testPreparationDiagnosticsFinishAndContextUpdatesAreExclusiveSafe() async throws {
+        let key = "Moves.tests.exploration.preparation.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let diagnostics = ExplorationPreparationDiagnostics(key: key)
+
+        await diagnostics.start(stage: "route-input")
+        await diagnostics.setWork(itemID: "route-1", dayKey: "2026-10-13", lane: "routes")
+        await diagnostics.finish(stage: "route-input", routeCount: 7)
+
+        let data = try XCTUnwrap(UserDefaults.standard.data(forKey: key))
+        let record = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNotNil(record["endedAt"])
+        XCTAssertEqual(record["dayKey"] as? String, "2026-10-13")
+        XCTAssertEqual(record["routeCount"] as? Int, 7)
+        XCTAssertEqual(record["lane"] as? String, "routes")
+
+        await diagnostics.fail("retryable failure")
+        await diagnostics.clearWork()
+        let context = await diagnostics.failureContext()
+        XCTAssertEqual(context.dayKey, "2026-10-13")
+        XCTAssertNil(context.lane)
+        XCTAssertNil(context.itemID)
     }
 
 #if DEBUG

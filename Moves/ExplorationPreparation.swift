@@ -25,6 +25,10 @@ struct ExplorationPreparationCheckpoint: Codable, Equatable, Sendable {
     /// Snapshot of the number of DayTimeline work units when preparation began.
     var totalDayCount: Int?
     var processedDayCount = 0
+    var processedHistoricalDayKeys: Set<String> = []
+    /// Cumulative time spent doing preparation work, excluding time waiting for
+    /// iOS to grant another execution window.
+    var successfulRuntime: TimeInterval = 0
     var isProcessing = false
     /// Lease used to recover a checkpoint left in the processing state after
     /// termination or a background-task expiration.
@@ -39,6 +43,8 @@ struct ExplorationPreparationCheckpoint: Codable, Equatable, Sendable {
         case startedAt
         case totalDayCount
         case processedDayCount
+        case processedHistoricalDayKeys
+        case successfulRuntime
         case isProcessing
         case processingLeaseUntil
         case updatedAt
@@ -55,6 +61,8 @@ struct ExplorationPreparationCheckpoint: Codable, Equatable, Sendable {
         startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
         totalDayCount = try container.decodeIfPresent(Int.self, forKey: .totalDayCount)
         processedDayCount = try container.decodeIfPresent(Int.self, forKey: .processedDayCount) ?? preparedShardCount
+        processedHistoricalDayKeys = try container.decodeIfPresent(Set<String>.self, forKey: .processedHistoricalDayKeys) ?? []
+        successfulRuntime = try container.decodeIfPresent(TimeInterval.self, forKey: .successfulRuntime) ?? 0
         isProcessing = try container.decodeIfPresent(Bool.self, forKey: .isProcessing) ?? false
         processingLeaseUntil = try container.decodeIfPresent(Date.self, forKey: .processingLeaseUntil)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
@@ -85,19 +93,18 @@ struct ExplorationPreparationStatistics: Sendable, Equatable {
     }
 
     var averageDaysPerHour: Double? {
-        guard let elapsed, elapsed > 0, processedDayCount > 0 else { return nil }
-        return Double(processedDayCount) / (elapsed / 3_600)
+        guard checkpoint.successfulRuntime > 0, processedDayCount > 0 else { return nil }
+        return Double(processedDayCount) / (checkpoint.successfulRuntime / 3_600)
     }
 
     var estimatedCompletionDate: Date? {
         guard let remainingDayCount,
               remainingDayCount > 0,
-              let elapsed,
-              elapsed > 1,
+              checkpoint.successfulRuntime > 1,
               processedDayCount > 0 else {
             return nil
         }
-        let secondsPerDay = elapsed / Double(processedDayCount)
+        let secondsPerDay = checkpoint.successfulRuntime / Double(processedDayCount)
         return now.addingTimeInterval(secondsPerDay * Double(remainingDayCount))
     }
 
@@ -109,9 +116,6 @@ struct ExplorationPreparationStatistics: Sendable, Equatable {
 
 struct ExplorationPreparationBudget: Sendable {
     var maximumDays = 1
-    var maximumRoutes = 64
-    var maximumBlocks = 100_000
-    var maximumVisitCells = 20_000
 }
 
 struct ExplorationPreparationResult: Sendable {
@@ -161,14 +165,14 @@ actor ExplorationPreparationCheckpointStore {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return ExplorationPreparationCheckpoint()
         }
-        return try JSONDecoder().decode(ExplorationPreparationCheckpoint.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(ExplorationPreparationCheckpoint.self, from: ExplorationFileStorage.readData(from: url))
     }
 
     func save(_ checkpoint: ExplorationPreparationCheckpoint) throws {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(checkpoint)
-        try data.write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+        try ExplorationFileStorage.writeAtomically(data, to: url)
     }
 
     /// Deletes all Phase A source shards, merged blocks, and the preparation
@@ -177,6 +181,8 @@ actor ExplorationPreparationCheckpointStore {
         let root = url.deletingLastPathComponent().deletingLastPathComponent()
         let paths = [
             root.appendingPathComponent("v1/sources", isDirectory: true),
+            root.appendingPathComponent("v1/source-index.json"),
+            root.appendingPathComponent("v1/source-index.pending"),
             root.appendingPathComponent("v1/blocks", isDirectory: true),
             root.appendingPathComponent("v1/derived", isDirectory: true),
             root.appendingPathComponent("v1/render", isDirectory: true),
@@ -195,7 +201,7 @@ private actor ExplorationPreparationSourceWorker {
         try modelContext.fetchCount(FetchDescriptor<DayTimeline>())
     }
 
-    func nextDay(after dayKey: String?, maximumRoutes: Int) throws -> ExplorationDayInput? {
+    func nextDay(after dayKey: String?) throws -> ExplorationDayInput? {
         var descriptor = FetchDescriptor<DayTimeline>(sortBy: [SortDescriptor(\DayTimeline.dayKey)])
         descriptor.fetchLimit = 1
         if let dayKey {
@@ -205,22 +211,24 @@ private actor ExplorationPreparationSourceWorker {
         }
         guard let day = try modelContext.fetch(descriptor).first else { return nil }
 
-        return try makeInput(from: day, maximumRoutes: maximumRoutes)
+        return try makeInput(from: day)
     }
 
-    func day(with dayKey: String, maximumRoutes: Int) throws -> ExplorationDayInput? {
+    func day(with dayKey: String) throws -> ExplorationDayInput? {
         let descriptor = FetchDescriptor<DayTimeline>(
             predicate: #Predicate { $0.dayKey == dayKey }
         )
         guard let day = try modelContext.fetch(descriptor).first else { return nil }
-        return try makeInput(from: day, maximumRoutes: maximumRoutes)
+        return try makeInput(from: day)
     }
 
-    private func makeInput(from day: DayTimeline, maximumRoutes: Int) throws -> ExplorationDayInput {
+    private func makeInput(from day: DayTimeline) throws -> ExplorationDayInput {
 
         var routes: [ExplorationRouteInput] = []
-        routes.reserveCapacity(min(day.moves.count, maximumRoutes))
-        for move in day.moves.prefix(maximumRoutes) {
+        // A route cap silently discarded source history. Days are bounded by
+        // the worker window and raster resource limits instead.
+        routes.reserveCapacity(day.moves.count)
+        for move in day.moves {
             try Task.checkCancellation()
             let coordinates = MoveRouteGeometry.rawCoordinates(for: move).map {
                 ExplorationCoordinate(latitude: $0.latitude, longitude: $0.longitude)
@@ -241,6 +249,9 @@ enum ExplorationPreparation {
     static let log = Logger(subsystem: "de.holgerkrupp.Moves", category: "ExplorationPreparation")
     static let isEnabledKey = "Moves.exploration.phaseA.enabled"
 
+    private static let coordinator = ExplorationPreparationSingleFlight()
+    private static let diagnostics = ExplorationPreparationDiagnostics()
+
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
 #if DEBUG
         userDefaults.bool(forKey: isEnabledKey)
@@ -260,6 +271,52 @@ enum ExplorationPreparation {
         rootURL: URL = ExplorationStorageLocations.rootURL,
         budget: ExplorationPreparationBudget = ExplorationPreparationBudget()
     ) async throws -> ExplorationPreparationResult {
+        await coordinator.acquire()
+        await diagnostics.start(stage: "slice-start")
+        do {
+            let result = try await runSliceExclusively(in: modelContainer, rootURL: rootURL, budget: budget)
+            await coordinator.release()
+            return result
+        } catch {
+            let failureContext = await diagnostics.failureContext()
+            await diagnostics.fail(error.localizedDescription)
+            if let itemID = failureContext.itemID {
+                try? await ExplorationWorkQueue.shared.retry(itemID, error: error.localizedDescription)
+            }
+            if failureContext.itemID == nil,
+               let dayKey = failureContext.dayKey,
+               failureContext.lane == ExplorationWorkLane.historical.title {
+                try? await ExplorationWorkQueue.shared.enqueue(dayKeys: [dayKey], lane: .historical)
+                var checkpoint = (try? await ExplorationPreparationCheckpointStore(rootURL: rootURL).load())
+                    ?? ExplorationPreparationCheckpoint()
+                if checkpoint.nextDayKey == nil || checkpoint.nextDayKey! < dayKey {
+                    checkpoint.nextDayKey = dayKey
+                }
+                checkpoint.readiness = .partiallyReady
+                checkpoint.isProcessing = false
+                checkpoint.processingLeaseUntil = nil
+                checkpoint.updatedAt = .now
+                try? await ExplorationPreparationCheckpointStore(rootURL: rootURL).save(checkpoint)
+            } else {
+                var checkpoint = (try? await ExplorationPreparationCheckpointStore(rootURL: rootURL).load())
+                checkpoint?.isProcessing = false
+                checkpoint?.processingLeaseUntil = nil
+                checkpoint?.updatedAt = .now
+                if let checkpoint {
+                    try? await ExplorationPreparationCheckpointStore(rootURL: rootURL).save(checkpoint)
+                }
+            }
+            await coordinator.release()
+            throw error
+        }
+    }
+
+    private static func runSliceExclusively(
+        in modelContainer: ModelContainer,
+        rootURL: URL,
+        budget: ExplorationPreparationBudget
+    ) async throws -> ExplorationPreparationResult {
+        let startedWorkAt = Date.now
         guard budget.maximumDays > 0 else {
             throw PreparationError.budgetExceeded
         }
@@ -282,9 +339,15 @@ enum ExplorationPreparation {
         }
         // Count the bounded DayTimeline work units, not LocationSample rows. This is
         // persisted for the debug projection and is never performed by SwiftUI.
+        await diagnostics.start(stage: "source-fetch")
         let currentDayCount = try await sourceWorker.dayCount()
+        await diagnostics.finish(stage: "source-fetch")
         checkpoint.totalDayCount = max(checkpoint.totalDayCount ?? 0, currentDayCount)
         checkpoint.processedDayCount = max(checkpoint.processedDayCount, checkpoint.preparedShardCount)
+        UserDefaults.standard.set(
+            max(0, currentDayCount - checkpoint.processedDayCount),
+            forKey: "Moves.exploration.historicalBacklog"
+        )
         checkpoint.readiness = .preparing
         checkpoint.isProcessing = true
         checkpoint.processingLeaseUntil = now.addingTimeInterval(15 * 60)
@@ -292,98 +355,112 @@ enum ExplorationPreparation {
         try await checkpointStore.save(checkpoint)
 
         let workQueue = ExplorationWorkQueue.shared
+        await diagnostics.start(stage: "route-input")
         let claimedWork = try await workQueue.claim(maximum: 1)
         var claimedWorkID = claimedWork.first?.id
-        var claimedWorkCompleted = false
-        var deferredCleanupRequired = true
-
-        defer {
-            if deferredCleanupRequired {
-                Task {
-                    if let claimedWorkID, !claimedWorkCompleted {
-                        try? await workQueue.retry(claimedWorkID, error: "Preparation slice ended before completion")
-                    }
-                    var finalCheckpoint = (try? await checkpointStore.load()) ?? checkpoint
-                    finalCheckpoint.isProcessing = false
-                    finalCheckpoint.processingLeaseUntil = nil
-                    finalCheckpoint.updatedAt = .now
-                    try? await checkpointStore.save(finalCheckpoint)
-                }
-            }
+        if let claimed = claimedWork.first {
+            await diagnostics.setWork(itemID: claimed.id, dayKey: claimed.dayKey, lane: claimed.lane.title)
         }
 
         let input: ExplorationDayInput
         let isQueuedWork: Bool
         if let queued = claimedWork.first,
-           let queuedInput = try await sourceWorker.day(with: queued.dayKey, maximumRoutes: budget.maximumRoutes) {
+           let queuedInput = try await sourceWorker.day(with: queued.dayKey) {
             input = queuedInput
             isQueuedWork = true
         } else {
             if let queued = claimedWork.first {
                 try await workQueue.complete(queued.id)
-                claimedWorkCompleted = true
                 claimedWorkID = nil
+                await diagnostics.clearWork()
             }
-            guard let historicalInput = try await sourceWorker.nextDay(after: checkpoint.nextDayKey, maximumRoutes: budget.maximumRoutes) else {
-                checkpoint.readiness = checkpoint.preparedShardCount == 0 ? .notStarted : .ready
+            guard let historicalInput = try await sourceWorker.nextDay(after: checkpoint.nextDayKey) else {
+                let outstanding = try await workQueue.snapshot()
+                let hasOutstandingWork = outstanding.queuedCount + outstanding.delayedCount + outstanding.processingCount > 0
+                checkpoint.readiness = hasOutstandingWork
+                    ? .partiallyReady
+                    : (checkpoint.processedDayCount == 0 ? .notStarted : .ready)
                 checkpoint.isProcessing = false
                 checkpoint.processingLeaseUntil = nil
                 try await checkpointStore.save(checkpoint)
-                deferredCleanupRequired = false
                 return ExplorationPreparationResult(daysProcessed: 0, routesProcessed: 0, blocksWritten: 0, checkpoint: checkpoint)
             }
             input = historicalInput
             isQueuedWork = false
         }
 
+        await diagnostics.finish(
+            stage: "route-input",
+            dayKey: input.dayKey,
+            routeCount: input.routes.count,
+            lane: isQueuedWork ? claimedWork.first?.lane.title : ExplorationWorkLane.historical.title
+        )
+
         if input.routes.isEmpty && input.visits.isEmpty && !isQueuedWork {
             // Quiet days still advance the durable cursor. Otherwise the first
             // empty DayTimeline would stop historical preparation permanently.
             checkpoint.nextDayKey = input.dayKey
             checkpoint.processedThroughDayKey = input.dayKey
-            checkpoint.processedDayCount += 1
+            if checkpoint.processedHistoricalDayKeys.insert(input.dayKey).inserted {
+                checkpoint.processedDayCount += 1
+            }
+            checkpoint.successfulRuntime += max(0, Date.now.timeIntervalSince(startedWorkAt))
             checkpoint.readiness = .partiallyReady
             checkpoint.isProcessing = false
             checkpoint.processingLeaseUntil = nil
             checkpoint.updatedAt = .now
             try await checkpointStore.save(checkpoint)
-            deferredCleanupRequired = false
             return ExplorationPreparationResult(daysProcessed: 1, routesProcessed: 0, blocksWritten: 0, checkpoint: checkpoint)
         }
-
         try Task.checkCancellation()
         try await ExplorationPreparationResourceGate.check()
         let sources = ExplorationShardFileStore(rootURL: rootURL)
         let sourceID = "day:\(input.dayKey)"
         let previousRevision = try await sources.read(sourceID: sourceID)?.revision ?? 0
+        await diagnostics.start(stage: "raster", dayKey: input.dayKey, routeCount: input.routes.count)
         let shard = try await Task.detached(priority: .utility) {
             try ExplorationPerformance.measure("shard generation") {
                 try makeShard(from: input, revision: previousRevision + 1, budget: budget)
             }
         }.value
+        await diagnostics.finish(stage: "raster", dayKey: input.dayKey, routeCount: input.routes.count)
         let cache = ExplorationMergedCache(rootURL: rootURL, shardStore: sources)
-        try await cache.replaceShard(shard)
+        await diagnostics.start(stage: "merged-cache", dayKey: input.dayKey, routeCount: input.routes.count)
+        try await cache.replaceShard(shard, updateCountryPresence: false)
+        await diagnostics.finish(stage: "merged-cache", dayKey: input.dayKey, routeCount: input.routes.count)
         // Keep the compact country-day index moving with the same bounded
         // source unit. This is deliberately one-shard work and does not scan
         // the rest of the history from the preparation slice.
+        await diagnostics.start(stage: "country-day-index", dayKey: input.dayKey, routeCount: input.routes.count)
         try await ExplorationCountryPresenceIndexStore(rootURL: rootURL).update(with: shard)
-        if let claimedWorkID {
-            try await workQueue.complete(claimedWorkID)
-            claimedWorkCompleted = true
-        }
-
+        await diagnostics.finish(stage: "country-day-index", dayKey: input.dayKey, routeCount: input.routes.count)
         if !isQueuedWork {
             checkpoint.nextDayKey = input.dayKey
             checkpoint.processedThroughDayKey = input.dayKey
-            checkpoint.preparedShardCount += 1
-            checkpoint.processedDayCount += 1
+            if checkpoint.processedHistoricalDayKeys.insert(input.dayKey).inserted {
+                checkpoint.preparedShardCount += 1
+                checkpoint.processedDayCount += 1
+            }
+        } else if claimedWork.first?.lane == .historical {
+            if checkpoint.processedHistoricalDayKeys.insert(input.dayKey).inserted {
+                checkpoint.preparedShardCount += 1
+                checkpoint.processedDayCount += 1
+            }
+            checkpoint.processedThroughDayKey = max(checkpoint.processedThroughDayKey ?? input.dayKey, input.dayKey)
         }
         checkpoint.readiness = .partiallyReady
         checkpoint.isProcessing = false
         checkpoint.processingLeaseUntil = nil
         checkpoint.updatedAt = .now
+        if !isQueuedWork {
+            checkpoint.successfulRuntime += max(0, Date.now.timeIntervalSince(startedWorkAt))
+        }
+        await diagnostics.start(stage: "checkpoint-commit", dayKey: input.dayKey, routeCount: input.routes.count)
         try await checkpointStore.save(checkpoint)
-        deferredCleanupRequired = false
+        await diagnostics.finish(stage: "checkpoint-commit", dayKey: input.dayKey, routeCount: input.routes.count)
+        if let claimedWorkID {
+            try await workQueue.complete(claimedWorkID)
+        }
         return ExplorationPreparationResult(
             daysProcessed: 1,
             routesProcessed: input.routes.count,
@@ -400,15 +477,23 @@ enum ExplorationPreparation {
         in modelContainer: ModelContainer,
         rootURL: URL = ExplorationStorageLocations.rootURL,
         sliceBudget: ExplorationPreparationBudget = ExplorationPreparationBudget(),
-        maximumDays: Int = 16,
+        maximumDays: Int = 64,
         maximumDuration: TimeInterval = 120
     ) async throws -> [ExplorationPreparationResult] {
         guard maximumDays > 0, maximumDuration > 0 else { return [] }
+        let checkpoint = try await ExplorationPreparationCheckpointStore(rootURL: rootURL).load()
+        let adaptiveDayLimit: Int
+        if checkpoint.successfulRuntime > 0, checkpoint.processedDayCount > 0 {
+            let secondsPerDay = checkpoint.successfulRuntime / Double(checkpoint.processedDayCount)
+            adaptiveDayLimit = min(maximumDays, max(1, Int(maximumDuration / max(secondsPerDay, 1))))
+        } else {
+            adaptiveDayLimit = min(maximumDays, 16)
+        }
         let deadline = Date().addingTimeInterval(maximumDuration)
         var results: [ExplorationPreparationResult] = []
-        results.reserveCapacity(maximumDays)
+        results.reserveCapacity(adaptiveDayLimit)
 
-        while results.count < maximumDays, Date() < deadline {
+        while results.count < adaptiveDayLimit, Date() < deadline {
             try Task.checkCancellation()
             try await ExplorationPreparationResourceGate.check()
 
@@ -435,7 +520,6 @@ enum ExplorationPreparation {
         budget: ExplorationPreparationBudget
     ) throws -> ExplorationShard {
         var bitmaps = [FogBlockID: [ExplorationLayer: FogBitmapBlock]]()
-        var visitCellCount = 0
 
         func set(_ cell: FogCell, layer: ExplorationLayer) throws {
             let address = try FogRasterV1.address(for: cell)
@@ -447,7 +531,9 @@ enum ExplorationPreparation {
             }
             bitmap.set(x: Int(address.localCellX), y: Int(address.localCellY))
             bitmaps[address.block, default: [:]][layer] = bitmap
-            guard bitmaps.count <= budget.maximumBlocks else { throw PreparationError.budgetExceeded }
+            // Do not turn a valid but large day into a permanent historical
+            // cursor stop. The caller still checks cancellation between route
+            // segments and commits the completed day as one atomic shard.
         }
 
         for route in input.routes {
@@ -456,8 +542,12 @@ enum ExplorationPreparation {
                   let firstAddress = try? FogRasterV1.address(for: first.clCoordinate) else { continue }
             var previous = firstAddress.cell
             for coordinate in route.coordinates.dropFirst() {
+                try Task.checkCancellation()
                 guard let currentAddress = try? FogRasterV1.address(for: coordinate.clCoordinate) else { continue }
-                for cell in FogRasterV1.cellsAlongLine(from: previous, to: currentAddress.cell) {
+                var traversed = 0
+                try FogRasterV1.forEachCellAlongLine(from: previous, to: currentAddress.cell) { cell in
+                    traversed += 1
+                    if traversed.isMultiple(of: 4_096) { try Task.checkCancellation() }
                     try set(cell, layer: route.layer)
                 }
                 previous = currentAddress.cell
@@ -466,8 +556,8 @@ enum ExplorationPreparation {
         }
 
         for visit in input.visits {
-            guard visitCellCount < budget.maximumVisitCells,
-                  let address = try? FogRasterV1.address(for: visit.clCoordinate) else { continue }
+            try Task.checkCancellation()
+            guard let address = try? FogRasterV1.address(for: visit.clCoordinate) else { continue }
             // A visit contributes a small, deterministic disk in the same raster.
             // The radius is intentionally conservative until the Phase B product
             // semantics settle; it never creates a second geographic grid.
@@ -482,10 +572,7 @@ enum ExplorationPreparation {
                           globalX < Int(FogRasterV1.globalCellDimension),
                           globalY < Int(FogRasterV1.globalCellDimension) else { continue }
                     try set(FogCell(coordinate: FogRasterCoordinate(x: UInt32(globalX), y: UInt32(globalY))), layer: .visits)
-                    visitCellCount += 1
-                    if visitCellCount >= budget.maximumVisitCells { break }
                 }
-                if visitCellCount >= budget.maximumVisitCells { break }
             }
         }
 
@@ -497,6 +584,113 @@ enum ExplorationPreparation {
 
     private enum PreparationError: Error {
         case budgetExceeded
+    }
+}
+
+actor ExplorationPreparationDiagnostics {
+    private struct Event: Codable {
+        var stage: String
+        var dayKey: String?
+        var routeCount: Int?
+        var lane: String?
+        var itemID: String?
+        var startedAt: Date
+        var endedAt: Date?
+        var durationMilliseconds: Double?
+        var error: String?
+    }
+
+    private var current: Event?
+    private let key: String
+
+    init(key: String = "Moves.exploration.preparation.lastStage") {
+        self.key = key
+    }
+
+    func start(stage: String, dayKey: String? = nil, routeCount: Int? = nil, lane: String? = nil) {
+        let previous = stage == "slice-start" ? nil : current
+        current = Event(
+            stage: stage,
+            dayKey: dayKey ?? previous?.dayKey,
+            routeCount: routeCount ?? previous?.routeCount,
+            lane: lane ?? previous?.lane,
+            itemID: previous?.itemID,
+            startedAt: .now,
+            endedAt: nil,
+            durationMilliseconds: nil,
+            error: nil
+        )
+        persist()
+    }
+
+    func finish(stage: String, dayKey: String? = nil, routeCount: Int? = nil, lane: String? = nil) {
+        if current?.stage != stage {
+            start(stage: stage, dayKey: dayKey, routeCount: routeCount, lane: lane)
+        }
+        guard var event = current else { return }
+        event.dayKey = dayKey ?? event.dayKey
+        event.routeCount = routeCount ?? event.routeCount
+        event.lane = lane ?? event.lane
+        event.endedAt = .now
+        let duration = max(0, event.endedAt!.timeIntervalSince(event.startedAt) * 1_000)
+        event.durationMilliseconds = duration
+        current = event
+        let durationKey = "Moves.exploration.preparation.stageDurations.\(stage)"
+        var durations = UserDefaults.standard.array(forKey: durationKey) as? [Double] ?? []
+        durations.append(duration)
+        if durations.count > 128 { durations.removeFirst(durations.count - 128) }
+        UserDefaults.standard.set(durations, forKey: durationKey)
+        persist()
+    }
+
+    func fail(_ message: String) {
+        guard var event = current else { return }
+        event.error = message
+        current = event
+        persist()
+    }
+
+    func setWork(itemID: String, dayKey: String, lane: String) {
+        guard var event = current else { return }
+        event.itemID = itemID
+        event.dayKey = dayKey
+        event.lane = lane
+        current = event
+        persist()
+    }
+
+    func clearWork() {
+        guard var event = current else { return }
+        event.itemID = nil
+        event.lane = nil
+        current = event
+        persist()
+    }
+
+    func failureContext() -> (dayKey: String?, lane: String?, itemID: String?) {
+        (current?.dayKey, current?.lane, current?.itemID)
+    }
+
+    private func persist() {
+        guard let current, let data = try? JSONEncoder().encode(current) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+enum ExplorationSchedulingPolicy {
+    /// A missing earliest date means the request is already eligible. Keep it;
+    /// only replace a dated request when newly urgent work is earlier.
+    static func shouldReplace(
+        existingEarliest: Date?,
+        existingRequiresExternalPower: Bool = false,
+        desiredEarliest: Date,
+        desiredRequiresExternalPower: Bool = false
+    ) -> Bool {
+        if let existingEarliest, existingEarliest < desiredEarliest { return false }
+        if existingRequiresExternalPower && !desiredRequiresExternalPower { return true }
+        if !existingRequiresExternalPower && desiredRequiresExternalPower { return false }
+        guard let existingEarliest else { return false }
+        return desiredEarliest < existingEarliest
     }
 }
 
@@ -528,27 +722,83 @@ private enum ExplorationPreparationResourceGate {
     }
 }
 
+private actor ExplorationPreparationSingleFlight {
+    private var isOccupied = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isOccupied {
+            isOccupied = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            isOccupied = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 #if !os(macOS)
 enum ExplorationPreparationBackgroundTask {
     static let taskIdentifier = "de.holgerkrupp.Moves.explorationPreparation"
+    private static let defaults = UserDefaults.standard
+    private static let pendingKey = "Moves.exploration.bg.pendingDate"
+    private static let resultKey = "Moves.exploration.bg.lastResult"
+    private static let eventKey = "Moves.exploration.bg.lastEvent"
 
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
-            handle(task as! BGProcessingTask)
+            guard let task = task as? BGProcessingTask else {
+                defaults.set("Unexpected background task type", forKey: resultKey)
+                task.setTaskCompleted(success: false)
+                return
+            }
+            handle(task)
         }
     }
 
-    static func schedule(now: Date = .now) {
+    static func schedule(now: Date = .now, urgent: Bool = false) {
         guard ExplorationPreparation.isEnabled() else { return }
-        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: taskIdentifier)
         let request = BGProcessingTaskRequest(identifier: taskIdentifier)
         request.requiresNetworkConnectivity = false
-        request.requiresExternalPower = false
-        // Preparation is intentionally an overnight opportunistic job. The
-        // system may delay it further, but repeated app launches must not turn
-        // this into a foreground-adjacent polling loop.
-        request.earliestBeginDate = nextRunDate(now: now)
-        try? BGTaskScheduler.shared.submit(request)
+        request.requiresExternalPower = backlogIsSubstantial && !urgent
+        request.earliestBeginDate = urgent || backlogIsSubstantial ? now : nextRunDate(now: now)
+        BGTaskScheduler.shared.getPendingTaskRequests { pending in
+            let existing = pending.first { $0.identifier == taskIdentifier }
+            let existingProcessingRequest = existing as? BGProcessingTaskRequest
+            if let existing,
+               !ExplorationSchedulingPolicy.shouldReplace(
+                   existingEarliest: existing.earliestBeginDate,
+                   existingRequiresExternalPower: existingProcessingRequest?.requiresExternalPower ?? false,
+                   desiredEarliest: request.earliestBeginDate!,
+                   desiredRequiresExternalPower: request.requiresExternalPower
+               ) {
+                defaults.set(existing.earliestBeginDate, forKey: pendingKey)
+                defaults.set("Existing request retained", forKey: resultKey)
+                return
+            }
+            if existing != nil {
+                BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: taskIdentifier)
+            }
+            do {
+                try BGTaskScheduler.shared.submit(request)
+                defaults.set(request.earliestBeginDate, forKey: pendingKey)
+                defaults.set("Submitted", forKey: resultKey)
+                defaults.set(now, forKey: eventKey)
+            } catch {
+                defaults.set("Submission failed: \(error.localizedDescription)", forKey: resultKey)
+                defaults.set(now, forKey: eventKey)
+            }
+        }
+    }
+
+    private static var backlogIsSubstantial: Bool {
+        defaults.integer(forKey: "Moves.exploration.historicalBacklog") > 30
     }
 
     static func nextRunDate(
@@ -564,17 +814,38 @@ enum ExplorationPreparationBackgroundTask {
     }
 
     private static func handle(_ task: BGProcessingTask) {
-        schedule()
+        defaults.set(Date.now, forKey: "Moves.exploration.bg.lastStart")
+        defaults.set(true, forKey: "Moves.exploration.bg.isProcessing")
+        defaults.removeObject(forKey: pendingKey)
+        defaults.set("Granted", forKey: resultKey)
+        var didComplete = false
+        let completionLock = NSLock()
+        func finish(_ success: Bool, result: String) {
+            completionLock.lock()
+            guard !didComplete else { completionLock.unlock(); return }
+            didComplete = true
+            completionLock.unlock()
+            defaults.set(false, forKey: "Moves.exploration.bg.isProcessing")
+            defaults.set(result, forKey: resultKey)
+            defaults.set(Date.now, forKey: eventKey)
+            task.setTaskCompleted(success: success)
+            schedule()
+        }
         let work = Task {
             do {
                 let container = try await MainActor.run { try MovesApp.makeModelContainer() }
                 _ = try await ExplorationPreparation.runBackgroundWindow(in: container)
-                task.setTaskCompleted(success: !Task.isCancelled)
+                finish(!Task.isCancelled, result: Task.isCancelled ? "Cancelled" : "Completed")
             } catch {
-                task.setTaskCompleted(success: false)
+                finish(false, result: "Failed: \(error.localizedDescription)")
             }
         }
-        task.expirationHandler = { work.cancel() }
+        task.expirationHandler = {
+            defaults.set(Date.now, forKey: "Moves.exploration.bg.lastExpiration")
+            defaults.set("Expired", forKey: resultKey)
+            work.cancel()
+            finish(false, result: "Expired")
+        }
     }
 }
 #else

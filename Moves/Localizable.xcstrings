@@ -10,6 +10,9 @@
     " It will also stop if battery reaches %@." : {
 
     },
+    "·" : {
+
+    },
     "%@" : {
 
     },
@@ -79,6 +82,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@ error %2$lld"
+          }
+        }
+      }
+    },
+    "%@ matching visits · %@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ matching visits · %2$@, %3$@"
           }
         }
       }
@@ -159,16 +172,6 @@
     "%lld matching route(s)" : {
 
     },
-    "%lld matching visits · %@, %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld matching visits · %2$@, %3$@"
-          }
-        }
-      }
-    },
     "%lld more import%@ in the queue" : {
       "localizations" : {
         "en" : {
@@ -205,12 +208,12 @@
         }
       }
     },
-    "%lld recorded visit%@ inside this area" : {
+    "%lld recorded visit%@ on this page" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "%1$lld recorded visit%2$@ inside this area"
+            "value" : "%1$lld recorded visit%2$@ on this page"
           }
         }
       }
@@ -284,6 +287,9 @@
 
     },
     "Activity" : {
+
+    },
+    "Activity Unavailable" : {
 
     },
     "Add Regular Place" : {
@@ -374,6 +380,9 @@
 
     },
     "Both tools open at %@. Choose another day or period inside the tool whenever you need it." : {
+
+    },
+    "Browse other visits to this place" : {
 
     },
     "Building optimized map cache…" : {
@@ -509,16 +518,28 @@
     "Could Not Update Statistics" : {
 
     },
+    "Could Not Update Visits" : {
+
+    },
     "Couldn’t Import Route File" : {
 
     },
     "Couldn’t Import Route Files" : {
 
     },
+    "Couldn’t Load Visits" : {
+
+    },
     "Create & Share" : {
 
     },
+    "Create a saved place centered on this visit" : {
+
+    },
     "Create Regular Place" : {
+
+    },
+    "Create Regular Place…" : {
 
     },
     "Created" : {
@@ -596,9 +617,6 @@
     "Delete Entry?" : {
 
     },
-    "Delete Known Location?" : {
-
-    },
     "Delete Move" : {
 
     },
@@ -609,6 +627,9 @@
 
     },
     "Delete Place?" : {
+
+    },
+    "Delete Regular Place?" : {
 
     },
     "Delete Sample" : {
@@ -1061,7 +1082,16 @@
     "Live Real Route Tracking location fix %lld" : {
 
     },
+    "Load More Visits" : {
+
+    },
     "Loading visit history…" : {
+
+    },
+    "Loading visits…" : {
+
+    },
+    "Loading…" : {
 
     },
     "Locate File" : {
@@ -1285,6 +1315,12 @@
     "No movement summary available yet." : {
 
     },
+    "No other recorded visits match this place." : {
+
+    },
+    "No Other Visits" : {
+
+    },
     "No recorded days yet" : {
 
     },
@@ -1367,6 +1403,12 @@
 
     },
     "Organize in year/month folders" : {
+
+    },
+    "Other Visits" : {
+
+    },
+    "Other visits here" : {
 
     },
     "Overall progress" : {
@@ -1469,6 +1511,12 @@
     "Record Details Unavailable" : {
 
     },
+    "Record Location Sample" : {
+
+    },
+    "Record one precise location sample" : {
+
+    },
     "Recorded days" : {
 
     },
@@ -1476,6 +1524,12 @@
 
     },
     "Recorded visits remain in your timeline. Only the saved name and proximity area are removed." : {
+
+    },
+    "Recording location sample" : {
+
+    },
+    "Regular Place: %@" : {
 
     },
     "Regular Places" : {
@@ -1539,6 +1593,9 @@
     "Retry" : {
 
     },
+    "Retry Visit Updates" : {
+
+    },
     "Retrying never deletes or recreates your local store." : {
 
     },
@@ -1582,9 +1639,6 @@
 
     },
     "Save places such as Home or Work to recognize future visits." : {
-
-    },
-    "Saving a name also creates or updates a Regular Place for future visits." : {
 
     },
     "Search" : {
@@ -1692,6 +1746,9 @@
     "Show import status in the menu bar" : {
 
     },
+    "Show individual OS location fixes on the map and in the timeline. Gaps are intentional; no connecting routes are drawn." : {
+
+    },
     "Show inspector" : {
 
     },
@@ -1710,6 +1767,12 @@
     "Show realistic map elevation" : {
 
     },
+    "Show reconstructed routes alongside visits and movement in the timeline." : {
+
+    },
+    "Showing the latest %lld loaded raw OS location fixes." : {
+
+    },
     "Showing the latest %lld of %lld routes." : {
       "localizations" : {
         "en" : {
@@ -1724,12 +1787,6 @@
 
     },
     "Shows move details and raw location data" : {
-
-    },
-    "Shows only individual locations reported by iOS. Gaps are intentional: Moves did not receive enough fixes to know the path. Background tracking can look sparse." : {
-
-    },
-    "Shows the normal reconstructed routes from your location evidence. This is the default display mode." : {
 
     },
     "Shrink map" : {
@@ -1912,6 +1969,9 @@
     "This journey still appears in your timeline and can be included again at any time." : {
 
     },
+    "This label applies to this visit only." : {
+
+    },
     "This month" : {
 
     },
@@ -1931,6 +1991,9 @@
 
     },
     "This removes this place from the timeline. You can undo the deletion afterwards." : {
+
+    },
+    "This visit may have been deleted or changed on another device." : {
 
     },
     "Time" : {
@@ -1993,6 +2056,9 @@
     "Try a location such as Hamburg, a note, or a date from your history." : {
 
     },
+    "Try Again" : {
+
+    },
     "Turn off" : {
 
     },
@@ -2009,6 +2075,9 @@
 
     },
     "until the end of today" : {
+
+    },
+    "Updating Visits…" : {
 
     },
     "Upload All History" : {
@@ -2048,6 +2117,12 @@
 
     },
     "Uses only enough temporary space for the file currently being imported." : {
+
+    },
+    "View or edit the saved place for this visit" : {
+
+    },
+    "Visit Unavailable" : {
 
     },
     "Visited %@" : {

@@ -181,6 +181,7 @@ struct ExplorationCountryResolver: Sendable {
         let id: String
         let name: String
         let polygons: [[[[Double]]]]
+        private let polygonBounds: [BoundaryBounds]
         let minLongitude: Double
         let maxLongitude: Double
         let minLatitude: Double
@@ -194,6 +195,15 @@ struct ExplorationCountryResolver: Sendable {
             id = Self.canonicalID(for: record.name, fallback: record.id)
             name = record.name
             polygons = record.polygons
+            polygonBounds = record.polygons.map { polygon in
+                let points = polygon.flatMap { $0 }
+                return BoundaryBounds(
+                    minLongitude: points.map { $0[0] }.min() ?? -180,
+                    maxLongitude: points.map { $0[0] }.max() ?? 180,
+                    minLatitude: points.map { $0[1] }.min() ?? -90,
+                    maxLatitude: points.map { $0[1] }.max() ?? 90
+                )
+            }
             let points = record.polygons.flatMap { $0 }.flatMap { $0 }
             minLongitude = points.map { $0[0] }.min() ?? -180
             maxLongitude = points.map { $0[0] }.max() ?? 180
@@ -204,7 +214,9 @@ struct ExplorationCountryResolver: Sendable {
         func contains(longitude: Double, latitude: Double) -> Bool {
             guard latitude >= minLatitude, latitude <= maxLatitude,
                   longitude >= minLongitude, longitude <= maxLongitude else { return false }
-            return polygons.contains { polygon in
+            return zip(polygons, polygonBounds).contains { pair in
+                let (polygon, bounds) = pair
+                guard bounds.contains(longitude: longitude, latitude: latitude) else { return false }
                 guard let outer = polygon.first, pointInRing(longitude: longitude, latitude: latitude, ring: outer) else { return false }
                 return !polygon.dropFirst().contains { pointInRing(longitude: longitude, latitude: latitude, ring: $0) }
             }
@@ -213,11 +225,30 @@ struct ExplorationCountryResolver: Sendable {
         func coveredArea(in bounds: FogCellGeographicBounds) -> Double {
             guard bounds.north >= minLatitude, bounds.south <= maxLatitude,
                   bounds.east >= minLongitude, bounds.west <= maxLongitude else { return 0 }
-            return polygons.reduce(0) { total, polygon in
+            return zip(polygons, polygonBounds).reduce(0) { total, pair in
+                let (polygon, polygonBounds) = pair
+                guard polygonBounds.intersects(bounds) else { return total }
                 guard let outer = polygon.first else { return total }
                 let outerArea = projectedClippedRingArea(outer, in: bounds)
                 let holeArea = polygon.dropFirst().reduce(0) { $0 + projectedClippedRingArea($1, in: bounds) }
                 return total + max(0, outerArea - holeArea)
+            }
+        }
+
+        private struct BoundaryBounds: Sendable {
+            let minLongitude: Double
+            let maxLongitude: Double
+            let minLatitude: Double
+            let maxLatitude: Double
+
+            func contains(longitude: Double, latitude: Double) -> Bool {
+                latitude >= minLatitude && latitude <= maxLatitude
+                    && longitude >= minLongitude && longitude <= maxLongitude
+            }
+
+            func intersects(_ bounds: FogCellGeographicBounds) -> Bool {
+                bounds.north >= minLatitude && bounds.south <= maxLatitude
+                    && bounds.east >= minLongitude && bounds.west <= maxLongitude
             }
         }
 

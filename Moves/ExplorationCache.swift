@@ -45,7 +45,7 @@ actor ExplorationMergedCache {
     func readBlock(_ id: FogBlockID) throws -> ExplorationMergedBlock? {
         let url = blockURL(id)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        return try decodeBlock(Data(contentsOf: url))
+        return try decodeBlock(ExplorationFileStorage.readData(from: url))
     }
 
     func blockIDs() throws -> [FogBlockID] {
@@ -66,35 +66,50 @@ actor ExplorationMergedCache {
         try await replaceShard(shard)
     }
 
-    func replaceShard(_ shard: ExplorationShard) async throws {
-        try await replaceShards([shard])
+    func replaceShard(_ shard: ExplorationShard, updateCountryPresence: Bool = true) async throws {
+        try await replaceShards([shard], updateCountryPresence: updateCountryPresence)
     }
 
     /// Replaces a bounded batch of source shards and rebuilds their affected
     /// canonical blocks once. Importers use this to avoid rebuilding the whole
     /// cache for every Fog tile.
-    func replaceShards(_ shards: [ExplorationShard]) async throws {
+    func replaceShards(_ shards: [ExplorationShard], updateCountryPresence: Bool = true) async throws {
         guard !shards.isEmpty else { return }
         var affected = Set<FogBlockID>()
+        var rebuildAffected = Set<FogBlockID>()
+        var appendOnly = [ExplorationShard]()
+        var accepted = [ExplorationShard]()
         for shard in shards {
             let old = try await shardStore.read(sourceID: shard.sourceID)
             guard try await shardStore.writeIfPreferred(shard) else { continue }
+            accepted.append(shard)
+            if old == nil { appendOnly.append(shard) }
             affected.formUnion((old?.blocks ?? []).map(\.id))
             affected.formUnion(shard.blocks.map(\.id))
+            if old != nil {
+                rebuildAffected.formUnion((old?.blocks ?? []).map(\.id))
+                rebuildAffected.formUnion(shard.blocks.map(\.id))
+            }
         }
         guard !affected.isEmpty else { return }
-        try await rebuildBlocks(affected)
+        if !rebuildAffected.isEmpty { try await rebuildBlocks(rebuildAffected) }
+        if !appendOnly.isEmpty { try await appendShardsToBlocks(appendOnly) }
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
-        try? await ExplorationCountryPresenceIndexStore(rootURL: rootURL).remove()
-        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: affected)
+        if updateCountryPresence {
+            let countryIndex = ExplorationCountryPresenceIndexStore(rootURL: rootURL)
+            for shard in accepted where shard.logicalStart != nil || shard.logicalEnd != nil {
+                try await countryIndex.update(with: shard)
+            }
+        }
+        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: affected, cache: self)
     }
 
     func removeShard(sourceID: String) async throws {
         guard let old = try await shardStore.remove(sourceID: sourceID) else { return }
         try await rebuildBlocks(Set(old.blocks.map(\.id)))
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
-        try? await ExplorationCountryPresenceIndexStore(rootURL: rootURL).remove()
-        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: old.blocks.map(\.id))
+        try? await ExplorationCountryPresenceIndexStore(rootURL: rootURL).removeDay(for: old)
+        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: old.blocks.map(\.id), cache: self)
     }
 
     func invalidateBlocks(_ ids: some Sequence<FogBlockID>) throws {
@@ -107,12 +122,12 @@ actor ExplorationMergedCache {
     func rebuildBlocks(_ ids: some Sequence<FogBlockID>) async throws {
         let ids = Array(Set(ids)).sorted()
         guard !ids.isEmpty else { return }
-        let shards = try await shardStore.allShards()
-        var wanted = Set(ids)
         var merged = [FogBlockID: [ExplorationLayer: FogBitmapBlock]]()
-
-        for shard in shards {
-            for block in shard.blocks where wanted.contains(block.id) {
+        for id in ids {
+            let sourceIDs = try await shardStore.sourceIDs(containing: id)
+            for sourceID in sourceIDs {
+                guard let shard = try await shardStore.read(sourceID: sourceID),
+                      let block = shard.blocks.first(where: { $0.id == id }) else { continue }
                 for layer in block.layers {
                     if let current = merged[block.id]?[layer.layer] {
                         merged[block.id]?[layer.layer] = current.union(layer.bitmap)
@@ -132,8 +147,37 @@ actor ExplorationMergedCache {
                 let url = blockURL(id)
                 if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
             }
-            wanted.remove(id)
         }
+    }
+
+    private func appendShardsToBlocks(_ shards: [ExplorationShard]) async throws {
+        var blocksByID = [FogBlockID: [ExplorationLayer: FogBitmapBlock]]()
+        for shard in shards {
+            for block in shard.blocks {
+                if blocksByID[block.id] == nil, let existing = try readBlock(block.id) {
+                    blocksByID[block.id] = Dictionary(uniqueKeysWithValues: existing.layers.map { ($0.layer, $0.bitmap) })
+                }
+                for layer in block.layers {
+                    if let existing = blocksByID[block.id]?[layer.layer] {
+                        blocksByID[block.id]?[layer.layer] = existing.union(layer.bitmap)
+                    } else {
+                        blocksByID[block.id, default: [:]][layer.layer] = layer.bitmap
+                    }
+                }
+            }
+        }
+        for (id, layers) in blocksByID {
+            try writeBlock(ExplorationMergedBlock(id: id, layers: layers.map { ExplorationLayerBitmap(layer: $0.key, bitmap: $0.value) }))
+        }
+    }
+
+    func renderBlocks(_ ids: some Sequence<FogBlockID>) throws -> [FogBlockID: [ExplorationLayer: FogBitmapBlock]] {
+        var result = [FogBlockID: [ExplorationLayer: FogBitmapBlock]]()
+        for id in Set(ids) {
+            guard let block = try readBlock(id) else { continue }
+            result[id] = Dictionary(uniqueKeysWithValues: block.layers.map { ($0.layer, $0.bitmap) })
+        }
+        return result
     }
 
     func rebuildAll() async throws {
@@ -157,7 +201,7 @@ actor ExplorationMergedCache {
         appendUInt32(crc32(data), to: &data)
         let destination = blockURL(block.id)
         try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: destination, options: ExplorationFileStorage.atomicWriteOptions)
+        try ExplorationFileStorage.writeAtomically(data, to: destination)
     }
 
     private func decodeBlock(_ data: Data) throws -> ExplorationMergedBlock {

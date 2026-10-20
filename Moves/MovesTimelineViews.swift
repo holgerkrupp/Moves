@@ -135,7 +135,12 @@ struct DayTimelinePageContent: View {
     private var timelineRows: [TimelineEntryRow] {
         var rows = presentationCache.timelineRows
 
-        if rows.isEmpty, let latestSample = presentationCache.latestSample {
+        let todayKey = DayTimeline.makeDayKey(for: Calendar.current.startOfDay(for: .now))
+        let latestRepresentedDate = rows.map { $0.entry.startDate }.max()
+        if dayTimeline.dayKey == todayKey,
+           routeDisplayMode != .rawOSLocationFixes,
+           let latestSample = presentationCache.latestSample,
+           latestRepresentedDate.map({ latestSample.timestamp > $0 }) ?? true {
             let entry = TimelineEntry.sample(
                 location: latestSample,
                 sampleCount: presentationCache.sampleCount,
@@ -3731,13 +3736,17 @@ struct TimelineRowPresentation: Identifiable, Equatable {
 
         case .sample(let location, let sampleCount, let resolvedName):
             clockText = Self.timeString(from: location.timestamp)
-            if let resolvedName,
+            if location.source == .timelineOpen {
+                titleText = "Last observed location"
+            } else if let resolvedName,
                !resolvedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 titleText = resolvedName
             } else {
                 titleText = Self.coordinateString(latitude: location.latitude, longitude: location.longitude)
             }
-            subtitleText = "In progress"
+            subtitleText = location.source == .timelineOpen
+                ? "Provisional · \(location.source.displayName)"
+                : "In progress · \(location.source.displayName)"
             tertiaryText = sampleCount == 1
                 ? "1 location sample captured"
                 : "\(sampleCount) location samples captured"

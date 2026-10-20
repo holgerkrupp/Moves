@@ -3,6 +3,9 @@ import Foundation
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ExplorationPreparationDebugView: View {
     @Environment(\.modelContext) private var modelContext
@@ -14,6 +17,8 @@ struct ExplorationPreparationDebugView: View {
     @State private var isConfirmingReset = false
     @State private var isResetting = false
     @State private var isRunningSlice = false
+    @State private var isRunningCatchUp = false
+    @State private var catchUpTask: Task<Void, Never>?
     @State private var isRebuildingCache = false
     @State private var isShowingFogImporter = false
     @State private var isImportingFog = false
@@ -51,6 +56,21 @@ struct ExplorationPreparationDebugView: View {
                 }
                 .disabled(isRunningSlice || isResetting || isRebuildingCache)
 
+                Button {
+                    startCatchUp()
+                } label: {
+                    Label(isRunningCatchUp ? "Catch-up running…" : "Prepare historical map now", systemImage: "bolt.fill")
+                }
+                .disabled(isRunningSlice || isRunningCatchUp || isResetting || isRebuildingCache)
+
+                if isRunningCatchUp {
+                    Button(role: .cancel) {
+                        catchUpTask?.cancel()
+                    } label: {
+                        Label("Stop catch-up", systemImage: "stop.fill")
+                    }
+                }
+
                 Text("Processes at most one bounded DayTimeline work unit. This does not enable automatic background scheduling.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -78,15 +98,78 @@ struct ExplorationPreparationDebugView: View {
 
                     if let queueSnapshot {
                         debugRow("Queued work", queueSnapshot.queuedCount.formatted())
+                        debugRow("Delayed / backoff", queueSnapshot.delayedCount.formatted())
                         debugRow("Processing work", queueSnapshot.processingCount.formatted())
+                        ForEach(ExplorationWorkLane.allCases, id: \.self) { lane in
+                            debugRow("\(lane.title) lane", (queueSnapshot.countsByLane[lane] ?? 0).formatted())
+                        }
                         if queueSnapshot.staleProcessingCount > 0 {
                             debugRow("Stale leases", queueSnapshot.staleProcessingCount.formatted())
+                        }
+                        ForEach(queueSnapshot.recentFailures, id: \.id) { item in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Last failure · \(item.dayKey) · \(item.lane.title) · attempt \(item.attempts)")
+                                Text(item.lastError ?? "Unknown error")
+                                    .foregroundStyle(.secondary)
+                                if let retry = item.nextEligibleAt {
+                                    Text("Retry eligible \(retry.formatted(date: .abbreviated, time: .shortened))")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.footnote)
                         }
                     }
                 } else {
                     Text("No preparation checkpoint has been written yet.")
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Background scheduler") {
+                let defaults = UserDefaults.standard
+                if let data = defaults.data(forKey: "Moves.exploration.preparation.lastStage"),
+                   let event = try? JSONDecoder().decode(ExplorationStageDebugRecord.self, from: data) {
+                    debugRow("Last preparation stage", [event.stage, event.dayKey, event.lane, event.routeCount.map { "\($0) routes" }].compactMap { $0 }.joined(separator: " · "))
+                    if let ended = event.endedAt {
+                        let duration = event.durationMilliseconds.map { formatDuration($0 / 1_000) }
+                            ?? formatDuration(ended.timeIntervalSince(event.startedAt))
+                        debugRow("Stage duration", "\(duration) · P95 \(percentile95(defaults.array(forKey: "Moves.exploration.preparation.stageDurations.\(event.stage)")))")
+                    } else {
+                        debugRow("Stage status", "Started \(event.startedAt.formatted(date: .abbreviated, time: .shortened)); no completion recorded")
+                    }
+                    if let error = event.error { debugRow("Stage error", error) }
+                }
+                if let failure = defaults.dictionary(forKey: "Moves.exploration.protectedReadFailure") {
+                    let component = failure["pathComponent"] as? String ?? "unknown file"
+                    let domain = failure["domain"] as? String ?? "unknown error"
+                    let code = failure["code"] as? Int ?? 0
+                    let protection = failure["protectionClass"] as? String ?? "unknown class"
+                    let available = failure["protectedDataAvailable"] as? Bool ?? false
+                    let background = failure["attemptedInBackground"] as? Bool ?? false
+                    debugRow("Protected file access", "\(component) · \(domain) \(code) · \(protection) · data available: \(available) · background: \(background)")
+                }
+                debugRow("Last BG result", defaults.string(forKey: "Moves.exploration.bg.lastResult") ?? "No grant recorded")
+                if let date = defaults.object(forKey: "Moves.exploration.bg.lastStart") as? Date {
+                    debugRow("Last BG start", date.formatted(date: .abbreviated, time: .shortened))
+                }
+                if let date = defaults.object(forKey: "Moves.exploration.bg.pendingDate") as? Date {
+                    debugRow("Pending earliest", date.formatted(date: .abbreviated, time: .shortened))
+                } else {
+                    debugRow("Pending request", "None recorded")
+                }
+                if let date = defaults.object(forKey: "Moves.exploration.bg.lastExpiration") as? Date {
+                    debugRow("Last expiration", date.formatted(date: .abbreviated, time: .shortened))
+                }
+                if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                    debugRow("Resource gate", "Low Power Mode")
+                } else if ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
+                    debugRow("Resource gate", "Thermal state: \(ProcessInfo.processInfo.thermalState)")
+                } else if defaults.bool(forKey: "Moves.routeImport.isActive") {
+                    debugRow("Resource gate", "Route import active")
+                }
+#if canImport(UIKit)
+                debugRow("Background App Refresh", UIApplication.shared.backgroundRefreshStatus == .available ? "Available" : "Unavailable")
+#endif
             }
 
             Section("Projection") {
@@ -96,8 +179,9 @@ struct ExplorationPreparationDebugView: View {
                     }
 
                     if let elapsed = statistics.elapsed {
-                        debugRow("Elapsed", formatDuration(elapsed))
+                        debugRow("Wall time since first attempt", formatDuration(elapsed))
                     }
+                    debugRow("Worker runtime", formatDuration(statistics.checkpoint.successfulRuntime))
 
                     if let averageDaysPerHour = statistics.averageDaysPerHour {
                         debugRow("Average", "\(averageDaysPerHour.formatted(.number.precision(.fractionLength(2)))) days/hour")
@@ -149,7 +233,7 @@ struct ExplorationPreparationDebugView: View {
                         systemImage: "trash"
                     )
                 }
-                .disabled(isResetting)
+                .disabled(isResetting || isRunningSlice || isRunningCatchUp)
 
                 Text("Deletes source shards, the merged cache, and the preparation checkpoint. Moves history is not deleted.")
                     .font(.footnote)
@@ -309,6 +393,34 @@ struct ExplorationPreparationDebugView: View {
         }
     }
 
+    private func startCatchUp() {
+        guard !isRunningCatchUp else { return }
+        isRunningCatchUp = true
+        sliceMessage = "Preparing bounded catch-up batches…"
+        catchUpTask = Task { @MainActor in
+            defer {
+                isRunningCatchUp = false
+                catchUpTask = nil
+            }
+            do {
+                let results = try await ExplorationPreparation.runBackgroundWindow(
+                    in: modelContext.container,
+                    maximumDays: 64,
+                    maximumDuration: 10 * 60
+                )
+                await refresh()
+                let completed = results.reduce(0) { $0 + $1.daysProcessed }
+                sliceMessage = "Catch-up committed \(completed.formatted()) day(s). Run again to continue."
+            } catch is CancellationError {
+                await refresh()
+                sliceMessage = "Catch-up stopped. Completed checkpoints can resume on the next run."
+            } catch {
+                await refresh()
+                errorMessage = "Catch-up could not continue: \(error.localizedDescription)"
+            }
+        }
+    }
+
     @ViewBuilder
     private func debugRow(_ title: String, _ value: String) -> some View {
         HStack {
@@ -393,7 +505,7 @@ struct ExplorationPreparationDebugView: View {
 
             do {
                 let result = try await FogOfWorldDebugImporter.importArchive(at: url)
-                fogImportMessage = "\(result.archiveKind): \(result.tileCount.formatted()) tiles, \(result.blockCount.formatted()) blocks, \(result.revealedCellCount.formatted()) revealed cells. Source \(result.sourceID)."
+                fogImportMessage = "\(result.archiveKind): \(result.tileCount.formatted()) tiles, \(result.blockCount.formatted()) blocks, \(result.revealedCellCount.formatted()) revealed cells. Source \(result.sourceID). This coverage is undated and does not change historical day progress."
             } catch is CancellationError {
                 fogImportMessage = "Fog import cancelled."
             } catch {
@@ -425,6 +537,25 @@ struct ExplorationPreparationDebugView: View {
             }
         }
     }
+}
+
+private struct ExplorationStageDebugRecord: Decodable {
+    let stage: String
+    let dayKey: String?
+    let routeCount: Int?
+    let lane: String?
+    let itemID: String?
+    let startedAt: Date
+    let endedAt: Date?
+    let durationMilliseconds: Double?
+    let error: String?
+}
+
+private func percentile95(_ rawValues: Any?) -> String {
+    let values = (rawValues as? [Double] ?? []).sorted()
+    guard !values.isEmpty else { return "—" }
+    let index = min(values.count - 1, Int(ceil(Double(values.count) * 0.95)) - 1)
+    return String(format: "%.0f ms", values[index])
 }
 
 struct FogDebugExportDocument: FileDocument {

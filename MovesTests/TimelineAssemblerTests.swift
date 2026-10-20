@@ -2575,6 +2575,197 @@ final class TimelineAssemblerTests: XCTestCase {
         XCTAssertEqual(moves.count, 1)
     }
 
+    func testContainedAutomaticCyclingMovesKeepLongTripRegardlessOfArrivalOrder() throws {
+        for shorterFirst in [false, true] {
+            let container = try makeInMemoryContainer()
+            let repository = SwiftDataTimelineRepository(modelContainer: container)
+            let start = Date(timeIntervalSince1970: 1_760_000_000)
+            let longEnd = start.addingTimeInterval(12 * 60)
+            let shortStart = start.addingTimeInterval(6 * 60)
+            let shortEnd = start.addingTimeInterval(11 * 60)
+            let longOrigin = VisitPlace(
+                arrivalDate: start.addingTimeInterval(-5 * 60),
+                departureDate: start,
+                latitude: 52.5200,
+                longitude: 13.4050,
+                horizontalAccuracy: 20
+            )
+            let shortOrigin = VisitPlace(
+                arrivalDate: start.addingTimeInterval(4 * 60),
+                departureDate: shortStart,
+                latitude: 52.5208,
+                longitude: 13.4050,
+                horizontalAccuracy: 20
+            )
+            let longDestination = VisitPlace(
+                arrivalDate: longEnd,
+                departureDate: nil,
+                latitude: 52.5300,
+                longitude: 13.4150,
+                horizontalAccuracy: 20
+            )
+            let shortDestination = VisitPlace(
+                arrivalDate: shortEnd,
+                departureDate: nil,
+                latitude: 52.5300,
+                longitude: 13.4150,
+                horizontalAccuracy: 20
+            )
+            let longSamples = try repository.appendSamples(from: [
+                makeLocation(
+                    latitude: 52.5208,
+                    longitude: 13.4050,
+                    speed: 4,
+                    timestamp: shortStart.addingTimeInterval(10)
+                ),
+                makeLocation(
+                    latitude: 52.5250,
+                    longitude: 13.4100,
+                    speed: 4,
+                    timestamp: start.addingTimeInterval(9 * 60)
+                )
+            ], source: .significantChange)
+            let shortSamples = try repository.appendSamples(from: [
+                makeLocation(
+                    latitude: 52.5220,
+                    longitude: 13.4070,
+                    speed: 4,
+                    timestamp: start.addingTimeInterval(8 * 60)
+                )
+            ], source: .significantChange)
+
+            var retainedLongMove: MoveSegment?
+            if shorterFirst {
+                _ = try repository.upsertMove(
+                    startPlace: shortOrigin,
+                    endPlace: shortDestination,
+                    startDate: shortStart,
+                    endDate: shortEnd,
+                    transportMode: .cycling,
+                    distanceMeters: 1_400,
+                    stepCount: 500,
+                    samples: shortSamples
+                )
+                retainedLongMove = try repository.upsertMove(
+                    startPlace: longOrigin,
+                    endPlace: longDestination,
+                    startDate: start,
+                    endDate: longEnd,
+                    transportMode: .cycling,
+                    distanceMeters: 2_100,
+                    stepCount: 900,
+                    samples: longSamples
+                )
+            } else {
+                retainedLongMove = try repository.upsertMove(
+                    startPlace: longOrigin,
+                    endPlace: longDestination,
+                    startDate: start,
+                    endDate: longEnd,
+                    transportMode: .cycling,
+                    distanceMeters: 2_100,
+                    stepCount: 900,
+                    samples: longSamples
+                )
+                _ = try repository.upsertMove(
+                    startPlace: shortOrigin,
+                    endPlace: shortDestination,
+                    startDate: shortStart,
+                    endDate: shortEnd,
+                    transportMode: .cycling,
+                    distanceMeters: 1_400,
+                    stepCount: 500,
+                    samples: shortSamples
+                )
+            }
+
+            let verificationContext = ModelContext(container)
+            let moves = try verificationContext.fetch(FetchDescriptor<MoveSegment>())
+            let canonical = try XCTUnwrap(moves.first)
+            XCTAssertEqual(moves.count, 1)
+            XCTAssertEqual(canonical.id, retainedLongMove?.id)
+            XCTAssertEqual(canonical.startDate, start)
+            XCTAssertEqual(canonical.endDate, longEnd)
+            XCTAssertEqual(canonical.startPlace?.id, longOrigin.id)
+            XCTAssertEqual(canonical.dayTimeline?.dayKey, DayTimeline.makeDayKey(for: start))
+            XCTAssertEqual(canonical.samples.count, 3)
+            XCTAssertEqual(try verificationContext.fetchCount(FetchDescriptor<LocationSample>()), 3)
+            XCTAssertEqual(try verificationContext.fetchCount(FetchDescriptor<VisitPlace>()), 4)
+        }
+    }
+
+    func testContainedAutomaticMovePreservesPreciseShortRouteTrack() throws {
+        let container = try makeInMemoryContainer()
+        let repository = SwiftDataTimelineRepository(modelContainer: container)
+        let start = Date(timeIntervalSince1970: 1_760_100_000)
+        let longEnd = start.addingTimeInterval(12 * 60)
+        let shortStart = start.addingTimeInterval(6 * 60)
+        let shortEnd = start.addingTimeInterval(11 * 60)
+        let longOrigin = VisitPlace(
+            arrivalDate: start.addingTimeInterval(-5 * 60),
+            departureDate: start,
+            latitude: 52.5200,
+            longitude: 13.4050,
+            horizontalAccuracy: 20
+        )
+        let shortOrigin = VisitPlace(
+            arrivalDate: start.addingTimeInterval(4 * 60),
+            departureDate: shortStart,
+            latitude: 52.5208,
+            longitude: 13.4050,
+            horizontalAccuracy: 5
+        )
+        let destination = VisitPlace(
+            arrivalDate: longEnd,
+            departureDate: nil,
+            latitude: 52.5300,
+            longitude: 13.4150,
+            horizontalAccuracy: 20
+        )
+        let longRouteSample = try repository.appendSamples(from: [
+            makeLocation(
+                latitude: 52.5208,
+                longitude: 13.4050,
+                speed: 4,
+                timestamp: shortStart.addingTimeInterval(10)
+            )
+        ], source: .significantChange)
+        _ = try repository.upsertMove(
+            startPlace: longOrigin,
+            endPlace: destination,
+            startDate: start,
+            endDate: longEnd,
+            transportMode: .cycling,
+            distanceMeters: 2_100,
+            stepCount: nil,
+            samples: longRouteSample
+        )
+
+        let preciseSample = try repository.appendSamples(from: [
+            makeLocation(
+                latitude: 52.5208,
+                longitude: 13.4050,
+                speed: 4,
+                timestamp: shortStart.addingTimeInterval(10)
+            )
+        ], source: .routeTracking)
+        _ = try repository.upsertMove(
+            startPlace: shortOrigin,
+            endPlace: destination,
+            startDate: shortStart,
+            endDate: shortEnd,
+            transportMode: .cycling,
+            distanceMeters: 1_400,
+            stepCount: nil,
+            samples: preciseSample
+        )
+
+        let verificationContext = ModelContext(container)
+        let moves = try verificationContext.fetch(FetchDescriptor<MoveSegment>())
+        XCTAssertEqual(moves.count, 2)
+        XCTAssertTrue(moves.contains { $0.samples.contains(where: { $0.source == .routeTracking }) })
+    }
+
     func testHistoricalDeduplicationSweepMergesExistingDuplicatePlacesAndMoves() throws {
         let container = try makeInMemoryContainer()
         let seedContext = ModelContext(container)

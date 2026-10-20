@@ -6,14 +6,35 @@ navigation, scrolling, search, imports, and launch.
 Current bounds:
 
 - one `DayTimeline` per preparation slice by default;
-- at most 64 routes, 100,000 affected blocks, and 20,000 visit cells per slice;
+- one complete `DayTimeline` source unit per commit; route and visit inputs are
+  no longer silently truncated by per-day counts;
 - one durable queue claim at a time;
 - 16 Fog tile shards per cache merge batch;
-- dated country-presence entries are generated as derived data and are
-  invalidated with source replacements;
+- dated country-presence entries are generated as derived data and updated or
+  removed per source day;
+- block rebuilds use a versioned block-to-source manifest; append-only updates
+  union into the existing canonical block, while replacements read only source
+  shards that contribute to affected blocks;
+- render updates consume affected canonical blocks, and country presence is
+  stored as per-day files so normal day processing does not rewrite all history;
+- the manifest has a pending-mutation journal and a one-time full rebuild path
+  for legacy stores or crash recovery;
+- country attribution prefilters each multipolygon component by its own bounds
+  before exact cell-clipping work;
 - route geometry is released after the day work unit;
-- leases make cancellation and process termination retryable;
+- leases and exponential per-item retry backoff make cancellation, process
+  termination, and transient failures retryable without monopolizing a window;
 - no Exploration fetch is launched from SwiftUI body evaluation.
+
+Exploration shards, checkpoints, queues, caches, and indexes use
+`NSFileProtectionCompleteUntilFirstUserAuthentication`. This keeps derived
+Exploration available to background work after the first unlock following
+reboot, including while the device is locked. These files contain derived
+travel-presence and raster data, so this trades the stronger between-unlocks
+protection of `NSFileProtectionComplete` for background availability. The
+authoritative SwiftData/CloudKit timeline and user-selected Fog archives keep
+their existing protection. Existing files are migrated in resumable batches
+only inside `Application Support/Moves/Exploration`.
 
 The worker is default-disabled until a device-history baseline is measured. The
 DEBUG build contains `OSSignposter` instrumentation for shard generation and

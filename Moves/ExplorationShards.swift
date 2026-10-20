@@ -261,6 +261,9 @@ private func lexicographicallyPrecedes(_ lhs: Data, _ rhs: Data) -> Bool {
 }
 
 actor ExplorationShardFileStore {
+    private struct ManifestMutation: Codable {
+        let sourceID: String
+    }
     let rootURL: URL
     private let fileManager: FileManager
 
@@ -272,7 +275,7 @@ actor ExplorationShardFileStore {
     func read(sourceID: String) throws -> ExplorationShard? {
         let url = try url(for: sourceID)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        return try ExplorationShardCodec.decode(Data(contentsOf: url))
+        return try ExplorationShardCodec.decode(ExplorationFileStorage.readData(from: url))
     }
 
     func allShards() throws -> [ExplorationShard] {
@@ -281,25 +284,48 @@ actor ExplorationShardFileStore {
         let urls = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "exploration" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        return try urls.map { try ExplorationShardCodec.decode(Data(contentsOf: $0)) }
+        return try urls.map { try ExplorationShardCodec.decode(ExplorationFileStorage.readData(from: $0)) }
+    }
+
+    func sourceIDs(containing blockID: FogBlockID) throws -> [String] {
+        try recoverManifestMutationIfNeeded()
+        let manifestURL = rootURL.appendingPathComponent("v1/source-index.json")
+        if fileManager.fileExists(atPath: manifestURL.path),
+           let manifest = try? JSONDecoder().decode([String: [String]].self, from: ExplorationFileStorage.readData(from: manifestURL)) {
+            return manifest[Self.blockKey(blockID), default: []].sorted()
+        }
+        // One-time bounded recovery path for installs predating the manifest.
+        let shards = try allShards()
+        var manifest = [String: Set<String>]()
+        for shard in shards {
+            for block in shard.blocks { manifest[Self.blockKey(block.id), default: []].insert(shard.sourceID) }
+        }
+        try saveManifest(manifest)
+        return manifest[Self.blockKey(blockID), default: []].sorted()
     }
 
     func write(_ shard: ExplorationShard, failBeforeReplacement: Bool = false) throws {
         let data = try ExplorationShardCodec.encode(shard)
         _ = try ExplorationShardCodec.decode(data)
+        let old = try read(sourceID: shard.sourceID)
         let destination = try url(for: shard.sourceID)
         try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ExplorationFileStorage.applyProtection(to: destination.deletingLastPathComponent())
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: temporary) }
         try data.write(to: temporary, options: ExplorationFileStorage.protectedWriteOptions)
         if failBeforeReplacement {
             throw CocoaError(.fileWriteUnknown)
         }
+        try saveManifestMutation(sourceID: shard.sourceID)
         if fileManager.fileExists(atPath: destination.path) {
             _ = try fileManager.replaceItemAt(destination, withItemAt: temporary)
         } else {
             try fileManager.moveItem(at: temporary, to: destination)
         }
+        try ExplorationFileStorage.applyProtection(to: destination)
+        try updateManifest(old: old, new: shard)
+        try clearManifestMutation()
     }
 
     /// Applies a shard received from another producer without allowing an old
@@ -324,8 +350,67 @@ actor ExplorationShardFileStore {
     @discardableResult
     func remove(sourceID: String) throws -> ExplorationShard? {
         let existing = try read(sourceID: sourceID)
-        if existing != nil { try fileManager.removeItem(at: try url(for: sourceID)) }
+        if let existing {
+            try saveManifestMutation(sourceID: sourceID)
+            try fileManager.removeItem(at: try url(for: sourceID))
+            try updateManifest(old: existing, new: nil)
+            try clearManifestMutation()
+        }
         return existing
+    }
+
+    private static func blockKey(_ id: FogBlockID) -> String { "\(id.x)-\(id.y)" }
+
+    private func updateManifest(old: ExplorationShard?, new: ExplorationShard?) throws {
+        let url = rootURL.appendingPathComponent("v1/source-index.json")
+        var manifest: [String: Set<String>] = [:]
+        if fileManager.fileExists(atPath: url.path),
+           let decoded = try? JSONDecoder().decode([String: [String]].self, from: ExplorationFileStorage.readData(from: url)) {
+            manifest = decoded.mapValues(Set.init)
+        } else {
+            for shard in try allShards() {
+                for block in shard.blocks { manifest[Self.blockKey(block.id), default: []].insert(shard.sourceID) }
+            }
+        }
+        if let old {
+            for block in old.blocks {
+                manifest[Self.blockKey(block.id)]?.remove(old.sourceID)
+            }
+        }
+        if let new {
+            for block in new.blocks { manifest[Self.blockKey(block.id), default: []].insert(new.sourceID) }
+        }
+        manifest = manifest.filter { !$0.value.isEmpty }
+        try saveManifest(manifest)
+    }
+
+    private func saveManifest(_ manifest: [String: Set<String>]) throws {
+        let normalized = manifest.mapValues { $0.sorted() }
+        let data = try JSONEncoder().encode(normalized)
+        try ExplorationFileStorage.writeAtomically(data, to: rootURL.appendingPathComponent("v1/source-index.json"))
+    }
+
+    private func saveManifestMutation(sourceID: String) throws {
+        let data = try JSONEncoder().encode(ManifestMutation(sourceID: sourceID))
+        try ExplorationFileStorage.writeAtomically(data, to: rootURL.appendingPathComponent("v1/source-index.pending"))
+    }
+
+    private func clearManifestMutation() throws {
+        let url = rootURL.appendingPathComponent("v1/source-index.pending")
+        if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
+    }
+
+    private func recoverManifestMutationIfNeeded() throws {
+        let pendingURL = rootURL.appendingPathComponent("v1/source-index.pending")
+        guard fileManager.fileExists(atPath: pendingURL.path) else { return }
+        // A crash between the source replacement and manifest commit is rare;
+        // repair the index from durable source files once, then resume indexed reads.
+        var manifest = [String: Set<String>]()
+        for shard in try allShards() {
+            for block in shard.blocks { manifest[Self.blockKey(block.id), default: []].insert(shard.sourceID) }
+        }
+        try saveManifest(manifest)
+        try clearManifestMutation()
     }
 
     private func url(for sourceID: String) throws -> URL {

@@ -965,7 +965,13 @@ struct ContentView: View {
             }
             importedRouteDataSummary.setProcessingEnabled(true)
             let todayKey = DayTimeline.makeDayKey(for: Calendar.current.startOfDay(for: .now))
-            guard !lastForegroundDayKey.isEmpty, lastForegroundDayKey != todayKey else { return }
+            guard !lastForegroundDayKey.isEmpty else { return }
+            if lastForegroundDayKey == todayKey {
+                if selectedDayKey == todayKey {
+                    captureManager.requestLocationFixForTodayTimeline()
+                }
+                return
+            }
             ensureCurrentDayExists()
             if selectedDayKey == lastForegroundDayKey {
                 openCurrentDay()
@@ -978,8 +984,12 @@ struct ContentView: View {
         .dropDestination(for: RouteFileDropItem.self) { items, _ in
             enqueueRouteImport(items.map(\.url))
         }
-        .onChange(of: selectedDayKey) { _, newKey in
+        .onChange(of: selectedDayKey) { oldKey, newKey in
             timelineMapSelection = nil
+            let todayKey = DayTimeline.makeDayKey(for: Calendar.current.startOfDay(for: .now))
+            if scenePhase == .active, newKey == todayKey, oldKey != todayKey {
+                captureManager.requestLocationFixForTodayTimeline()
+            }
             if let index = recordedDayTimelines.firstIndex(where: { $0.dayKey == newKey }) {
                 selectedPageIndex = index
                 _ = timelineWindow.prefetch(around: index)
@@ -1146,9 +1156,14 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     deleteDayToolbarButton
                 }
+
             }
 
             if captureManager.isLocationTrackingAvailable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    preciseLocationToolbarButton
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     routeTrackingToolbarButton
                 }
@@ -1257,6 +1272,23 @@ struct ContentView: View {
             Label("More", systemImage: "ellipsis.circle")
         }
         .help("More actions")
+    }
+
+    private var preciseLocationToolbarButton: some View {
+        Button {
+            captureManager.recordPreciseLocationSample()
+        } label: {
+            if captureManager.isRecordingPreciseLocationSample {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Recording location sample")
+            } else {
+                Label("Record Location Sample", systemImage: "location.circle")
+            }
+        }
+        .labelStyle(.iconOnly)
+        .disabled(captureManager.isRecordingPreciseLocationSample)
+        .help("Record one precise location sample")
     }
 
     private var background: some View {
@@ -1429,6 +1461,10 @@ struct ContentView: View {
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: .now)
         let todayKey = DayTimeline.makeDayKey(for: todayStart)
+
+        if scenePhase == .active, selectedDayKey == todayKey {
+            captureManager.requestLocationFixForTodayTimeline()
+        }
 
         if timelineWindow.selectLoadedDay(dayKey: todayKey) {
             selectDay(dayKey: todayKey)

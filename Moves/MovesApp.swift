@@ -76,6 +76,29 @@ final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
         return true
     }
 
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        resumeExplorationProtectionMigration(application)
+    }
+
+    func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
+        resumeExplorationProtectionMigration(application)
+    }
+
+    private func resumeExplorationProtectionMigration(_ application: UIApplication) {
+        guard application.isProtectedDataAvailable else { return }
+        do {
+            var complete = false
+            // Keep each foreground opportunity bounded while completing most
+            // existing installations in a few activations.
+            for _ in 0..<8 where !complete {
+                complete = try ExplorationFileProtectionMigration.run()
+            }
+            if complete { ExplorationPreparationBackgroundTask.schedule() }
+        } catch {
+            UserDefaults.standard.set(error.localizedDescription, forKey: "Moves.exploration.protectionMigration.lastError")
+        }
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

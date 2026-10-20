@@ -234,7 +234,7 @@ actor ExplorationAchievementStore {
 
     func load() throws -> ExplorationAchievementState? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONDecoder().decode(ExplorationAchievementState.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(ExplorationAchievementState.self, from: ExplorationFileStorage.readData(from: url))
     }
 
     func refresh(from snapshot: ExplorationDerivedStatistics) throws -> ExplorationAchievementState {
@@ -265,7 +265,7 @@ actor ExplorationAchievementStore {
         let result = ExplorationAchievementState(generatedAt: .now, achievements: evaluated)
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try JSONEncoder().encode(result).write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+        try ExplorationFileStorage.writeAtomically(JSONEncoder().encode(result), to: url)
         return result
     }
 

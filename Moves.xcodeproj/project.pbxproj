@@ -177,6 +177,7 @@
 		F60000014000000100000031 /* ExplorationFlightTickets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000032 /* ExplorationFlightTickets.swift */; };
 		F60000014000000100000033 /* PhotosIntegrationDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000034 /* PhotosIntegrationDebug.swift */; };
 		F60000014000000100000035 /* FlightMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000014000000100000036 /* FlightMatching.swift */; };
+		F70000014000000100000001 /* RegularPlacesWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000014000000100000000 /* RegularPlacesWorker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -434,6 +435,7 @@
 		F60000014000000100000032 /* ExplorationFlightTickets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorationFlightTickets.swift; sourceTree = "<group>"; };
 		F60000014000000100000034 /* PhotosIntegrationDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosIntegrationDebug.swift; sourceTree = "<group>"; };
 		F60000014000000100000036 /* FlightMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightMatching.swift; sourceTree = "<group>"; };
+		F70000014000000100000000 /* RegularPlacesWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegularPlacesWorker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -562,6 +564,7 @@
 				A20000012FA0000100000000 /* HealthWorkoutRouteImporter.swift */,
 				A40000012FC0000100000000 /* RouteFileImport.swift */,
 				A40000012FC0000100000002 /* RouteFileImportWorker.swift */,
+				F70000014000000100000000 /* RegularPlacesWorker.swift */,
 				B41000012FC0000100000000 /* ImportedTransportModeInference.swift */,
 				A41000012FC0000100000000 /* ImportQueue.swift */,
 				A42000012FC0000100000000 /* RouteImportAcquisition.swift */,
@@ -1116,6 +1119,7 @@
 				A20000012FA0000100000001 /* HealthWorkoutRouteImporter.swift in Sources */,
 				A40000012FC0000100000001 /* RouteFileImport.swift in Sources */,
 				B40000012FC0000100000001 /* RouteFileImportWorker.swift in Sources */,
+				F70000014000000100000001 /* RegularPlacesWorker.swift in Sources */,
 				B41000012FC0000100000001 /* ImportedTransportModeInference.swift in Sources */,
 				A41000012FC0000100000001 /* ImportQueue.swift in Sources */,
 				A42000012FC0000100000001 /* RouteImportAcquisition.swift in Sources */,

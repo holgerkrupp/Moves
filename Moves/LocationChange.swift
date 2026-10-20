@@ -924,6 +924,21 @@ final class DefaultTimelineAssembler: TimelineAssembler {
                 locations: movementLocations
             )
         }
+
+        // Repository upsert remains the final reconciliation boundary. This
+        // bounded preflight avoids repeating route matching and reporting a new
+        // gap fill when a longer automatic move already contains this leg.
+        if try repository.hasAutomaticMoveContaining(
+            startPlace: previousPlace,
+            endPlace: visitPlace,
+            startDate: startDate,
+            endDate: endDate,
+            transportMode: transportMode,
+            samples: betweenSamples
+        ) {
+            return false
+        }
+
         let steps = await motionClassifier.stepCount(start: startDate, end: endDate)
         let totalDistance = Self.totalDistance(for: movementLocations)
 
@@ -1128,6 +1143,7 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     @Published private(set) var recentRouteTrackingLocationCount = 0
     @Published private(set) var lastRouteTrackingStopReason = "Not recorded"
     @Published private(set) var lastCoreLocationErrorCode: String?
+    @Published private(set) var isRecordingPreciseLocationSample = false
 
     private let manager = CLLocationManager()
     private let userDefaults: UserDefaults
@@ -1140,6 +1156,11 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     private let routeMatchingScheduler: AutomaticInferredMoveRouteMatchingScheduler
     private let routeTrackingLiveActivity = RouteTrackingLiveActivityCoordinator()
     private var pendingOneShotLocationSource: LocationSampleSource?
+    private var lastTimelineRefreshRequestAt: Date?
+    private var timelineRefreshRequestedAt: Date?
+    private var timelineRefreshTimeoutTask: Task<Void, Never>?
+    private var pendingPreciseCaptureAuthorization = false
+    private var preciseCapturePreviousAccuracy: CLLocationAccuracy?
     private var pendingTemporaryRouteTrackingDuration: TemporaryRouteTrackingDuration?
     private var shouldChainToAlwaysAfterWhenInUse = false
     private var isHighAccuracyMonitoring = false
@@ -1471,10 +1492,77 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         guard isBackgroundLocationListeningEnabled else { return }
 
         guard isAuthorizedForTracking else { return }
+        guard pendingOneShotLocationSource == nil else { return }
+        if let lastTimelineRefreshRequestAt,
+           Date.now.timeIntervalSince(lastTimelineRefreshRequestAt) < 45 { return }
 
         // iOS does not expose requestHistoricalLocations for third-party apps.
         // We ask for one current fix on launch/foreground to bridge short gaps.
         requestOneShotLocation(source: .launchBackfill)
+    }
+
+    /// Requests a current fix when the user opens today's Timeline. This is a
+    /// foreground action that still respects the user's tracking role and consent.
+    /// Do not prompt for permission as a side effect of opening the timeline.
+    func requestLocationFixForTodayTimeline() {
+        guard isLocationTrackingAvailable, !shouldSkipLiveTracking,
+              isTrackingRoleDecided, isBackgroundLocationListeningEnabled,
+              isAuthorizedForTracking, !isTemporaryRouteTrackingActive,
+              pendingOneShotLocationSource == nil else { return }
+        if let lastTimelineRefreshRequestAt,
+           Date.now.timeIntervalSince(lastTimelineRefreshRequestAt) < 45 { return }
+        lastTimelineRefreshRequestAt = .now
+        timelineRefreshRequestedAt = .now
+        requestOneShotLocation(source: .timelineOpen)
+        timelineRefreshTimeoutTask?.cancel()
+        timelineRefreshTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            if self?.pendingOneShotLocationSource == .timelineOpen {
+                self?.pendingOneShotLocationSource = nil
+                self?.timelineRefreshRequestedAt = nil
+            }
+        }
+    }
+
+    /// Records one user-requested fix using Core Location's best available accuracy.
+    /// This request is independent of background tracking consent and only starts
+    /// after the user taps the timeline action.
+    func recordPreciseLocationSample() {
+        guard isLocationTrackingAvailable else { return }
+        guard !isRecordingPreciseLocationSample else { return }
+
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            requestPreciseLocationSample()
+        case .notDetermined:
+            pendingPreciseCaptureAuthorization = true
+            manager.requestWhenInUseAuthorization()
+        case .restricted, .denied:
+            lastErrorMessage = "Allow location access in Settings to record a location sample."
+        @unknown default:
+            lastErrorMessage = "Location access is unavailable."
+        }
+    }
+
+    private func requestPreciseLocationSample() {
+        guard isAuthorizedForTracking, !isRecordingPreciseLocationSample else { return }
+        isRecordingPreciseLocationSample = true
+        lastErrorMessage = nil
+        if !isTemporaryRouteTrackingActive {
+            preciseCapturePreviousAccuracy = manager.desiredAccuracy
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+        }
+        pendingOneShotLocationSource = .manualPreciseCapture
+        manager.requestLocation()
+    }
+
+    private func finishPreciseLocationSampleRequest() {
+        isRecordingPreciseLocationSample = false
+        if let previousAccuracy = preciseCapturePreviousAccuracy {
+            manager.desiredAccuracy = previousAccuracy
+            preciseCapturePreviousAccuracy = nil
+        }
     }
 
     func enableTemporaryRouteTracking(duration: TemporaryRouteTrackingDuration) {
@@ -1629,7 +1717,12 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
         case .authorizedAlways:
             shouldChainToAlwaysAfterWhenInUse = false
             applyTrackingConfiguration()
-            requestOneShotLocation(source: .authorizationGrant)
+            if pendingPreciseCaptureAuthorization {
+                pendingPreciseCaptureAuthorization = false
+                requestPreciseLocationSample()
+            } else {
+                requestOneShotLocation(source: .authorizationGrant)
+            }
             startPendingTemporaryRouteTrackingIfNeeded()
         case .authorizedWhenInUse:
             if shouldChainToAlwaysAfterWhenInUse {
@@ -1638,11 +1731,20 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
             }
 
             applyTrackingConfiguration()
-            requestOneShotLocation(source: .authorizationGrant)
+            if pendingPreciseCaptureAuthorization {
+                pendingPreciseCaptureAuthorization = false
+                requestPreciseLocationSample()
+            } else {
+                requestOneShotLocation(source: .authorizationGrant)
+            }
             startPendingTemporaryRouteTrackingIfNeeded()
         case .restricted, .denied:
             shouldChainToAlwaysAfterWhenInUse = false
             pendingTemporaryRouteTrackingDuration = nil
+            if pendingPreciseCaptureAuthorization {
+                pendingPreciseCaptureAuthorization = false
+                lastErrorMessage = "Allow location access in Settings to record a location sample."
+            }
             stop()
         @unknown default:
             shouldChainToAlwaysAfterWhenInUse = false
@@ -2089,11 +2191,44 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
         lastCaptureAt = .now
         let source: LocationSampleSource = pendingOneShotLocationSource ?? (isTemporaryRouteTrackingActive ? .routeTracking : .significantChange)
         pendingOneShotLocationSource = nil
-        lastLocationBatchSize = locations.count
-        lastLocationHorizontalAccuracy = locations.last?.horizontalAccuracy
-        locationCallbackCounts[source.rawValue, default: 0] += locations.count
+        if source == .timelineOpen {
+            timelineRefreshTimeoutTask?.cancel()
+            timelineRefreshTimeoutTask = nil
+        }
+        let capturedLocations: [CLLocation]
+        if source == .manualPreciseCapture {
+            capturedLocations = locations
+                .filter {
+                    $0.horizontalAccuracy >= 0
+                        && $0.timestamp <= .now
+                        && Date.now.timeIntervalSince($0.timestamp) <= 30
+                }
+                .min { $0.horizontalAccuracy < $1.horizontalAccuracy }
+                .map { [$0] } ?? []
+            finishPreciseLocationSampleRequest()
+            if capturedLocations.isEmpty {
+                lastErrorMessage = "No usable location fix was returned. Try again in a moment."
+            }
+        } else if source == .timelineOpen {
+            let requestedAt = timelineRefreshRequestedAt ?? .now
+            timelineRefreshRequestedAt = nil
+            capturedLocations = locations
+                .filter {
+                    $0.horizontalAccuracy >= 0
+                        && $0.timestamp >= requestedAt.addingTimeInterval(-2)
+                        && $0.timestamp <= .now
+                        && Date.now.timeIntervalSince($0.timestamp) <= 60
+                }
+                .sorted { $0.timestamp < $1.timestamp }
+        } else {
+            capturedLocations = locations
+        }
+        guard !capturedLocations.isEmpty else { return }
+        lastLocationBatchSize = capturedLocations.count
+        lastLocationHorizontalAccuracy = capturedLocations.last?.horizontalAccuracy
+        locationCallbackCounts[source.rawValue, default: 0] += capturedLocations.count
         if source == .routeTracking {
-            recentRouteTrackingLocationCount += locations.count
+            recentRouteTrackingLocationCount += capturedLocations.count
             routeTrackingCallbackDates.append(.now)
             if routeTrackingCallbackDates.count > 64 {
                 routeTrackingCallbackDates.removeFirst(routeTrackingCallbackDates.count - 64)
@@ -2107,19 +2242,35 @@ extension MovesLocationCaptureManager: @preconcurrency CLLocationManagerDelegate
                     endsAt: temporaryRouteTrackingEndsAt
                 )
             }
-            await assembler.ingestLocations(locations, source: source)
+            await assembler.ingestLocations(capturedLocations, source: source)
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         let nsError = error as NSError
 
+        if pendingOneShotLocationSource == .timelineOpen {
+            pendingOneShotLocationSource = nil
+            timelineRefreshRequestedAt = nil
+            timelineRefreshTimeoutTask?.cancel()
+            timelineRefreshTimeoutTask = nil
+        }
+
         if nsError.domain == kCLErrorDomain,
            nsError.code == CLError.locationUnknown.rawValue {
+            if pendingOneShotLocationSource == .manualPreciseCapture {
+                pendingOneShotLocationSource = nil
+                finishPreciseLocationSampleRequest()
+                lastErrorMessage = "No usable location fix was returned. Try again in a moment."
+            }
             return
         }
 
         lastCoreLocationErrorCode = "\(nsError.domain):\(nsError.code)"
         lastErrorMessage = MovesStoreRecovery.privacySafeMessage(error.localizedDescription)
+        if pendingOneShotLocationSource == .manualPreciseCapture {
+            pendingOneShotLocationSource = nil
+            finishPreciseLocationSampleRequest()
+        }
     }
 }

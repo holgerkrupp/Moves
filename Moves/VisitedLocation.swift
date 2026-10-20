@@ -186,12 +186,14 @@ enum TransportModeProvenance: String, Codable, CaseIterable, Sendable {
 enum LocationSampleSource: String, Codable, CaseIterable {
     case visit
     case significantChange
+    case manualPreciseCapture
     case routeTracking
     case watchRouteTracking
     case fileRouteImport
     case watchSignificantChange
     case healthWorkoutRoute
     case launchBackfill
+    case timelineOpen
     case authorizationGrant
 }
 
@@ -205,20 +207,22 @@ extension LocationSampleSource {
         switch self {
         case .visit: "Visit fix"
         case .significantChange: "Background location fix"
+        case .manualPreciseCapture: "Manual precise fix"
         case .routeTracking: "Real Route Tracking fix"
         case .watchRouteTracking: "Watch Route Tracking fix"
         case .fileRouteImport: "Imported route point"
         case .watchSignificantChange: "Watch background fix"
         case .healthWorkoutRoute: "Health workout point"
         case .launchBackfill: "Launch backfill fix"
+        case .timelineOpen: "Timeline open fix"
         case .authorizationGrant: "Authorization backfill fix"
         }
     }
 
     var isOSLocationFix: Bool {
         switch self {
-        case .visit, .significantChange, .routeTracking, .watchRouteTracking,
-             .watchSignificantChange, .launchBackfill, .authorizationGrant:
+        case .visit, .significantChange, .manualPreciseCapture, .routeTracking, .watchRouteTracking,
+             .watchSignificantChange, .launchBackfill, .timelineOpen, .authorizationGrant:
             return true
         case .fileRouteImport, .healthWorkoutRoute:
             return false
@@ -234,8 +238,10 @@ extension LocationSampleSource {
         case .visit: return 3
         case .watchSignificantChange: return 2
         case .significantChange: return 2
+        case .manualPreciseCapture: return 3
         case .authorizationGrant: return 1
         case .launchBackfill: return 0
+        case .timelineOpen: return 0
         }
     }
 
@@ -243,7 +249,7 @@ extension LocationSampleSource {
         switch self {
         case .routeTracking, .watchRouteTracking, .healthWorkoutRoute, .fileRouteImport:
             return true
-        case .visit, .significantChange, .watchSignificantChange, .launchBackfill, .authorizationGrant:
+        case .visit, .significantChange, .manualPreciseCapture, .watchSignificantChange, .launchBackfill, .timelineOpen, .authorizationGrant:
             return false
         }
     }
@@ -252,7 +258,7 @@ extension LocationSampleSource {
         switch self {
         case .healthWorkoutRoute, .watchRouteTracking, .fileRouteImport:
             return true
-        case .routeTracking, .visit, .significantChange, .watchSignificantChange, .launchBackfill, .authorizationGrant:
+        case .routeTracking, .visit, .significantChange, .manualPreciseCapture, .watchSignificantChange, .launchBackfill, .timelineOpen, .authorizationGrant:
             return false
         }
     }
@@ -1540,6 +1546,14 @@ protocol TimelineRepository {
     func latestPlace(before date: Date, excluding placeID: UUID?) throws -> VisitPlace?
     func placesForGapFilling(onDayWithKey dayKey: String) throws -> [VisitPlace]
     func samples(from startDate: Date, to endDate: Date) throws -> [LocationSample]
+    func hasAutomaticMoveContaining(
+        startPlace: VisitPlace,
+        endPlace: VisitPlace,
+        startDate: Date,
+        endDate: Date,
+        transportMode: TransportMode,
+        samples: [LocationSample]
+    ) throws -> Bool
     func upsertMove(
         startPlace: VisitPlace,
         endPlace: VisitPlace,
@@ -1690,6 +1704,11 @@ final class SwiftDataTimelineRepository: TimelineRepository {
     private static let moveDedupeEndpointDistanceThreshold: CLLocationDistance = 140
     private static let moveParallelEndpointDistanceThreshold: CLLocationDistance = 320
     private static let moveParallelTimeWindow: TimeInterval = 5 * 60
+    private static let containedMoveSearchWindow: TimeInterval = 3 * 60 * 60
+    private static let containedMoveMinimumCoverage = 0.90
+    private static let containedMoveArrivalTolerance: TimeInterval = 2 * 60
+    private static let containedMoveSampleTimeTolerance: TimeInterval = 3 * 60
+    private static let containedMoveMaximumSampleDistance: CLLocationDistance = 250
     private static let moveTransientStayMaximumDuration: TimeInterval = 8 * 60
     private static let synthesizedStayMinimumGap: TimeInterval = 10 * 60
     private static let synthesizedStayTimeTolerance: TimeInterval = 60
@@ -2177,14 +2196,14 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             distanceMeters: distance,
             stepCount: nil,
             samples: samples,
-            saveImmediately: saveImmediately
+            saveImmediately: saveImmediately,
+            transportModeProvenance: source == .fileRouteImport
+                ? .imported
+                : (source == .healthWorkoutRoute ? .healthWorkout : .automatic)
         )
 
         if source == .fileRouteImport {
             move.importedRouteData = ImportedRoutePayloadCodec.encode(orderedLocations)
-            move.transportModeProvenance = .imported
-        } else if source == .healthWorkoutRoute {
-            move.transportModeProvenance = .healthWorkout
         }
 
         if saveImmediately {
@@ -2253,6 +2272,46 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         }
     }
 
+    func hasAutomaticMoveContaining(
+        startPlace: VisitPlace,
+        endPlace: VisitPlace,
+        startDate: Date,
+        endDate: Date,
+        transportMode: TransportMode,
+        samples: [LocationSample]
+    ) throws -> Bool {
+        guard endDate > startDate else { return false }
+        let candidate = MoveSegment(
+            dedupeKey: "containment-check",
+            startDate: startDate,
+            endDate: endDate,
+            transportMode: transportMode,
+            distanceMeters: 0,
+            stepCount: nil
+        )
+        candidate.startPlace = startPlace
+        candidate.endPlace = endPlace
+
+        let windowStart = startDate.addingTimeInterval(-Self.containedMoveSearchWindow)
+        let windowEnd = endDate.addingTimeInterval(Self.containedMoveSearchWindow)
+        var descriptor = FetchDescriptor<MoveSegment>(
+            predicate: #Predicate { move in
+                move.startDate <= windowEnd && move.endDate >= windowStart
+            },
+            sortBy: [SortDescriptor(\MoveSegment.startDate, order: .forward)]
+        )
+        descriptor.fetchLimit = 128
+        return try modelContext.fetch(descriptor).contains { existing in
+            belongsToCurrentDevice(existing.deviceIdentifier)
+                && containedAutomaticDuplicatePair(
+                    existing,
+                    candidate,
+                    additionalSamplesForAnchor: samples,
+                    anchorID: candidate.id
+                )?.longer.id == existing.id
+        }
+    }
+
     func upsertMove(
         startPlace: VisitPlace,
         endPlace: VisitPlace,
@@ -2285,7 +2344,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         distanceMeters: Double,
         stepCount: Int?,
         samples: [LocationSample],
-        saveImmediately: Bool
+        saveImmediately: Bool,
+        transportModeProvenance: TransportModeProvenance = .automatic
     ) throws -> MoveSegment {
         let dedupeKey = Self.makeMoveDedupeKey(
             startPlaceID: startPlace.id,
@@ -2296,8 +2356,7 @@ final class SwiftDataTimelineRepository: TimelineRepository {
 
         let timeline = try timeline(for: startDate)
 
-        let move: MoveSegment
-        if let existing = try findMove(byDedupeKey: dedupeKey)
+        let existing = try findMove(byDedupeKey: dedupeKey)
             ?? findMove(startPlaceID: startPlace.id, endPlaceID: endPlace.id)
             ?? findSimilarMove(
                 startCoordinate: startPlace.coordinate,
@@ -2306,7 +2365,15 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 endDate: endDate,
                 distanceMeters: distanceMeters,
                 transportMode: transportMode
-            ) {
+            )
+
+        let move: MoveSegment
+        let mayUpdateExisting = existing.map {
+            isEligibleForAutomaticContainmentReconciliation($0)
+                || (transportModeProvenance != .automatic
+                    && $0.transportModeProvenance == transportModeProvenance)
+        } ?? false
+        if let existing, mayUpdateExisting {
             move = existing
             move.dedupeKey = dedupeKey
             move.transportMode = transportMode
@@ -2332,12 +2399,12 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         move.startPlace = startPlace
         move.endPlace = endPlace
         move.dayTimeline = timeline
+        move.transportModeProvenance = transportModeProvenance
 
+        let canonical = try collapseDuplicateMoves(around: move, addingSamples: samples)
         for sample in samples {
-            sample.moveSegment = move
+            sample.moveSegment = canonical
         }
-
-        let canonical = try collapseDuplicateMoves(around: move)
         if saveImmediately {
             try saveIfNeeded()
             NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
@@ -2849,16 +2916,22 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         }
     }
 
-    private func collapseDuplicateMoves(around anchor: MoveSegment) throws -> MoveSegment {
-        let windowStart = anchor.startDate.addingTimeInterval(-Self.moveDedupeTimeWindow)
-        let windowEnd = anchor.startDate.addingTimeInterval(Self.moveDedupeTimeWindow)
+    private func collapseDuplicateMoves(
+        around anchor: MoveSegment,
+        addingSamples: [LocationSample] = []
+    ) throws -> MoveSegment {
+        // Keep the historical exact/near-exact window while also retrieving moves
+        // whose intervals overlap the anchor. The query is bounded around the
+        // anchor and the result count is capped for long histories.
+        let windowStart = anchor.startDate.addingTimeInterval(-Self.containedMoveSearchWindow)
+        let windowEnd = anchor.endDate.addingTimeInterval(Self.containedMoveSearchWindow)
 
         var descriptor = FetchDescriptor<MoveSegment>(
             predicate: #Predicate { move in
-                move.startDate >= windowStart && move.startDate <= windowEnd
+                move.startDate <= windowEnd && move.endDate >= windowStart
             }
         )
-        descriptor.fetchLimit = 32
+        descriptor.fetchLimit = 128
 
         let candidates = try modelContext.fetch(descriptor)
 
@@ -2870,7 +2943,9 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 continue
             }
 
-            let isStrictDuplicate = isDuplicateMove(
+            let canAutomaticallyReconcile = isEligibleForAutomaticContainmentReconciliation(candidate)
+                && isEligibleForAutomaticContainmentReconciliation(canonical)
+            let isStrictDuplicate = canAutomaticallyReconcile && isDuplicateMove(
                 candidate,
                 comparedToStartCoordinate: canonicalStartCoordinate,
                 endCoordinate: canonicalEndCoordinate,
@@ -2879,18 +2954,25 @@ final class SwiftDataTimelineRepository: TimelineRepository {
                 distanceMeters: canonical.distanceMeters,
                 transportMode: canonical.transportMode
             )
-            let isParallelDuplicate = isLikelyParallelDuplicateMove(candidate, comparedTo: canonical)
+            let isParallelDuplicate = canAutomaticallyReconcile
+                && isLikelyParallelDuplicateMove(candidate, comparedTo: canonical)
+            let containedPair = containedAutomaticDuplicatePair(
+                canonical,
+                candidate,
+                additionalSamplesForAnchor: addingSamples,
+                anchorID: anchor.id
+            )
 
-            guard isStrictDuplicate || isParallelDuplicate else {
+            guard isStrictDuplicate || isParallelDuplicate || containedPair != nil else {
                 continue
             }
 
-            let preferred = preferredMove(between: canonical, and: candidate)
+            let preferred = containedPair?.longer ?? preferredMove(between: canonical, and: candidate)
             if preferred.id == canonical.id {
-                mergeMove(candidate, into: canonical)
+                mergeMove(candidate, into: canonical, allowRouteCacheTransfer: containedPair == nil)
                 modelContext.delete(candidate)
             } else {
-                mergeMove(canonical, into: candidate)
+                mergeMove(canonical, into: candidate, allowRouteCacheTransfer: containedPair == nil)
                 modelContext.delete(canonical)
                 canonical = candidate
             }
@@ -2899,7 +2981,109 @@ final class SwiftDataTimelineRepository: TimelineRepository {
         return canonical
     }
 
-    private func mergeMove(_ source: MoveSegment, into destination: MoveSegment) {
+    private func containedAutomaticDuplicatePair(
+        _ lhs: MoveSegment,
+        _ rhs: MoveSegment,
+        additionalSamplesForAnchor: [LocationSample] = [],
+        anchorID: UUID? = nil
+    ) -> (longer: MoveSegment, shorter: MoveSegment)? {
+        guard lhs.id != rhs.id,
+              isEligibleForAutomaticContainmentReconciliation(lhs),
+              isEligibleForAutomaticContainmentReconciliation(rhs),
+              areTransportModesCompatible(lhs.transportMode, rhs.transportMode) else {
+            return nil
+        }
+
+        let longer: MoveSegment
+        let shorter: MoveSegment
+        if lhs.startDate <= rhs.startDate && lhs.endDate >= rhs.endDate {
+            longer = lhs
+            shorter = rhs
+        } else if rhs.startDate <= lhs.startDate && rhs.endDate >= lhs.endDate {
+            longer = rhs
+            shorter = lhs
+        } else {
+            return nil
+        }
+
+        let shorterDuration = shorter.endDate.timeIntervalSince(shorter.startDate)
+        let shorterHasIncomingPreciseTrack = shorter.id == anchorID
+            && additionalSamplesForAnchor.contains(where: { $0.source.isRouteTrack })
+        guard shorterDuration > 0,
+              !shorter.usesHighAccuracyRouteTracking,
+              !shorterHasIncomingPreciseTrack else { return nil }
+        let overlapDuration = max(
+            min(lhs.endDate, rhs.endDate).timeIntervalSince(max(lhs.startDate, rhs.startDate)),
+            0
+        )
+        let overlapRatio = overlapDuration / shorterDuration
+        guard overlapRatio >= Self.containedMoveMinimumCoverage,
+              abs(longer.endDate.timeIntervalSince(shorter.endDate)) <= Self.containedMoveArrivalTolerance,
+              let longerEnd = longer.endPlace,
+              let shorterEnd = shorter.endPlace else {
+            return nil
+        }
+
+        let endpointDistance = Self.distanceMeters(from: longerEnd.coordinate, to: shorterEnd.coordinate)
+        let endpointLimit = min(
+            max(180, longerEnd.horizontalAccuracy + shorterEnd.horizontalAccuracy + 40),
+            350
+        )
+        guard endpointDistance <= endpointLimit else { return nil }
+
+        let shorterDistanceLimit = longer.distanceMeters * 1.25
+            + max(250, longer.distanceMeters * 0.10)
+        guard shorter.distanceMeters <= shorterDistanceLimit else { return nil }
+
+        guard let shorterStart = shorter.startPlace else { return nil }
+        var routeSamples = longer.samples
+        if longer.id == anchorID {
+            routeSamples.append(contentsOf: additionalSamplesForAnchor)
+        }
+        let nearbyRouteSamples = routeSamples.filter {
+            abs($0.timestamp.timeIntervalSince(shorter.startDate)) <= Self.containedMoveSampleTimeTolerance
+        }
+        let sampleEvidence = nearbyRouteSamples.map { sample in
+            (
+                sample: sample,
+                distance: Self.distanceMeters(from: sample.coordinate, to: shorterStart.coordinate),
+                limit: min(
+                    max(100, sample.horizontalAccuracy + shorterStart.horizontalAccuracy + 35),
+                    Self.containedMoveMaximumSampleDistance
+                )
+            )
+        }.first { $0.distance <= $0.limit }
+
+        #if DEBUG
+        let reason = sampleEvidence == nil
+            ? "rejected: no timestamped route sample near contained origin"
+            : "matched: automatic interval containment and route continuity"
+        let spatialDistance = sampleEvidence?.distance ?? -1
+        print("Move containment \(reason); longer=\(longer.id.uuidString) shorter=\(shorter.id.uuidString) provenance=\(longer.transportModeProvenance.rawValue)/\(shorter.transportModeProvenance.rawValue) start=\(longer.startDate.timeIntervalSince1970)..\(longer.endDate.timeIntervalSince1970) contained=\(shorter.startDate.timeIntervalSince1970)..\(shorter.endDate.timeIntervalSince1970) overlap=\(String(format: "%.3f", overlapRatio)) endpointMeters=\(Int(endpointDistance.rounded())) sampleMeters=\(Int(spatialDistance.rounded())) routeSamples=\(nearbyRouteSamples.count) samples=\(longer.samples.count)/\(shorter.samples.count)")
+        #endif
+
+        guard sampleEvidence != nil else { return nil }
+        return (longer, shorter)
+    }
+
+    private func isEligibleForAutomaticContainmentReconciliation(_ move: MoveSegment) -> Bool {
+        guard move.transportModeProvenance == .automatic,
+              move.manualRouteCoordinatesData == nil,
+              move.importedRouteData == nil,
+              move.comment?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+              !move.isExcludedFromConnectionStatistics,
+              !move.usesHealthWorkoutRoute,
+              !move.usesImportedRoute else {
+            return false
+        }
+        return true
+    }
+
+    private func mergeMove(
+        _ source: MoveSegment,
+        into destination: MoveSegment,
+        allowRouteCacheTransfer: Bool = true
+    ) {
         destination.startDate = min(destination.startDate, source.startDate)
         destination.endDate = max(destination.endDate, source.endDate)
         destination.distanceMeters = max(destination.distanceMeters, source.distanceMeters)
@@ -2931,7 +3115,8 @@ final class SwiftDataTimelineRepository: TimelineRepository {
             destination.flightMetadataData = source.flightMetadataData
         }
 
-        if destination.routeCacheCoordinatesData == nil,
+        if allowRouteCacheTransfer,
+           destination.routeCacheCoordinatesData == nil,
            let sourceCoordinates = source.routeCacheCoordinatesData {
             destination.routeCacheCoordinatesData = sourceCoordinates
             destination.routeCacheSignature = source.routeCacheSignature

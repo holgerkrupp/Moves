@@ -1,12 +1,21 @@
 import Foundation
 
-enum ExplorationWorkLane: Int, Codable, Comparable, Sendable {
+enum ExplorationWorkLane: Int, Codable, CaseIterable, Comparable, Sendable {
     case live = 0
     case synchronizedShard = 1
     case importedHistory = 2
     case historical = 3
 
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    var title: String {
+        switch self {
+        case .live: "Live"
+        case .synchronizedShard: "Synchronized shard"
+        case .importedHistory: "Imported history"
+        case .historical: "Historical"
+        }
+    }
 }
 
 enum ExplorationWorkState: String, Codable, Sendable {
@@ -21,6 +30,7 @@ struct ExplorationWorkItem: Codable, Equatable, Hashable, Sendable, Identifiable
     var state: ExplorationWorkState = .queued
     var enqueuedAt: Date
     var leaseUntil: Date?
+    var nextEligibleAt: Date?
     var attempts = 0
     var lastError: String?
 
@@ -34,9 +44,11 @@ struct ExplorationWorkItem: Codable, Equatable, Hashable, Sendable, Identifiable
 
 struct ExplorationWorkQueueSnapshot: Sendable, Equatable {
     let queuedCount: Int
+    let delayedCount: Int
     let processingCount: Int
     let staleProcessingCount: Int
     let countsByLane: [ExplorationWorkLane: Int]
+    let recentFailures: [ExplorationWorkItem]
 }
 
 actor ExplorationWorkQueue {
@@ -62,6 +74,7 @@ actor ExplorationWorkQueue {
                     existing.lane = min(existing.lane, lane)
                     existing.enqueuedAt = now
                     existing.lastError = nil
+                    existing.nextEligibleAt = nil
                     items[id] = existing
                 }
             } else {
@@ -94,7 +107,7 @@ actor ExplorationWorkQueue {
         try loadIfNeeded()
         _ = try recoverExpired(now: now)
         let candidates = items.values
-            .filter { $0.state == .queued }
+            .filter { $0.state == .queued && ($0.nextEligibleAt.map { $0 <= now } ?? true) }
             .sorted {
                 if $0.lane != $1.lane { return $0.lane < $1.lane }
                 if $0.enqueuedAt != $1.enqueuedAt { return $0.enqueuedAt < $1.enqueuedAt }
@@ -122,12 +135,27 @@ actor ExplorationWorkQueue {
         try save()
     }
 
-    func retry(_ itemID: String, error: String? = nil) throws {
+    func retry(_ itemID: String, error: String? = nil, now: Date = .now) throws {
         try loadIfNeeded()
         guard var item = items[itemID] else { return }
         item.state = .queued
         item.leaseUntil = nil
         item.lastError = error
+        // Exponential backoff prevents a broken item from consuming every
+        // granted window while keeping retries bounded and automatic.
+        let delay = min(30 * 24 * 60 * 60, 30 * pow(2, Double(min(max(item.attempts - 1, 0), 20))))
+        item.nextEligibleAt = now.addingTimeInterval(delay)
+        items[itemID] = item
+        try save()
+    }
+
+    func deferForProtectedData(_ itemID: String, error: String, now: Date = .now) throws {
+        try loadIfNeeded()
+        guard var item = items[itemID] else { return }
+        item.state = .queued
+        item.leaseUntil = nil
+        item.lastError = error
+        item.nextEligibleAt = now.addingTimeInterval(30 * 60)
         items[itemID] = item
         try save()
     }
@@ -142,10 +170,13 @@ actor ExplorationWorkQueue {
         var counts = [ExplorationWorkLane: Int]()
         for item in items.values { counts[item.lane, default: 0] += 1 }
         return ExplorationWorkQueueSnapshot(
-            queuedCount: items.values.filter { $0.state == .queued }.count,
+            queuedCount: items.values.filter { $0.state == .queued && ($0.nextEligibleAt.map { $0 <= now } ?? true) }.count,
+            delayedCount: items.values.filter { $0.state == .queued && ($0.nextEligibleAt.map { $0 > now } ?? false) }.count,
             processingCount: items.values.filter { $0.state == .processing }.count,
             staleProcessingCount: 0,
-            countsByLane: counts
+            countsByLane: counts,
+            recentFailures: items.values.filter { $0.lastError != nil }
+                .sorted { $0.enqueuedAt > $1.enqueuedAt }.prefix(5).map { $0 }
         )
     }
 
@@ -161,7 +192,7 @@ actor ExplorationWorkQueue {
         guard !loaded else { return }
         loaded = true
         guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let data = try Data(contentsOf: url)
+        let data = try ExplorationFileStorage.readData(from: url)
         items = try JSONDecoder().decode([String: ExplorationWorkItem].self, from: data)
     }
 
@@ -169,7 +200,7 @@ actor ExplorationWorkQueue {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(items)
-        try data.write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+        try ExplorationFileStorage.writeAtomically(data, to: url)
     }
 }
 
@@ -180,7 +211,7 @@ enum ExplorationIncrementalHooks {
         Task.detached(priority: .utility) {
             try? await ExplorationWorkQueue.shared.enqueue(dayKeys: keys, lane: .importedHistory)
 #if !os(macOS)
-            await MainActor.run { ExplorationPreparationBackgroundTask.schedule() }
+            await MainActor.run { ExplorationPreparationBackgroundTask.schedule(urgent: true) }
 #endif
         }
     }
@@ -190,7 +221,7 @@ enum ExplorationIncrementalHooks {
         Task.detached(priority: .utility) {
             try? await ExplorationWorkQueue.shared.enqueue(dayKeys: [dayKey], lane: .live)
 #if !os(macOS)
-            await MainActor.run { ExplorationPreparationBackgroundTask.schedule() }
+            await MainActor.run { ExplorationPreparationBackgroundTask.schedule(urgent: true) }
 #endif
         }
     }

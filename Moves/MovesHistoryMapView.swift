@@ -151,6 +151,14 @@ struct MovesHistoryMapView: View {
         selectedPeriod.start(for: selectedDate)
     }
 
+    private var selectableDisplays: [Display] {
+#if DEBUG
+        Display.allCases
+#else
+        Display.allCases.filter { $0 != .fog }
+#endif
+    }
+
     private var selectedTimelines: [DayTimeline] {
         guard selectedPeriod != .forever else { return dayTimelines }
         return dayTimelines.filter {
@@ -322,7 +330,7 @@ struct MovesHistoryMapView: View {
     private var controls: some View {
         VStack(spacing: 10) {
             Picker("Display", selection: $display) {
-                ForEach(Display.allCases) { option in
+                ForEach(selectableDisplays) { option in
                     Label(option.rawValue, systemImage: option.symbol).tag(option)
                 }
             }

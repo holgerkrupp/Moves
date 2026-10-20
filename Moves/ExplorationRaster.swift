@@ -236,20 +236,36 @@ enum FogRasterV1 {
     /// The same integer line traversal used by the canonical raster boundary. It
     /// operates after coordinate projection, so no second geographic grid is introduced.
     static func cellsAlongLine(from start: FogCell, to end: FogCell) -> [FogCell] {
+        var result: [FogCell] = []
+        forEachCellAlongLine(from: start, to: end) { result.append($0) }
+        return result
+    }
+
+    static func forEachCellAlongLine(
+        from start: FogCell,
+        to end: FogCell,
+        _ visit: (FogCell) throws -> Void
+    ) rethrows {
         var x0 = Int(start.coordinate.x)
         var y0 = Int(start.coordinate.y)
-        let x1 = Int(end.coordinate.x)
+        var x1 = Int(end.coordinate.x)
         let y1 = Int(end.coordinate.y)
+        // Longitude wraps at the antimeridian. Traverse the shortest projected
+        // path, then wrap generated cells back into the canonical raster.
+        let dimension = Int(FogRasterV1.globalCellDimension)
+        if x1 - x0 > dimension / 2 {
+            x1 -= dimension
+        } else if x0 - x1 > dimension / 2 {
+            x1 += dimension
+        }
         let dx = abs(x1 - x0)
         let sx = x0 < x1 ? 1 : -1
         let dy = -abs(y1 - y0)
         let sy = y0 < y1 ? 1 : -1
         var error = dx + dy
-        var result: [FogCell] = []
-        result.reserveCapacity(max(dx, -dy) + 1)
-
         while true {
-            result.append(FogCell(coordinate: FogRasterCoordinate(x: UInt32(x0), y: UInt32(y0))))
+            let wrappedX = ((x0 % dimension) + dimension) % dimension
+            try visit(FogCell(coordinate: FogRasterCoordinate(x: UInt32(wrappedX), y: UInt32(y0))))
             if x0 == x1 && y0 == y1 { break }
             let twiceError = 2 * error
             if twiceError >= dy {
@@ -261,6 +277,5 @@ enum FogRasterV1 {
                 y0 += sy
             }
         }
-        return result
     }
 }

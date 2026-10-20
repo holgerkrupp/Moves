@@ -166,14 +166,14 @@ actor ExplorationStatisticsStore {
 
     func load() throws -> ExplorationDerivedStatistics? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONDecoder().decode(ExplorationDerivedStatistics.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(ExplorationDerivedStatistics.self, from: ExplorationFileStorage.readData(from: url))
     }
 
     func save(_ snapshot: ExplorationDerivedStatistics) throws {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(snapshot)
-        try data.write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+        try ExplorationFileStorage.writeAtomically(data, to: url)
     }
 
     func remove() throws {

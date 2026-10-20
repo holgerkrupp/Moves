@@ -59,7 +59,7 @@ actor ExplorationTravelEvidenceStore {
 
     func load() throws -> [ExplorationManualTravelEvidence] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        return try JSONDecoder().decode([ExplorationManualTravelEvidence].self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode([ExplorationManualTravelEvidence].self, from: ExplorationFileStorage.readData(from: url))
     }
 
     func save(_ records: [ExplorationManualTravelEvidence]) throws {
@@ -70,7 +70,7 @@ actor ExplorationTravelEvidenceStore {
         }
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try JSONEncoder().encode(normalized).write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+        try ExplorationFileStorage.writeAtomically(JSONEncoder().encode(normalized), to: url)
     }
 
     func upsert(_ record: ExplorationManualTravelEvidence) throws {

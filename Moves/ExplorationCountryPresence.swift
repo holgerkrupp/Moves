@@ -108,18 +108,33 @@ actor ExplorationCountryPresenceIndexStore {
     }
 
     func load() throws -> ExplorationCountryPresenceIndex? {
+        let dayDirectory = url.deletingLastPathComponent().appendingPathComponent("country-presence-days", isDirectory: true)
+        if FileManager.default.fileExists(atPath: dayDirectory.path) {
+            let files = try FileManager.default.contentsOfDirectory(at: dayDirectory, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            let entries = try files.map { try JSONDecoder().decode(ExplorationCountryPresenceEntry.self, from: ExplorationFileStorage.readData(from: $0)) }
+            return ExplorationCountryPresenceIndex(schemaVersion: ExplorationCountryPresenceIndex.schemaVersion, rasterVersion: .fogRasterV1, generatedAt: .now, includeFlight: false, entries: entries)
+        }
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONDecoder().decode(ExplorationCountryPresenceIndex.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(ExplorationCountryPresenceIndex.self, from: ExplorationFileStorage.readData(from: url))
     }
 
     func save(_ index: ExplorationCountryPresenceIndex) throws {
-        let directory = url.deletingLastPathComponent()
+        let directory = url.deletingLastPathComponent().appendingPathComponent("country-presence-days", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try JSONEncoder().encode(index).write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+        let desired = Set(index.entries.map(\.dayKey))
+        let existing = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in existing where file.pathExtension == "json" && !desired.contains(file.deletingPathExtension().lastPathComponent) {
+            try FileManager.default.removeItem(at: file)
+        }
+        for entry in index.entries { try write(entry, to: directory) }
+        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
     }
 
     func remove() throws {
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        let directory = url.deletingLastPathComponent().appendingPathComponent("country-presence-days", isDirectory: true)
+        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
     }
 
     /// Compact country summaries for list/detail screens. This reads the
@@ -190,8 +205,11 @@ actor ExplorationCountryPresenceIndexStore {
     func update(with shard: ExplorationShard, includeFlight: Bool = false) throws {
         guard let date = shard.logicalStart ?? shard.logicalEnd else { return }
         guard let resolver = try? ExplorationCountryResolver.bundled() else { return }
+        try migrateLegacyIndexIfNeeded()
 
-        let dayKey = Self.dayKey(for: date)
+        let dayKey = shard.sourceID.hasPrefix("day:")
+            ? String(shard.sourceID.dropFirst("day:".count))
+            : Self.dayKey(for: date)
         var visibleByBlock = [FogBlockID: FogBitmapBlock]()
         var importedByBlock = [FogBlockID: FogBitmapBlock]()
         for block in shard.blocks {
@@ -233,22 +251,24 @@ actor ExplorationCountryPresenceIndexStore {
             countryFirstPresence: counts.mapValues { _ in date },
             countryLastPresence: counts.mapValues { _ in date }
         )
-        var index = try load() ?? ExplorationCountryPresenceIndex(
-            schemaVersion: ExplorationCountryPresenceIndex.schemaVersion,
-            rasterVersion: .fogRasterV1,
-            generatedAt: .now,
-            includeFlight: includeFlight,
-            entries: []
-        )
-        let entries = index.entries.filter { $0.dayKey != dayKey } + (counts.isEmpty ? [] : [entry])
-        index = ExplorationCountryPresenceIndex(
-            schemaVersion: ExplorationCountryPresenceIndex.schemaVersion,
-            rasterVersion: .fogRasterV1,
-            generatedAt: .now,
-            includeFlight: includeFlight,
-            entries: entries.sorted { $0.date == $1.date ? $0.dayKey < $1.dayKey : $0.date < $1.date }
-        )
-        try save(index)
+        let directory = url.deletingLastPathComponent().appendingPathComponent("country-presence-days", isDirectory: true)
+        if counts.isEmpty {
+            let entryURL = directory.appendingPathComponent("\(dayKey).json")
+            if FileManager.default.fileExists(atPath: entryURL.path) { try FileManager.default.removeItem(at: entryURL) }
+        } else {
+            try write(entry, to: directory)
+        }
+    }
+
+    func removeDay(for shard: ExplorationShard) throws {
+        guard let date = shard.logicalStart ?? shard.logicalEnd else { return }
+        try migrateLegacyIndexIfNeeded()
+        let dayKey = shard.sourceID.hasPrefix("day:")
+            ? String(shard.sourceID.dropFirst("day:".count))
+            : Self.dayKey(for: date)
+        let directory = url.deletingLastPathComponent().appendingPathComponent("country-presence-days", isDirectory: true)
+        let entryURL = directory.appendingPathComponent("\(dayKey).json")
+        if FileManager.default.fileExists(atPath: entryURL.path) { try FileManager.default.removeItem(at: entryURL) }
     }
 
     /// Builds only from dated source shards. Undated Fog imports intentionally
@@ -339,6 +359,20 @@ actor ExplorationCountryPresenceIndexStore {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+
+    private func write(_ entry: ExplorationCountryPresenceEntry, to directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(entry)
+        try ExplorationFileStorage.writeAtomically(data, to: directory.appendingPathComponent("\(entry.dayKey).json"))
+    }
+
+    private func migrateLegacyIndexIfNeeded() throws {
+        let directory = url.deletingLastPathComponent().appendingPathComponent("country-presence-days", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: url.path),
+              !FileManager.default.fileExists(atPath: directory.path) else { return }
+        let legacy = try JSONDecoder().decode(ExplorationCountryPresenceIndex.self, from: ExplorationFileStorage.readData(from: url))
+        try save(legacy)
     }
 
     private struct SummaryAccumulator {

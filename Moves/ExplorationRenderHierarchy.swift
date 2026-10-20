@@ -38,7 +38,7 @@ actor ExplorationRenderHierarchy {
     func read(_ id: ExplorationRenderTileID) throws -> ExplorationRenderTile? {
         let url = url(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONDecoder().decode(ExplorationRenderTile.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(ExplorationRenderTile.self, from: ExplorationFileStorage.readData(from: url))
     }
 
     func tileIDs(level: UInt8) throws -> [ExplorationRenderTileID] {
@@ -61,11 +61,10 @@ actor ExplorationRenderHierarchy {
         try write(tiles)
     }
 
-    func rebuild(affectedBlocks: some Sequence<FogBlockID>) async throws {
+    func rebuild(affectedBlocks: some Sequence<FogBlockID>, cache: ExplorationMergedCache) async throws {
         let ids = Array(Set(affectedBlocks))
         guard !ids.isEmpty else { return }
-        let shards = try await shardStore.allShards()
-        let merged = merge(shards)
+        let merged = try await cache.renderBlocks(ids)
         let affectedTiles = Set(ids.flatMap { block in
             (0...10).map { level in tileID(for: block, level: level) }
         })
@@ -154,7 +153,7 @@ actor ExplorationRenderHierarchy {
             if let tile = tiles[id] {
                 try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let data = try JSONEncoder().encode(tile)
-                try data.write(to: url, options: ExplorationFileStorage.atomicWriteOptions)
+                try ExplorationFileStorage.writeAtomically(data, to: url)
             } else if fileManager.fileExists(atPath: url.path) {
                 try fileManager.removeItem(at: url)
             }
