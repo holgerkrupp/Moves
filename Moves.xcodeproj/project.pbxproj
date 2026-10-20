@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		05CFC7D08DF8B4883E27CC68 /* TimelineDayPresentationWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897102BA1F9377F5CC46A40E /* TimelineDayPresentationWorker.swift */; };
+		177000000000000000000001 /* TimelineDayNavigationWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177000000000000000000002 /* TimelineDayNavigationWorker.swift */; };
+		177000000000000000000003 /* TimelineDayNavigationWorkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177000000000000000000004 /* TimelineDayNavigationWorkerTests.swift */; };
 		06CFC7D08DF8B4883E27CC68 /* MovesStartupInstrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 067102BA1F9377F5CC46A40E /* MovesStartupInstrumentation.swift */; };
 		13F2901544F7737794EA0147 /* RouteFileKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F8808470F5A4588C0C4BF95 /* RouteFileKit */; };
 		14FAD9561C371D9BB84C83CB /* CoreText.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E3D9A02FF44C234613C38175 /* CoreText.framework */; };
@@ -341,6 +343,8 @@
 		609CEA33FBE3C59E6FB3F232 /* PreviewProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
 		85023B46CB5AEA6FD3B42A4A /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		897102BA1F9377F5CC46A40E /* TimelineDayPresentationWorker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineDayPresentationWorker.swift; sourceTree = "<group>"; };
+		177000000000000000000002 /* TimelineDayNavigationWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineDayNavigationWorker.swift; sourceTree = "<group>"; };
+		177000000000000000000004 /* TimelineDayNavigationWorkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineDayNavigationWorkerTests.swift; sourceTree = "<group>"; };
 		067102BA1F9377F5CC46A40E /* MovesStartupInstrumentation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MovesStartupInstrumentation.swift; sourceTree = "<group>"; };
 		9A1B00012F00000100000001 /* MovesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A1B00012F00000100000002 /* TimelineAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAssemblerTests.swift; sourceTree = "<group>"; };
@@ -610,6 +614,7 @@
 				2FD1F14D125105528B9C0872 /* RegularPlaceQueryWorker.swift */,
 				12385AFA0A4838B03CF27C15 /* OtherVisitsAtPlaceView.swift */,
 				897102BA1F9377F5CC46A40E /* TimelineDayPresentationWorker.swift */,
+				177000000000000000000002 /* TimelineDayNavigationWorker.swift */,
 				067102BA1F9377F5CC46A40E /* MovesStartupInstrumentation.swift */,
 			);
 			path = Moves;
@@ -710,6 +715,7 @@
 				F60000014000000100000008 /* ExplorationTests.swift */,
 				9FC44ECA193282F41A97BACB /* OtherVisitsMatcherTests.swift */,
 				EE872F14A2C2360176411D00 /* RegularPlaceQueryWorkerTests.swift */,
+				177000000000000000000004 /* TimelineDayNavigationWorkerTests.swift */,
 			);
 			path = MovesTests;
 			sourceTree = "<group>";
@@ -1177,6 +1183,7 @@
 				B91907A148D2F0F92411871D /* RegularPlaceQueryWorker.swift in Sources */,
 				7CF42545188A657E5438D1F6 /* OtherVisitsAtPlaceView.swift in Sources */,
 				05CFC7D08DF8B4883E27CC68 /* TimelineDayPresentationWorker.swift in Sources */,
+				177000000000000000000001 /* TimelineDayNavigationWorker.swift in Sources */,
 				06CFC7D08DF8B4883E27CC68 /* MovesStartupInstrumentation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1198,6 +1205,7 @@
 				F60000014000000100000007 /* ExplorationTests.swift in Sources */,
 				82A4C2AC8EB6B7D59A07E41F /* OtherVisitsMatcherTests.swift in Sources */,
 				CFFF35FD78EACDCC8F50B8CA /* RegularPlaceQueryWorkerTests.swift in Sources */,
+				177000000000000000000003 /* TimelineDayNavigationWorkerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

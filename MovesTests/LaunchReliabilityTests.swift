@@ -261,7 +261,7 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertNil(runtime.syncDiagnostics?.latestSnapshot)
     }
 
-    func testInitialTodaySelectionUsesOneBoundedWindowLoadWithTenThousandDays() throws {
+    func testInitialTodaySelectionUsesOneBoundedWindowLoadWithTenThousandDays() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
         let today = Calendar.current.startOfDay(for: .now)
@@ -273,6 +273,8 @@ final class LaunchReliabilityTests: XCTestCase {
 
         let window = TimelineDayWindowStore()
         window.loadInitial(using: context)
+        let loaded = await waitUntil { window.pagerDays.count == TimelineDayWindowStore.pagerWindowSize }
+        XCTAssertTrue(loaded)
         let selected = window.selectLoadedDay(dayKey: DayTimeline.makeDayKey(for: today))
 
         XCTAssertTrue(selected)
