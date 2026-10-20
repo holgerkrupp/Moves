@@ -291,7 +291,6 @@ struct MovesApp: App {
         .environmentObject(runtime.undoController)
         .environmentObject(runtime.healthWorkoutRouteAutoImporter!)
         .environmentObject(runtime.cloudDataPresencePublisher!)
-        .environmentObject(runtime.syncDiagnostics!)
         .environmentObject(runtime.locationServiceSyncManager!)
         .environmentObject(runtime.multiDevicePresenceManager!)
         .environmentObject(runtime.importCoordinator!)
@@ -571,6 +570,11 @@ final class MovesAppRuntime: ObservableObject {
     func startDeferredRuntimeServices() {
         guard !didStartDeferredServices else { return }
         didStartDeferredServices = true
+        if syncDiagnostics == nil, let container {
+            let interval = MovesStartupInstrumentation.signposter.beginInterval("syncDiagnosticsConstruction")
+            syncDiagnostics = diagnosticsFactory(container)
+            MovesStartupInstrumentation.signposter.endInterval("syncDiagnosticsConstruction", interval)
+        }
         if container != nil {
             MovesAppShortcuts.updateAppShortcutParameters()
         }
@@ -658,17 +662,35 @@ final class MovesAppRuntime: ObservableObject {
                     DemoDataSeeder.seedIfNeeded(in: container)
                     #endif
 
-                    let captureManager = MovesLocationCaptureManager(modelContainer: container)
-                    let watchRouteInbox = WatchRouteInbox(modelContainer: container)
-                    let healthWorkoutRouteAutoImporter = HealthWorkoutRouteAutoImportManager(modelContainer: container)
-                    let cloudDataPresencePublisher = MovesCloudDataPresencePublisher(modelContainer: container)
-                    let locationServiceSyncManager = LocationServiceSyncManager(modelContainer: container)
-                    let multiDevicePresenceManager = MultiDevicePresenceManager(modelContainer: container)
-                    let importCoordinator = ImportCoordinator()
-                    let routeFileImporter = RouteFileImporter(
-                        modelContext: ModelContext(container),
-                        importCoordinator: importCoordinator
-                    )
+                    let captureManager = MovesStartupInstrumentation.measureConstruction("captureManagerConstruction") {
+                        MovesLocationCaptureManager(modelContainer: container)
+                    }
+                    // WatchConnectivity must be activated during launch so an OS-delivered route
+                    // is not lost while the user is still waiting for the first screen.
+                    let watchRouteInbox = MovesStartupInstrumentation.measureConstruction("watchInboxConstruction") {
+                        WatchRouteInbox(modelContainer: container)
+                    }
+                    let healthWorkoutRouteAutoImporter = MovesStartupInstrumentation.measureConstruction("healthImporterConstruction") {
+                        HealthWorkoutRouteAutoImportManager(modelContainer: container)
+                    }
+                    let cloudDataPresencePublisher = MovesStartupInstrumentation.measureConstruction("cloudPresenceConstruction") {
+                        MovesCloudDataPresencePublisher(modelContainer: container)
+                    }
+                    let locationServiceSyncManager = MovesStartupInstrumentation.measureConstruction("locationSyncConstruction") {
+                        LocationServiceSyncManager(modelContainer: container)
+                    }
+                    let multiDevicePresenceManager = MovesStartupInstrumentation.measureConstruction("devicePresenceConstruction") {
+                        MultiDevicePresenceManager(modelContainer: container)
+                    }
+                    let importCoordinator = MovesStartupInstrumentation.measureConstruction("importCoordinatorConstruction") {
+                        ImportCoordinator()
+                    }
+                    let routeFileImporter = MovesStartupInstrumentation.measureConstruction("routeImporterConstruction") {
+                        RouteFileImporter(
+                            modelContext: ModelContext(container),
+                            importCoordinator: importCoordinator
+                        )
+                    }
                     importCoordinator.attach(routeFileImporter: routeFileImporter)
 
                     self.captureManager = captureManager
@@ -679,17 +701,20 @@ final class MovesAppRuntime: ObservableObject {
                     self.multiDevicePresenceManager = multiDevicePresenceManager
                     self.importCoordinator = importCoordinator
                     self.routeFileImporter = routeFileImporter
-                    self.routeWatchFolderManager = RouteWatchFolderManager(importer: routeFileImporter)
-                    self.importedRouteDataSummary = ImportedRouteDataSummaryStore(modelContainer: container)
+                    self.routeWatchFolderManager = MovesStartupInstrumentation.measureConstruction("watchFolderConstruction") {
+                        RouteWatchFolderManager(importer: routeFileImporter)
+                    }
+                    self.importedRouteDataSummary = MovesStartupInstrumentation.measureConstruction("routeSummaryConstruction") {
+                        ImportedRouteDataSummaryStore(modelContainer: container)
+                    }
 
                 }
 
-                let syncDiagnostics = self.diagnosticsFactory(container)
-                self.syncDiagnostics = syncDiagnostics
                 self.container = container
                 isReady = true
                 preparationState = .ready
                 MovesStartupInstrumentation.event("runtimeReady")
+                MovesStartupInstrumentation.event("minimumStateReady")
             } catch {
                 let failure = MovesStoreRecovery.record(
                     error,

@@ -225,12 +225,14 @@ final class LaunchReliabilityTests: XCTestCase {
     func testRuntimePublishesReadyBeforeDiagnosticsObservationCompletes() async throws {
         let container = try makeInMemoryContainer()
         let tracker = CancellationTracker()
+        let diagnosticsFactoryCalls = LockedCounter()
         let runtime = MovesAppRuntime(
             applicationContainerFactory: { container },
             localFallbackContainerFactory: { container },
             initializesServices: false,
             diagnosticsFactory: { modelContainer in
-                MovesSyncDiagnostics(
+                diagnosticsFactoryCalls.increment()
+                return MovesSyncDiagnostics(
                     modelContainer: modelContainer,
                     userDefaults: self.makeIsolatedDefaults(),
                     notificationCenter: NotificationCenter(),
@@ -248,9 +250,11 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertEqual(runtime.preparationState, .ready)
         XCTAssertTrue(runtime.isReady)
         XCTAssertIdentical(runtime.container, container)
+        XCTAssertEqual(diagnosticsFactoryCalls.value, 0, "Diagnostics construction must not gate the first usable screen")
         let startedBeforeDeferredPhase = await tracker.started
         XCTAssertFalse(startedBeforeDeferredPhase)
         runtime.startDeferredRuntimeServices()
+        XCTAssertEqual(diagnosticsFactoryCalls.value, 1)
         runtime.startDeferredDiagnostics()
         let didStart = await waitUntil { await tracker.started }
         XCTAssertTrue(didStart)
