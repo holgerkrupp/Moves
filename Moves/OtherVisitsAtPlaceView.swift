@@ -205,22 +205,32 @@ enum OtherVisitsMatcher {
     ) -> [RegularPlaceVisitDTO] {
         var byID: [UUID: RegularPlaceVisitDTO] = [:]
         let placeID = regularPlace?.id ?? reference.regularPlaceID
-        let center = CLLocation(latitude: regularPlace?.latitude ?? reference.latitude, longitude: regularPlace?.longitude ?? reference.longitude)
+        let centerLatitude = regularPlace?.latitude ?? reference.latitude
+        let centerLongitude = regularPlace?.longitude ?? reference.longitude
+        let centerCoordinate = CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude)
+        let center = CLLocationCoordinate2DIsValid(centerCoordinate)
+            ? CLLocation(latitude: centerLatitude, longitude: centerLongitude)
+            : nil
         let radius = regularPlace?.radiusMeters ?? fallbackRadius(for: reference)
 
         for candidate in candidates where candidate.id != reference.id {
             let isSameIdentity = placeID != nil && candidate.regularPlaceID == placeID
             let isUnclassified = candidate.regularPlaceID == nil
-            let candidateLocation = CLLocation(latitude: candidate.latitude, longitude: candidate.longitude)
-            let distance = center.distance(from: candidateLocation)
             let uncertainty = max(0, candidate.horizontalAccuracy)
             // Keep the full uncertainty disk within the target area. Very poor
             // fixes therefore cannot pull a distant visit into the group.
             let hasValidSpatialFix = candidate.latitude.isFinite
                 && candidate.longitude.isFinite
+                && CLLocationCoordinate2DIsValid(candidate.coordinate)
                 && candidate.horizontalAccuracy.isFinite
                 && candidate.horizontalAccuracy >= 0
-            let isSpatiallyClose = hasValidSpatialFix && distance + uncertainty <= radius
+            let isSpatiallyClose: Bool
+            if hasValidSpatialFix, let center {
+                let candidateLocation = CLLocation(latitude: candidate.latitude, longitude: candidate.longitude)
+                isSpatiallyClose = center.distance(from: candidateLocation) + uncertainty <= radius
+            } else {
+                isSpatiallyClose = false
+            }
 
             guard isSameIdentity || (isUnclassified && isSpatiallyClose) else { continue }
             if let existing = byID[candidate.id] {

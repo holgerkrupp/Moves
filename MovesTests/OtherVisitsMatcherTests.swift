@@ -77,6 +77,10 @@ final class OtherVisitsMatcherTests: XCTestCase {
         let reference = visit(id: 1, day: 100, regularPlaceID: placeID)
         let old = visit(id: 2, day: 1, regularPlaceID: nil)
         let current = visit(id: 3, day: 90, regularPlaceID: placeID)
+        XCTAssertNil(old.regularPlaceID)
+        XCTAssertEqual(old.latitude, 0)
+        XCTAssertEqual(old.longitude, 0)
+        XCTAssertEqual(old.horizontalAccuracy, 10)
 
         let result = OtherVisitsMatcher.matchingVisits(
             [old, current],
