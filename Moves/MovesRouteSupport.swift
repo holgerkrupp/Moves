@@ -697,6 +697,20 @@ enum MoveRouteGeometry {
         samples: [LocationSample],
         usesHealthWorkoutRoute: Bool
     ) -> [CLLocationCoordinate2D] {
+        // Dense imported tracks are stored as a compact payload on the move rather
+        // than as LocationSample rows. Timeline snapshots use this overload to
+        // avoid faulting the complete samples relationship, so keep that recorded
+        // route available to the snapshot path as well.
+        if let importedCoordinates = move.importedRouteCoordinates,
+           importedCoordinates.count > 1 {
+            return RouteCoordinateOps.dedupeSequentialCoordinates(
+                importedCoordinates,
+                minimumDistanceMeters: rawCoordinateDedupeDistance(
+                    usesHealthWorkoutRoute: usesHealthWorkoutRoute
+                )
+            )
+        }
+
         let sampleCoordinates = samples.preferredRouteDisplaySamples
             .sorted(by: { $0.timestamp < $1.timestamp })
             .map(\.coordinate)

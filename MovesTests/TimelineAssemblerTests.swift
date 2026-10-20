@@ -3624,6 +3624,69 @@ final class TimelinePresentationEpochTests: XCTestCase {
 
 @MainActor
 final class TimelineDayPresentationWorkerTests: XCTestCase {
+    func testSelectedDaySnapshotRetainsDeviceLocalMatchedGeometry() async throws {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let dayStart = Date(timeIntervalSince1970: 1_790_000_000)
+        let move = MoveSegment(
+            dedupeKey: "device-local-matched-route",
+            startDate: dayStart.addingTimeInterval(60),
+            endDate: dayStart.addingTimeInterval(600),
+            transportMode: .walking,
+            distanceMeters: 900,
+            stepCount: nil
+        )
+        let matchedCoordinates = [
+            CLLocationCoordinate2D(latitude: 52.5200, longitude: 13.4050),
+            CLLocationCoordinate2D(latitude: 52.5250, longitude: 13.4200),
+            CLLocationCoordinate2D(latitude: 52.5300, longitude: 13.4350)
+        ]
+        let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: [])
+        move.storeCachedRouteCoordinates(matchedCoordinates, signature: signature)
+        container.mainContext.insert(move)
+        try container.mainContext.save()
+
+        let snapshot = try await TimelineDayPresentationWorker(modelContainer: container)
+            .snapshot(dayStart: dayStart)
+        let moveSnapshot = try XCTUnwrap(snapshot.moves.first)
+
+        XCTAssertEqual(moveSnapshot.cachedRouteCoordinates?.map(\.latitude), matchedCoordinates.map(\.latitude))
+        XCTAssertEqual(moveSnapshot.cachedRouteCoordinates?.map(\.longitude), matchedCoordinates.map(\.longitude))
+    }
+
+    func testSelectedDaySnapshotRetainsCompactImportedMoveGeometry() async throws {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let dayStart = Date(timeIntervalSince1970: 1_790_000_000)
+        let move = MoveSegment(
+            dedupeKey: "compact-imported-route",
+            startDate: dayStart.addingTimeInterval(60),
+            endDate: dayStart.addingTimeInterval(600),
+            transportMode: .train,
+            distanceMeters: 12_000,
+            stepCount: nil
+        )
+        let importedLocations = [
+            CLLocation(latitude: 52.5200, longitude: 13.4050),
+            CLLocation(latitude: 52.5300, longitude: 13.4150),
+            CLLocation(latitude: 52.5400, longitude: 13.4250)
+        ]
+        move.importedRouteData = ImportedRoutePayloadCodec.encode(importedLocations)
+        container.mainContext.insert(move)
+        try container.mainContext.save()
+
+        let snapshot = try await TimelineDayPresentationWorker(modelContainer: container)
+            .snapshot(dayStart: dayStart)
+        let moveSnapshot = try XCTUnwrap(snapshot.moves.first)
+
+        XCTAssertTrue(moveSnapshot.usesImportedRoute)
+        XCTAssertEqual(moveSnapshot.rawRouteCoordinates.count, importedLocations.count)
+        XCTAssertEqual(moveSnapshot.rawRouteCoordinates.map(\.latitude), importedLocations.map { $0.coordinate.latitude })
+        XCTAssertEqual(moveSnapshot.rawRouteCoordinates.map(\.longitude), importedLocations.map { $0.coordinate.longitude })
+    }
+
     func testConcurrentSelectedDayConsumersShareOneSnapshotResult() async throws {
         let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)

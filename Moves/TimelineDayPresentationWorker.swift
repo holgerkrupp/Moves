@@ -151,10 +151,11 @@ struct TimelineMoveSnapshot: Identifiable, Sendable, Hashable {
         )
         let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
         routeCacheSignature = signature
-        let syncedCache = move.routeCacheSignature == signature
-            ? RouteCoordinateStorage.decode(move.routeCacheCoordinatesData)
-            : []
-        cachedRouteCoordinates = syncedCache.isEmpty ? nil : syncedCache.map(RouteCoordinateStoragePoint.init)
+        // Preserve the former presentation path's device-local cache fallback.
+        // The method checks the CloudKit-backed cache first, then the rebuildable
+        // on-device cache, all while the model remains inside this ModelActor.
+        let cached = move.cachedRouteCoordinates(for: signature) ?? []
+        cachedRouteCoordinates = cached.isEmpty ? nil : cached.map(RouteCoordinateStoragePoint.init)
         rawRouteCoordinates = fallback.map(RouteCoordinateStoragePoint.init)
         dayKey = move.dayTimeline?.dayKey
     }
