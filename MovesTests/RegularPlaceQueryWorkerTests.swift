@@ -62,6 +62,94 @@ final class RegularPlaceQueryWorkerTests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryPaginationCrossesWorkerBatchBoundaryWithoutGapsOrDuplicates() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let location = KnownLocation(name: "Dense history", latitude: 53.55, longitude: 9.99, radiusMeters: 300)
+        context.insert(location)
+
+        let visits: [VisitPlace] = (0..<450).map { index in
+            let arrival = Date(timeIntervalSince1970: Double(index % 9))
+            let visit = VisitPlace(arrivalDate: arrival, departureDate: nil,
+                                   latitude: index.isMultiple(of: 4) ? 54 : 53.5501 + Double(index % 5) * 0.00001,
+                                   longitude: index.isMultiple(of: 4) ? 10 : 9.99,
+                                   horizontalAccuracy: 5)
+            // Mix authoritative identity matches with unclassified spatial matches.
+            // Some identity matches deliberately sit outside the area.
+            if index.isMultiple(of: 4) || !index.isMultiple(of: 2) {
+                visit.regularPlaceID = location.id
+                visit.regularPlaceName = location.name
+            }
+            return visit
+        }
+        visits.forEach(context.insert)
+        try context.save()
+
+        let worker = RegularPlaceQueryWorker(modelContainer: container)
+        var fetched: [RegularPlaceVisitDTO] = []
+        var offset = 0
+        var pageCount = 0
+        repeat {
+            let page = try await worker.historyVisits(regularPlaceID: location.id,
+                                                      definition: RegularPlaceDefinitionDTO(location),
+                                                      offset: offset, limit: 37)
+            fetched.append(contentsOf: page.visits)
+            XCTAssertEqual(page.nextOffset, offset + page.visits.count)
+            offset = page.nextOffset
+            pageCount += 1
+            if !page.hasMore { break }
+        } while pageCount < 20
+
+        let expectedIDs = visits.sorted {
+            if $0.arrivalDate != $1.arrivalDate { return $0.arrivalDate > $1.arrivalDate }
+            return $0.id.uuidString < $1.id.uuidString
+        }.map(\.id)
+        let fetchedIDs = fetched.map(\.id)
+        XCTAssertEqual(pageCount, 13)
+        XCTAssertEqual(fetched.count, visits.count)
+        XCTAssertEqual(Set(fetchedIDs).count, visits.count)
+        XCTAssertEqual(fetchedIDs, expectedIDs)
+    }
+
+    @MainActor
+    func testCancelledReconciliationDoesNotPersistPartialMutation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let oldLocation = KnownLocation(name: "Old", latitude: 53.55, longitude: 9.99, radiusMeters: 300)
+        let newLocation = KnownLocation(name: "New", latitude: 53.7, longitude: 9.99, radiusMeters: 300)
+        let visit = VisitPlace(arrivalDate: Date(timeIntervalSince1970: 100), departureDate: nil,
+                               latitude: 53.5501, longitude: 9.99, horizontalAccuracy: 5)
+        visit.regularPlaceID = oldLocation.id
+        visit.regularPlaceName = oldLocation.name
+        context.insert(oldLocation)
+        context.insert(newLocation)
+        context.insert(visit)
+        try context.save()
+
+        let worker = RegularPlaceQueryWorker(modelContainer: container)
+        let oldDefinition = RegularPlaceDefinitionDTO(oldLocation)
+        oldLocation.latitude = newLocation.latitude
+        oldLocation.name = newLocation.name
+        try context.save()
+        let newDefinition = RegularPlaceDefinitionDTO(oldLocation)
+        let task = Task<Int, Error> {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await worker.reconcile(location: newDefinition, replacedID: oldDefinition.id,
+                                              previousDefinition: oldDefinition,
+                                              definitions: [newDefinition, RegularPlaceDefinitionDTO(newLocation)])
+        }
+        do {
+            _ = try await task.value
+            XCTFail("Expected reconciliation cancellation")
+        } catch is CancellationError {
+        }
+
+        let stored = try await worker.visits(regularPlaceID: oldDefinition.id, offset: 0, limit: 10).visits
+        XCTAssertEqual(stored.map(\.id), [visit.id])
+        XCTAssertEqual(stored.first?.regularPlaceName, oldDefinition.name)
+    }
+
+    @MainActor
     func testCountsAndReconciliationPreserveManualLabelsAndCommentsAcrossOverlap() async throws {
         let container = try makeContainer()
         let context = container.mainContext
