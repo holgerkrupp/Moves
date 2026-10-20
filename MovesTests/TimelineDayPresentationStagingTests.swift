@@ -56,7 +56,8 @@ final class TimelineDayPresentationStagingTests: XCTestCase {
             usesHealthWorkoutRoute: false
         )
 
-        let prepared = try XCTUnwrap(try await TimelineRouteGeometryPreparer.prepare([input]).first)
+        let preparedRoutes = try await TimelineRouteGeometryPreparer.prepare([input])
+        let prepared = try XCTUnwrap(preparedRoutes.first)
 
         XCTAssertEqual(prepared.moveID, moveID)
         XCTAssertEqual(prepared.rawCoordinates.map(\.latitude), imported.map { $0.coordinate.latitude })
@@ -64,18 +65,14 @@ final class TimelineDayPresentationStagingTests: XCTestCase {
     }
 
     func testDeferredRawFixPreparationUsesOnlyRecordedSamplesAndKeepsEndpoints() async throws {
-        let start = TimelinePlaceSnapshot(
-            id: UUID(), deviceIdentifier: "device", arrivalDate: .distantPast,
-            departureDate: nil, latitude: 52.5, longitude: 13.4, horizontalAccuracy: 5,
-            userLabel: nil, regularPlaceID: nil, regularPlaceName: nil, autoLabel: nil,
-            comment: nil, dayKey: nil
-        )
-        let end = TimelinePlaceSnapshot(
-            id: UUID(), deviceIdentifier: "device", arrivalDate: .distantFuture,
-            departureDate: nil, latitude: 52.52, longitude: 13.42, horizontalAccuracy: 5,
-            userLabel: nil, regularPlaceID: nil, regularPlaceName: nil, autoLabel: nil,
-            comment: nil, dayKey: nil
-        )
+        let start = TimelinePlaceSnapshot(VisitPlace(
+            arrivalDate: .distantPast, departureDate: nil, latitude: 52.5,
+            longitude: 13.4, horizontalAccuracy: 5
+        ))
+        let end = TimelinePlaceSnapshot(VisitPlace(
+            arrivalDate: .distantFuture, departureDate: nil, latitude: 52.52,
+            longitude: 13.42, horizontalAccuracy: 5
+        ))
         let samples = [
             TimelineSampleSnapshot(
                 dedupeKey: "fix", deviceIdentifier: "device", timestamp: Date(),
@@ -89,7 +86,8 @@ final class TimelineDayPresentationStagingTests: XCTestCase {
             samples: samples, usesHealthWorkoutRoute: false
         )
 
-        let prepared = try XCTUnwrap(try await TimelineRouteGeometryPreparer.prepare([input]).first)
+        let preparedRoutes = try await TimelineRouteGeometryPreparer.prepare([input])
+        let prepared = try XCTUnwrap(preparedRoutes.first)
 
         XCTAssertEqual(prepared.rawCoordinates.count, 3)
         XCTAssertEqual(prepared.rawCoordinates.first?.latitude, start.latitude)

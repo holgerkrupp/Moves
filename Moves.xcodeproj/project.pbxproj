@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A90000014000000100000002 /* HistoryMapScalabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000014000000100000001 /* HistoryMapScalabilityTests.swift */; };
+		A90000014000000100000004 /* TimelineDayPresentationStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000014000000100000003 /* TimelineDayPresentationStagingTests.swift */; };
 		05CFC7D08DF8B4883E27CC68 /* TimelineDayPresentationWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897102BA1F9377F5CC46A40E /* TimelineDayPresentationWorker.swift */; };
 		177000000000000000000001 /* TimelineDayNavigationWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177000000000000000000002 /* TimelineDayNavigationWorker.swift */; };
 		177000000000000000000003 /* TimelineDayNavigationWorkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177000000000000000000004 /* TimelineDayNavigationWorkerTests.swift */; };
@@ -276,6 +278,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A90000014000000100000001 /* HistoryMapScalabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMapScalabilityTests.swift; sourceTree = "<group>"; };
+		A90000014000000100000003 /* TimelineDayPresentationStagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineDayPresentationStagingTests.swift; sourceTree = "<group>"; };
 		11F1C2226A3138B0E8A6CDA0 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
 		12385AFA0A4838B03CF27C15 /* OtherVisitsAtPlaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OtherVisitsAtPlaceView.swift; sourceTree = "<group>"; };
 		2FD1F14D125105528B9C0872 /* RegularPlaceQueryWorker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RegularPlaceQueryWorker.swift; sourceTree = "<group>"; };
@@ -702,6 +706,8 @@
 		9A1B00012F00000100000003 /* MovesTests */ = {
 			isa = PBXGroup;
 			children = (
+				A90000014000000100000001 /* HistoryMapScalabilityTests.swift */,
+				A90000014000000100000003 /* TimelineDayPresentationStagingTests.swift */,
 				E62000014000000100000000 /* LaunchReliabilityTests.swift */,
 				E61000014000000100000000 /* CrossDeviceWorkCoordinatorTests.swift */,
 				F20000013120000100000000 /* MacSearchTests.swift */,
@@ -1192,6 +1198,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A90000014000000100000002 /* HistoryMapScalabilityTests.swift in Sources */,
+				A90000014000000100000004 /* TimelineDayPresentationStagingTests.swift in Sources */,
 				E62000014000000100000001 /* LaunchReliabilityTests.swift in Sources */,
 				F20000013120000100000001 /* MacSearchTests.swift in Sources */,
 				D10000013010000100000003 /* DawarichSyncTests.swift in Sources */,
