@@ -88,8 +88,10 @@ final class RegularPlaceQueryWorkerTests: XCTestCase {
         let definitions = [RegularPlaceDefinitionDTO(oldLocation), RegularPlaceDefinitionDTO(overlap)]
         let worker = RegularPlaceQueryWorker(modelContainer: container)
         let counts = try await worker.counts(for: definitions)
+        let refreshNotification = expectation(forNotification: .movesVisitedPlaceDidChange, object: nil)
         _ = try await worker.reconcile(location: definitions[0], replacedID: oldLocation.id,
                                        definitions: definitions, batchSize: 1)
+        await fulfillment(of: [refreshNotification], timeout: 1)
 
         XCTAssertEqual(counts.first(where: { $0.regularPlaceID == oldLocation.id })?.count, 1)
         XCTAssertEqual(automatic.regularPlaceID, overlap.id)

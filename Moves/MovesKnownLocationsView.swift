@@ -11,6 +11,19 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+private struct RegularPlaceSettingsQueryKey: Hashable {
+    let definitions: [RegularPlaceDefinitionDTO]
+    let historyRevision: Int
+}
+
+private struct RegularPlaceReconciliationRequest: Sendable {
+    let location: RegularPlaceDefinitionDTO
+    let replacedID: UUID?
+    let previousDefinition: RegularPlaceDefinitionDTO?
+    let definitions: [RegularPlaceDefinitionDTO]
+    let selectedVisitID: UUID?
+}
+
 struct RegularPlacesSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \KnownLocation.name, order: .forward) private var locations: [KnownLocation]
@@ -18,6 +31,7 @@ struct RegularPlacesSettingsView: View {
     @State private var visitCounts: [UUID: Int] = [:]
     @State private var frequentSummaries: [RegularPlaceSummaryDTO] = []
     @State private var legacyCandidates: [RegularPlaceVisitDTO] = []
+    @State private var historyRevision = 0
     private var definitions: [RegularPlaceDefinitionDTO] { locations.map(RegularPlaceDefinitionDTO.init) }
 
     var body: some View {
@@ -104,7 +118,15 @@ struct RegularPlacesSettingsView: View {
                 KnownLocationEditorView(knownLocation: nil, suggestedLocation: nil)
             }
         }
-        .task(id: definitions) { await loadSummaries(for: definitions) }
+        .task(id: RegularPlaceSettingsQueryKey(definitions: definitions, historyRevision: historyRevision)) {
+            await loadSummaries(for: definitions)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .movesVisitedPlaceDidChange)) { _ in
+            visitCounts = [:]
+            frequentSummaries = []
+            legacyCandidates = []
+            historyRevision += 1
+        }
     }
 
     private func loadSummaries(for definitions: [RegularPlaceDefinitionDTO]) async {
@@ -158,6 +180,8 @@ struct KnownLocationEditorView: View {
     @State private var isReconciling = false
     @State private var pendingDeletionID: UUID?
     @State private var pendingDeletionDefinitions: [RegularPlaceDefinitionDTO] = []
+    @State private var pendingReconciliation: RegularPlaceReconciliationRequest?
+    @State private var visitRevision = 0
 
     private var queryKey: String { "\(centerLatitude)|\(centerLongitude)|\(radiusMeters)" }
 
@@ -329,15 +353,17 @@ struct KnownLocationEditorView: View {
         } message: {
             Text("Recorded visits remain in your timeline. Only the saved name and proximity area are removed.")
         }
-        .alert("Could Not Save Location", isPresented: $isShowingError) {
-            if pendingDeletionID != nil {
+        .alert(pendingReconciliation != nil || pendingDeletionID != nil ? "Could Not Update Visits" : "Could Not Save Location", isPresented: $isShowingError) {
+            if pendingReconciliation != nil {
+                Button("Retry Visit Updates") { Task { await retryReconciliation(container: nil) } }
+            } else if pendingDeletionID != nil {
                 Button("Retry Visit Updates") { Task { await reconcileDeletion() } }
             }
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
         }
-        .task(id: queryKey) {
+        .task(id: "\(queryKey)|\(visitRevision)") {
             let generation = UUID()
             queryGeneration = generation
             isLoadingVisits = false
@@ -346,6 +372,12 @@ struct KnownLocationEditorView: View {
             hasMoreVisits = false
             do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
             await loadMoreVisits(reset: true, generation: generation)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .movesVisitedPlaceDidChange)) { _ in
+            matchingVisits = []
+            visitsOffset = 0
+            hasMoreVisits = false
+            visitRevision += 1
         }
     }
 
@@ -419,31 +451,44 @@ struct KnownLocationEditorView: View {
             let definitions = allKnownLocations.map(RegularPlaceDefinitionDTO.init)
             let definition = RegularPlaceDefinitionDTO(location)
             let container = modelContext.container
-            let selectedVisitID = selectedVisit?.id
-            isReconciling = true
-            Task {
-                defer { isReconciling = false }
-                do {
-                    let worker = RegularPlaceQueryWorker(modelContainer: container)
-                    _ = try await worker.reconcile(location: definition, replacedID: originalID,
-                                                   previousDefinition: previousDefinition, definitions: definitions)
-                    if let selectedVisitID {
-                        let didAssign = try await worker.assignSelectedVisit(visitID: selectedVisitID, to: definition)
-                        if !didAssign {
-                            errorMessage = "This visit’s location accuracy does not fit inside the Regular Place radius. Adjust the center or radius, then save again."
-                            isShowingError = true
-                            return
-                        }
-                    }
-                    dismiss()
-                } catch {
-                    errorMessage = "The Regular Place was saved, but its visits could not be updated: \(error.localizedDescription)"
-                    isShowingError = true
-                }
-            }
+            pendingReconciliation = RegularPlaceReconciliationRequest(
+                location: definition,
+                replacedID: originalID,
+                previousDefinition: previousDefinition,
+                definitions: definitions,
+                selectedVisitID: selectedVisit?.id
+            )
+            Task { await retryReconciliation(container: container) }
         } catch {
             modelContext.rollback()
             errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+
+    @MainActor
+    private func retryReconciliation(container suppliedContainer: ModelContainer?) async {
+        guard let request = pendingReconciliation else { return }
+        isReconciling = true
+        defer { isReconciling = false }
+        do {
+            let worker = RegularPlaceQueryWorker(modelContainer: suppliedContainer ?? modelContext.container)
+            _ = try await worker.reconcile(location: request.location,
+                                           replacedID: request.replacedID,
+                                           previousDefinition: request.previousDefinition,
+                                           definitions: request.definitions)
+            if let selectedVisitID = request.selectedVisitID {
+                let didAssign = try await worker.assignSelectedVisit(visitID: selectedVisitID, to: request.location)
+                guard didAssign else {
+                    errorMessage = "This visit’s location accuracy does not fit inside the Regular Place radius. Adjust the center or radius, then retry visit updates."
+                    isShowingError = true
+                    return
+                }
+            }
+            pendingReconciliation = nil
+            dismiss()
+        } catch {
+            errorMessage = "The Regular Place was saved, but its visits could not be updated: \(error.localizedDescription)"
             isShowingError = true
         }
     }
