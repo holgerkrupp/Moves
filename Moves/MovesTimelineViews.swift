@@ -99,6 +99,8 @@ struct DayTimelinePageContent: View {
     @State private var provisionalSampleResolvedKey: String?
     @State private var presentationCache: DayTimelinePresentationCache
     @State private var presentationGeneration = 0
+    @State private var isLoadingPresentation = true
+    @State private var presentationLoadError: String?
     @State private var importedDataStatus: Bool?
     @State private var isReviewingImportedData = false
     @State private var isShowingFullScreenMap = false
@@ -367,6 +369,11 @@ struct DayTimelinePageContent: View {
         }
         .task(id: "presentation|\(presentationRefreshKey)|\(routeDisplayMode.rawValue)") {
             guard !Task.isCancelled else { return }
+            isLoadingPresentation = true
+            presentationLoadError = nil
+            defer {
+                if !Task.isCancelled { isLoadingPresentation = false }
+            }
             MovesStartupInstrumentation.event("selectedDayPresentationStart")
             let rawMode = routeDisplayMode == .rawOSLocationFixes
             if let cached = DayTimelinePresentationCacheStore.value(for: dayTimeline.dayKey, rawMode: rawMode) {
@@ -392,6 +399,8 @@ struct DayTimelinePageContent: View {
                 MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
                 guard !Task.isCancelled else { return }
                 importedDataStatus = false
+                presentationLoadError = error.localizedDescription
+                MovesStartupInstrumentation.event("selectedDayPresentationFailed")
                 return
             }
             importedDataStatus = source.hasImportedRouteData
@@ -736,17 +745,34 @@ struct DayTimelinePageContent: View {
 
     private var emptyTimelinePanel: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("No segments for this day yet.")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-
-            if presentationCache.sampleCount > 0 {
-                Text("\(presentationCache.sampleCount) location sample\(presentationCache.sampleCount == 1 ? "" : "s") captured. Waiting for the next visit or move.")
+            if isLoadingPresentation {
+                ProgressView("Loading timeline…")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+            } else if let presentationLoadError {
+                Text("Couldn’t load this day’s timeline.")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                Text(presentationLoadError)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Button("Retry") {
+                    self.presentationLoadError = nil
+                    presentationGeneration &+= 1
+                }
+                .buttonStyle(.bordered)
             } else {
-                Text("Grant location access above to start recording visits and movement.")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                Text("No segments for this day yet.")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                if presentationCache.sampleCount > 0 {
+                    Text("\(presentationCache.sampleCount) location sample\(presentationCache.sampleCount == 1 ? "" : "s") captured. Waiting for the next visit or move.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Grant location access above to start recording visits and movement.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
