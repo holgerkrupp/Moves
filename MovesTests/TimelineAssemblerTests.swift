@@ -3651,8 +3651,10 @@ final class TimelineDayPresentationWorkerTests: XCTestCase {
             .snapshot(dayStart: dayStart)
         let moveSnapshot = try XCTUnwrap(snapshot.moves.first)
 
+        XCTAssertNil(moveSnapshot.manualRouteCoordinates)
         XCTAssertEqual(moveSnapshot.cachedRouteCoordinates?.map(\.latitude), matchedCoordinates.map(\.latitude))
         XCTAssertEqual(moveSnapshot.cachedRouteCoordinates?.map(\.longitude), matchedCoordinates.map(\.longitude))
+        XCTAssertEqual(moveSnapshot.displayedRouteCoordinates, moveSnapshot.cachedRouteCoordinates)
     }
 
     func testSelectedDaySnapshotRetainsCompactImportedMoveGeometry() async throws {
@@ -3682,9 +3684,11 @@ final class TimelineDayPresentationWorkerTests: XCTestCase {
         let moveSnapshot = try XCTUnwrap(snapshot.moves.first)
 
         XCTAssertTrue(moveSnapshot.usesImportedRoute)
+        XCTAssertNil(moveSnapshot.manualRouteCoordinates)
         XCTAssertEqual(moveSnapshot.rawRouteCoordinates.count, importedLocations.count)
         XCTAssertEqual(moveSnapshot.rawRouteCoordinates.map(\.latitude), importedLocations.map { $0.coordinate.latitude })
         XCTAssertEqual(moveSnapshot.rawRouteCoordinates.map(\.longitude), importedLocations.map { $0.coordinate.longitude })
+        XCTAssertEqual(moveSnapshot.displayedRouteCoordinates, moveSnapshot.rawRouteCoordinates)
     }
 
     func testConcurrentSelectedDayConsumersShareOneSnapshotResult() async throws {

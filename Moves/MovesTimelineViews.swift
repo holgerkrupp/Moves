@@ -3409,8 +3409,7 @@ struct DayMapStrip: View {
                 let sources = source.sourcesByMoveID[move.id] ?? []
                 return RenderedRoute(
                     id: move.id.uuidString,
-                    coordinates: (move.manualRouteCoordinates ?? move.cachedRouteCoordinates ?? move.rawRouteCoordinates)
-                        .map(\.coordinate),
+                    coordinates: move.displayedRouteCoordinates.map(\.coordinate),
                     usesHighAccuracyRouteTracking: sources.contains(.routeTracking),
                     usesHealthWorkoutRoute: sources.contains(.healthWorkout),
                     transportMode: move.transportMode

@@ -113,6 +113,10 @@ struct TimelineMoveSnapshot: Identifiable, Sendable, Hashable {
         TransportMode(rawValue: transportModeRawValue) ?? .unknown
     }
 
+    var displayedRouteCoordinates: [RouteCoordinateStoragePoint] {
+        manualRouteCoordinates ?? cachedRouteCoordinates ?? rawRouteCoordinates
+    }
+
     var timelineDuration: TimeInterval {
         max(endDate.timeIntervalSince(timelineStartDate), 0)
     }
@@ -142,8 +146,10 @@ struct TimelineMoveSnapshot: Identifiable, Sendable, Hashable {
         self.usesRouteTracking = usesRouteTracking
         self.startPlace = startPlace
         self.endPlace = endPlace
-        manualRouteCoordinates = RouteCoordinateStorage.decode(move.manualRouteCoordinatesData)
-            .map(RouteCoordinateStoragePoint.init)
+        // Match MoveSegment.manualRouteCoordinates semantics: absent or invalid
+        // manual route data must remain nil so map presentation can fall back to
+        // cached or recorded geometry.
+        manualRouteCoordinates = move.manualRouteCoordinates?.map(RouteCoordinateStoragePoint.init)
         let fallback = MoveRouteGeometry.rawCoordinates(
             for: move,
             samples: samples,
