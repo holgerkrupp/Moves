@@ -885,6 +885,19 @@ struct ContentView: View {
             }
         }
         .task {
+            // CloudKit imports can finish after the selected page has already loaded an
+            // empty local snapshot. Refresh only after the import transaction reports
+            // success so a cold launch cannot leave that temporary snapshot on screen.
+            for await _ in NotificationCenter.default.notifications(
+                named: .movesCloudKitImportObserved
+            ) {
+                guard !Task.isCancelled else { return }
+                TimelinePresentationCacheInvalidator.invalidateAll()
+                timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                cloudDataPresencePublisher.publishSoon()
+            }
+        }
+        .task {
             for await notification in TimelineNotificationCoalescer.events(
                 named: .movesVisitedPlaceDidChange
             ) {

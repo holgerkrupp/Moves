@@ -3613,6 +3613,45 @@ final class TimelinePresentationEpochTests: XCTestCase {
 
 @MainActor
 final class TimelineDayPresentationWorkerTests: XCTestCase {
+    func testConcurrentSelectedDayConsumersShareOneSnapshotResult() async throws {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let dayStart = Date(timeIntervalSince1970: 1_790_000_000)
+        let day = DayTimeline(dayStart: dayStart)
+        let place = VisitPlace(
+            arrivalDate: dayStart.addingTimeInterval(60),
+            departureDate: dayStart.addingTimeInterval(600),
+            latitude: 52.5,
+            longitude: 13.4,
+            horizontalAccuracy: 8
+        )
+        place.dayTimeline = day
+        container.mainContext.insert(day)
+        container.mainContext.insert(place)
+        try container.mainContext.save()
+        DayPresentationValueSourceCache.removeAll()
+        defer { DayPresentationValueSourceCache.removeAll() }
+
+        async let timelineSnapshot = DayPresentationValueSourceCache.snapshot(
+            modelContainer: container,
+            dayStart: dayStart,
+            dayKey: day.dayKey,
+            generation: 0
+        )
+        async let mapSnapshot = DayPresentationValueSourceCache.snapshot(
+            modelContainer: container,
+            dayStart: dayStart,
+            dayKey: day.dayKey,
+            generation: 0
+        )
+        let (timeline, map) = try await (timelineSnapshot, mapSnapshot)
+
+        XCTAssertEqual(timeline.places.map(\.id), [place.id])
+        XCTAssertEqual(map.places.map(\.id), [place.id])
+        XCTAssertEqual(timeline.places, map.places)
+    }
+
     func testBoundedSnapshotKeepsExactDenseDayCounts() async throws {
         let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)

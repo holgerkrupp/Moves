@@ -527,6 +527,9 @@
     "Couldn’t Import Route Files" : {
 
     },
+    "Couldn’t load this day’s timeline." : {
+
+    },
     "Couldn’t Load Visits" : {
 
     },
@@ -1083,6 +1086,9 @@
 
     },
     "Load More Visits" : {
+
+    },
+    "Loading timeline…" : {
 
     },
     "Loading visit history…" : {

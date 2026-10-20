@@ -1634,7 +1634,7 @@ enum TimelinePresentationEpochLedger {
 }
 
 @MainActor
-private enum DayPresentationValueSourceCache {
+enum DayPresentationValueSourceCache {
     private struct InFlightSnapshot {
         let id: UUID
         let task: Task<TimelineDaySnapshot, Error>
@@ -1673,10 +1673,20 @@ private enum DayPresentationValueSourceCache {
         }
         do {
             let result = try await flight.task.value
-            guard TimelinePresentationEpochLedger.isCurrent(requestEpoch, for: dayKey),
-                  inFlight[key]?.id == flight.id else {
+            guard TimelinePresentationEpochLedger.isCurrent(requestEpoch, for: dayKey) else {
                 throw CancellationError()
             }
+
+            // Several view tasks can share one snapshot request (the rows, map, and
+            // route matcher do this for the selected day). The first waiter to resume
+            // publishes the result and removes the in-flight entry. Later waiters must
+            // be allowed to consume that same result instead of treating the missing
+            // in-flight entry as a stale request.
+            if let cached = entries[key] {
+                touch(key)
+                return cached
+            }
+            guard inFlight[key]?.id == flight.id else { throw CancellationError() }
             inFlight.removeValue(forKey: key)
             entries[key] = result
             touch(key)
@@ -2735,6 +2745,9 @@ struct DayMapStrip: View {
                     )
                 } catch {
                     MovesStartupInstrumentation.signposter.endInterval("selectedDayMapPresentationFetchAndBuild", state)
+                    if !(error is CancellationError), !Task.isCancelled {
+                        MovesStartupInstrumentation.event("selectedDayMapPresentationFailed")
+                    }
                     return
                 }
                 DayMapPresentationCacheStore.store(
