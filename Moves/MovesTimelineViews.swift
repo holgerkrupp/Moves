@@ -7,9 +7,11 @@
 
 import CryptoKit
 import Charts
+import Combine
 import ESADesignKit
 import Foundation
 import MapKit
+import Observation
 import SwiftData
 import SwiftUI
 #if canImport(UIKit)
@@ -100,7 +102,10 @@ struct DayTimelinePageContent: View {
     @State private var importedDataStatus: Bool?
     @State private var isReviewingImportedData = false
     @State private var isShowingFullScreenMap = false
-    @State private var timelineScrollOffset: CGFloat = 0
+    // The scroll view writes this reference on every geometry update. Keeping the
+    // observed value out of this page's stored state prevents each tick from
+    // invalidating the timeline rows, summary, and map subtree.
+    @State private var timelineScrollState = TimelineScrollOffsetState()
     @State private var pendingDeletionEntry: TimelineEntry?
     @State private var deletionErrorMessage = ""
     @State private var isShowingDeletionError = false
@@ -153,13 +158,13 @@ struct DayTimelinePageContent: View {
 
     private static func makePresentationCache(
         for dayTimeline: DayTimeline,
-        source: DayPresentationSource,
+        source: DayPresentationValueSource,
         mode: TrackingRouteDisplayMode
     ) -> DayTimelinePresentationCache {
         // Keep the complete import in SwiftData/iCloud, but bound the interactive phone
         // timeline to a recent window. Rendering one row and one map polyline per imported
         // file makes a large history unusable even though the data itself is valid.
-        let displayedMoveSelection = TimelinePresentationLimits.selection(
+        let displayedMoveSelection = TimelineValuePresentationLimits.selection(
             from: source.visibleMoves,
             maxImportedMoves: TimelinePresentationLimits.maxTimelineImportedMoves,
             maxTotalMoves: TimelinePresentationLimits.maxTimelineMoves,
@@ -189,10 +194,7 @@ struct DayTimelinePageContent: View {
         let moves = displayedMoves.map(TimelineEntry.move)
         let latestSample = source.visibleSamples.max { $0.timestamp < $1.timestamp }
         let rawFixEntries: [TimelineEntry] = mode == .rawOSLocationFixes
-            ? RawLocationFixPresentation.orderedTimelineFixes(
-                from: source.visibleSamples,
-                limit: TimelinePresentationLimits.maxTimelineRawFixes
-            ).map { .rawFix($0) }
+            ? TimelineMapRawFixPresentation.fixes(from: source.visibleSamples).map { .rawFix($0) }
             : []
         var entries = (places + moves + rawFixEntries).sorted {
             if $0.startDate == $1.startDate { return $0.id < $1.id }
@@ -273,7 +275,7 @@ struct DayTimelinePageContent: View {
     }
 
     private static func shouldHidePlaceFromTimeline(
-        _ place: VisitPlace,
+        _ place: TimelinePlaceSnapshot,
         incomingPlaceIDs: Set<UUID>,
         outgoingPlaceIDs: Set<UUID>
     ) -> Bool {
@@ -297,7 +299,7 @@ struct DayTimelinePageContent: View {
         return isShortTransitStop && hasIncomingMove && hasOutgoingMove
     }
 
-    private static func hasExplicitUserLabel(_ place: VisitPlace) -> Bool {
+    private static func hasExplicitUserLabel(_ place: TimelinePlaceSnapshot) -> Bool {
         !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
@@ -305,8 +307,15 @@ struct DayTimelinePageContent: View {
         presentationCache.transportSummaryMetrics
     }
 
-    private static func transportSummaryMetrics(for moves: [MoveSegment]) -> [DayTransportSummaryMetric] {
-        let valuesByBucket = DayTransportSummaryCalculator.aggregate(moves)
+    private static func transportSummaryMetrics(for moves: [TimelineMoveSnapshot]) -> [DayTransportSummaryMetric] {
+        var valuesByBucket: [DayTransportBucket: DayTransportSummaryValue] = [:]
+        for move in moves {
+            guard let bucket = DayTransportBucket(move.transportMode) else { continue }
+            var value = valuesByBucket[bucket, default: .zero]
+            value.duration += move.timelineDuration
+            value.distanceMeters += max(move.distanceMeters, 0)
+            valuesByBucket[bucket] = value
+        }
 
         return DayTransportBucket.allCases.compactMap { bucket in
             let value = valuesByBucket[bucket, default: .zero]
@@ -364,10 +373,22 @@ struct DayTimelinePageContent: View {
             }
 
             let state = MovesStartupInstrumentation.signposter.beginInterval("selectedDayPresentationFetchAndBuild")
-            let source = DayPresentationSourceCache.source(
-                for: dayTimeline,
-                generation: presentationGeneration
-            )
+            let source: DayPresentationValueSource
+            do {
+                let snapshot = try await DayPresentationValueSourceCache.snapshot(
+                    modelContainer: modelContext.container,
+                    dayStart: dayTimeline.dayStart,
+                    dayKey: dayTimeline.dayKey,
+                    generation: presentationGeneration
+                )
+                guard !Task.isCancelled else { return }
+                source = DayPresentationValueSource(snapshot)
+            } catch {
+                MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
+                guard !Task.isCancelled else { return }
+                importedDataStatus = false
+                return
+            }
             importedDataStatus = source.hasImportedRouteData
             let cache = Self.makePresentationCache(for: dayTimeline, source: source, mode: routeDisplayMode)
             MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
@@ -378,29 +399,47 @@ struct DayTimelinePageContent: View {
             markTimelineInteractiveIfNeeded()
         }
         .task {
-            for await _ in NotificationCenter.default.notifications(
-                named: .movesLocationSamplesDidChange
-            ) {
+            for await notification in TimelineNotificationCoalescer.events(named: .movesLocationSamplesDidChange) {
                 guard !Task.isCancelled else { return }
+                if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                    guard affectedDayKeys.contains(dayTimeline.dayKey) else { continue }
+                    TimelinePresentationCacheInvalidator.invalidate(dayKey: dayTimeline.dayKey)
+                } else {
+                    TimelinePresentationCacheInvalidator.invalidateAll()
+                }
                 presentationGeneration &+= 1
             }
         }
         .task {
-            for await _ in NotificationCenter.default.notifications(
-                named: .movesImportedRouteDataDidChange
-            ) {
+            for await _ in TimelineNotificationCoalescer.events(named: .movesImportedRouteDataDidChange) {
                 guard !Task.isCancelled else { return }
+                DayPresentationValueSourceCache.remove(dayKey: dayTimeline.dayKey)
                 presentationGeneration &+= 1
             }
         }
         .task {
-            for await notification in NotificationCenter.default.notifications(
+            for await notification in TimelineNotificationCoalescer.events(named: .movesVisitedPlaceDidChange) {
+                guard !Task.isCancelled else { return }
+                if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                    guard affectedDayKeys.contains(dayTimeline.dayKey) else { continue }
+                    TimelinePresentationCacheInvalidator.invalidate(dayKey: dayTimeline.dayKey)
+                } else {
+                    TimelinePresentationCacheInvalidator.invalidateAll()
+                }
+                presentationGeneration &+= 1
+            }
+        }
+        .task {
+            for await notification in TimelineNotificationCoalescer.events(
                 named: .movesMoveDataDidChange
             ) {
                 guard !Task.isCancelled else { return }
-                TimelinePresentationCacheInvalidator.invalidate(
-                    dayKey: notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
-                )
+                if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                    guard affectedDayKeys.contains(dayTimeline.dayKey) else { continue }
+                    TimelinePresentationCacheInvalidator.invalidate(dayKey: dayTimeline.dayKey)
+                } else {
+                    TimelinePresentationCacheInvalidator.invalidateAll()
+                }
                 presentationGeneration &+= 1
             }
         }
@@ -429,7 +468,8 @@ struct DayTimelinePageContent: View {
             }
         }
         .confirmationDialog("Delete Entry?", item: $pendingDeletionEntry, titleVisibility: .visible) { entry in
-            if case .place(let place) = entry,
+            if case .place(let placeSnapshot) = entry,
+               let place = resolvePlace(placeSnapshot.id),
                TimelineDeletion.canMergeAdjacentRoutes(for: place) {
                 Button("Delete and Merge Routes", role: .destructive) {
                     delete(entry: entry, mergeAdjacentRoutes: true)
@@ -468,7 +508,8 @@ struct DayTimelinePageContent: View {
             DayMapStrip(
                 dayTimeline: dayTimeline,
                 isActive: isActive,
-                selection: $mapSelection
+                selection: $mapSelection,
+                isTimelineScrollActive: timelineScrollState.isScrolling
             )
 
             importedDataReviewButton
@@ -478,6 +519,9 @@ struct DayTimelinePageContent: View {
                 elevationPanel
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onScrollPhaseChange { _, phase in
+                timelineScrollState.isScrolling = phase.isScrolling
+            }
             .scrollEdgeEffectStyle(.soft, for: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -496,7 +540,8 @@ struct DayTimelinePageContent: View {
                     DayMapStrip(
                         dayTimeline: dayTimeline,
                         isActive: isActive,
-                        selection: $mapSelection
+                        selection: $mapSelection,
+                        isTimelineScrollActive: timelineScrollState.isScrolling
                     )
                 }
 
@@ -514,7 +559,10 @@ struct DayTimelinePageContent: View {
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             max(0, geometry.contentOffset.y + geometry.contentInsets.top)
         } action: { _, newOffset in
-            timelineScrollOffset = newOffset
+            timelineScrollState.offset = newOffset
+        }
+        .onScrollPhaseChange { _, phase in
+            timelineScrollState.isScrolling = phase.isScrolling
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollingHero(
@@ -527,27 +575,16 @@ struct DayTimelinePageContent: View {
                 selection: $mapSelection,
                 fillsAvailableSpace: true,
                 usesHeroStyle: true,
-                fullScreenMapState: $isShowingFullScreenMap
+                fullScreenMapState: $isShowingFullScreenMap,
+                isTimelineScrollActive: timelineScrollState.isScrolling
             )
         }
         .overlay(alignment: .top) {
             if horizontalSizeClass == .compact {
-                let buttonOpacity = max(0, 1 - min(timelineScrollOffset / 28, 1))
-
-                VStack {
-                    Spacer()
-
-                    HStack {
-                        Spacer()
-                        TimelineFullScreenMapButton(isFullScreen: $isShowingFullScreenMap)
-                            .padding(10)
-                            .opacity(buttonOpacity)
-                            .allowsHitTesting(buttonOpacity > 0.01)
-                            .accessibilityHidden(buttonOpacity <= 0.01)
-                    }
-                }
-                .frame(height: DayMapStrip.collapsedMapHeight)
-                .animation(.easeOut(duration: 0.16), value: buttonOpacity <= 0.01)
+                TimelineScrollMapButtonOverlay(
+                    scrollState: timelineScrollState,
+                    isFullScreen: $isShowingFullScreenMap
+                )
             }
         }
     }
@@ -558,7 +595,8 @@ struct DayTimelinePageContent: View {
                 dayTimeline: dayTimeline,
                 isActive: isActive,
                 selection: $mapSelection,
-                fillsAvailableSpace: true
+                fillsAvailableSpace: true,
+                isTimelineScrollActive: timelineScrollState.isScrolling
             )
         } controlPane: {
             ScrollView {
@@ -582,6 +620,9 @@ struct DayTimelinePageContent: View {
                     daySummaryPanel
                 }
                 .safeAreaPadding(.bottom, 12)
+            }
+            .onScrollPhaseChange { _, phase in
+                timelineScrollState.isScrolling = phase.isScrolling
             }
             .scrollIndicators(.hidden)
             .scrollEdgeEffectStyle(.soft, for: .top)
@@ -774,7 +815,7 @@ struct DayTimelinePageContent: View {
         switch row.entry {
         case .place(let place):
             NavigationLink {
-                PlaceMapDetailView(place: place)
+                TimelinePlaceDetailByIDView(id: place.id)
             } label: {
                 detailChevron
             }
@@ -782,7 +823,7 @@ struct DayTimelinePageContent: View {
 
         case .move(let move):
             NavigationLink {
-                MoveMapDetailView(segment: move)
+                TimelineMoveDetailByIDView(id: move.id)
             } label: {
                 detailChevron
             }
@@ -807,7 +848,7 @@ struct DayTimelinePageContent: View {
         switch row.entry {
         case .place(let place):
             NavigationLink {
-                PlaceMapDetailView(place: place)
+                TimelinePlaceDetailByIDView(id: place.id)
             } label: {
                 StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
             }
@@ -815,7 +856,7 @@ struct DayTimelinePageContent: View {
 
         case .move(let segment):
             NavigationLink {
-                MoveMapDetailView(segment: segment)
+                TimelineMoveDetailByIDView(id: segment.id)
             } label: {
                 StorylineRow(presentation: row.presentation, isFirst: isFirst, isLast: isLast)
             }
@@ -837,7 +878,7 @@ struct DayTimelinePageContent: View {
         return Self.sampleLookupKey(for: latestSample, sampleCount: presentationCache.sampleCount)
     }
 
-    private func provisionalSampleTitle(for sample: LocationSample) -> String? {
+    private func provisionalSampleTitle(for sample: TimelineSampleSnapshot) -> String? {
         let key = Self.sampleLookupKey(for: sample, sampleCount: presentationCache.sampleCount)
         guard provisionalSampleResolvedKey == key else { return nil }
         return provisionalSampleResolvedTitle
@@ -864,7 +905,7 @@ struct DayTimelinePageContent: View {
         provisionalSampleResolvedTitle = resolved?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func sampleLookupKey(for sample: LocationSample, sampleCount: Int) -> String {
+    private static func sampleLookupKey(for sample: TimelineSampleSnapshot, sampleCount: Int) -> String {
         let timestamp = Int(sample.timestamp.timeIntervalSince1970.rounded())
         return "\(sample.dedupeKey)|\(timestamp)|\(sampleCount)"
     }
@@ -872,15 +913,19 @@ struct DayTimelinePageContent: View {
     private func delete(entry: TimelineEntry, mergeAdjacentRoutes: Bool = false) {
         do {
             switch entry {
-            case .place(let place):
+            case .place(let placeSnapshot):
+                guard let place = resolvePlace(placeSnapshot.id) else { return }
                 try TimelineDeletion.delete(
                     place: place,
                     mergeAdjacentRoutes: mergeAdjacentRoutes,
                     in: modelContext,
                     undoManager: undoController.manager
                 )
-            case .move(let move): try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoController.manager)
-            case .sample(let sample, _, _), .rawFix(let sample):
+            case .move(let moveSnapshot):
+                guard let move = resolveMove(moveSnapshot.id) else { return }
+                try TimelineDeletion.delete(move: move, in: modelContext, undoManager: undoController.manager)
+            case .sample(let sampleSnapshot, _, _), .rawFix(let sampleSnapshot):
+                guard let sample = resolveSample(dedupeKey: sampleSnapshot.dedupeKey, timestamp: sampleSnapshot.timestamp) else { return }
                 try TimelineDeletion.delete(sample: sample, in: modelContext, undoManager: undoController.manager)
             case .liveRoute, .start: return
             }
@@ -889,6 +934,126 @@ struct DayTimelinePageContent: View {
             deletionErrorMessage = error.localizedDescription
             isShowingDeletionError = true
         }
+    }
+
+    private func resolvePlace(_ id: UUID) -> VisitPlace? {
+        var descriptor = FetchDescriptor<VisitPlace>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func resolveMove(_ id: UUID) -> MoveSegment? {
+        var descriptor = FetchDescriptor<MoveSegment>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func resolveSample(dedupeKey: String, timestamp: Date) -> LocationSample? {
+        var descriptor = FetchDescriptor<LocationSample>(predicate: #Predicate {
+            $0.dedupeKey == dedupeKey && $0.timestamp == timestamp
+        })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+}
+
+private struct TimelinePlaceDetailByIDView: View {
+    @Environment(\.modelContext) private var modelContext
+    let id: UUID
+
+    var body: some View {
+        if let place = resolve() {
+            PlaceMapDetailView(place: place)
+        } else {
+            ContentUnavailableView("Visit Unavailable", systemImage: "mappin.slash")
+        }
+    }
+
+    private func resolve() -> VisitPlace? {
+        var descriptor = FetchDescriptor<VisitPlace>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+}
+
+private struct TimelineMoveDetailByIDView: View {
+    @Environment(\.modelContext) private var modelContext
+    let id: UUID
+
+    var body: some View {
+        if let move = resolve() {
+            MoveMapDetailView(segment: move)
+        } else {
+            ContentUnavailableView("Activity Unavailable", systemImage: "figure.walk.motion")
+        }
+    }
+
+    private func resolve() -> MoveSegment? {
+        var descriptor = FetchDescriptor<MoveSegment>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+}
+
+@Observable
+@MainActor
+private final class TimelineScrollOffsetState {
+    var offset: CGFloat = 0
+    var isScrolling = false
+}
+
+/// Observes only the scroll value used by the floating control. The parent page
+/// and its timeline presentation never read `offset`, so scroll ticks are scoped
+/// to this lightweight overlay.
+private struct TimelineScrollMapButtonOverlay: View {
+    let scrollState: TimelineScrollOffsetState
+    @Binding var isFullScreen: Bool
+
+    private var buttonOpacity: CGFloat {
+        TimelineScrollOverlayPresentation.buttonOpacity(for: scrollState.offset)
+    }
+
+    var body: some View {
+        VStack {
+            Spacer()
+
+            HStack {
+                Spacer()
+                TimelineFullScreenMapButton(isFullScreen: $isFullScreen)
+                    .padding(10)
+                    .opacity(buttonOpacity)
+                    .allowsHitTesting(buttonOpacity > 0.01)
+                    .accessibilityHidden(buttonOpacity <= 0.01)
+            }
+        }
+        .frame(height: DayMapStrip.collapsedMapHeight)
+        .animation(.easeOut(duration: 0.16), value: buttonOpacity <= 0.01)
+    }
+}
+
+enum TimelineScrollOverlayPresentation {
+    static func buttonOpacity(for scrollOffset: CGFloat) -> CGFloat {
+        max(0, 1 - min(max(0, scrollOffset) / 28, 1))
+    }
+}
+
+enum TimelineMapRawFixPresentation {
+    static func fixes(from samples: [LocationSample]) -> [LocationSample] {
+        RawLocationFixPresentation.orderedTimelineFixes(
+            from: samples,
+            limit: TimelinePresentationLimits.maxTimelineRawFixes
+        )
+    }
+
+    static func fixes(from samples: [TimelineSampleSnapshot]) -> [TimelineSampleSnapshot] {
+        Array(
+            samples.filter { $0.source.isOSLocationFix && CLLocationCoordinate2DIsValid($0.coordinate) }
+                .sorted {
+                    if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+                    return $0.dedupeKey < $1.dedupeKey
+                }
+                .suffix(TimelinePresentationLimits.maxTimelineRawFixes)
+        )
     }
 }
 
@@ -924,7 +1089,8 @@ private struct TimelineEntryContextMenu: ViewModifier {
     func body(content: Content) -> some View {
         content.contextMenu {
             switch entry {
-            case .move(let move):
+            case .move(let moveSnapshot):
+                if let move = resolveMove(moveSnapshot.id) {
                 exportActions(for: move)
 
                 Divider()
@@ -983,11 +1149,14 @@ private struct TimelineEntryContextMenu: ViewModifier {
 
                 Divider()
                 Button("Delete Activity", systemImage: "trash", role: .destructive, action: requestDelete)
+                }
 
-            case .place(let place):
-                exportActions(for: place)
-                Divider()
-                Button("Delete Place", systemImage: "trash", role: .destructive, action: requestDelete)
+            case .place(let placeSnapshot):
+                if let place = resolvePlace(placeSnapshot.id) {
+                    exportActions(for: place)
+                    Divider()
+                    Button("Delete Place", systemImage: "trash", role: .destructive, action: requestDelete)
+                }
 
             case .sample, .rawFix:
                 Button("Delete Sample", systemImage: "trash", role: .destructive, action: requestDelete)
@@ -1092,6 +1261,18 @@ private struct TimelineEntryContextMenu: ViewModifier {
 
     private func routeCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         move.manualRouteCoordinates ?? MoveRouteGeometry.rawCoordinates(for: move)
+    }
+
+    private func resolveMove(_ id: UUID) -> MoveSegment? {
+        var descriptor = FetchDescriptor<MoveSegment>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func resolvePlace(_ id: UUID) -> VisitPlace? {
+        var descriptor = FetchDescriptor<VisitPlace>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 }
 
@@ -1266,6 +1447,11 @@ enum TimelinePresentationLimits {
         let omittedCount: Int
     }
 
+    struct MoveSelectionValue {
+        let moves: [TimelineMoveSnapshot]
+        let omittedCount: Int
+    }
+
     static func selection(
         from moves: [MoveSegment],
         maxImportedMoves: Int,
@@ -1322,12 +1508,221 @@ enum TimelinePresentationLimits {
     }
 }
 
-struct TimelineMoveSourceFlags: OptionSet, Equatable {
+private enum TimelineValuePresentationLimits {
+    static func selection(
+        from moves: [TimelineMoveSnapshot],
+        maxImportedMoves: Int,
+        maxTotalMoves: Int,
+        importedMoveIDs: Set<UUID>
+    ) -> TimelinePresentationLimits.MoveSelectionValue {
+        let importedMoves = moves.filter { importedMoveIDs.contains($0.id) }
+        let retainedImportedIDs = Set(
+            importedMoves.sorted { $0.timelineStartDate > $1.timelineStartDate }
+                .prefix(max(maxImportedMoves, 0)).map(\.id)
+        )
+        var retained = moves.filter { !importedMoveIDs.contains($0.id) || retainedImportedIDs.contains($0.id) }
+        if retained.count > maxTotalMoves {
+            let retainedIDs = Set(
+                retained.sorted { $0.timelineStartDate > $1.timelineStartDate }
+                    .prefix(max(maxTotalMoves, 0)).map(\.id)
+            )
+            retained = retained.filter { retainedIDs.contains($0.id) }
+        }
+        return TimelinePresentationLimits.MoveSelectionValue(
+            moves: retained,
+            omittedCount: max(0, moves.count - retained.count)
+        )
+    }
+
+    static func routeSamples(from samples: [TimelineSampleSnapshot], limit: Int = TimelinePresentationLimits.maxRouteSamplesPerMove) -> [TimelineSampleSnapshot] {
+        guard limit > 1, samples.count > limit else { return samples }
+        let ordered = samples.sorted { $0.timestamp < $1.timestamp }
+        let step = Double(ordered.count - 1) / Double(limit - 1)
+        return (0..<limit).map { ordered[Int((Double($0) * step).rounded())] }
+    }
+}
+
+struct TimelineMoveSourceFlags: OptionSet, Equatable, Sendable {
     let rawValue: UInt8
 
     static let imported = TimelineMoveSourceFlags(rawValue: 1 << 0)
     static let routeTracking = TimelineMoveSourceFlags(rawValue: 1 << 1)
     static let healthWorkout = TimelineMoveSourceFlags(rawValue: 1 << 2)
+}
+
+private struct DayPresentationValueSource {
+    let visiblePlaces: [TimelinePlaceSnapshot]
+    let visibleMoves: [TimelineMoveSnapshot]
+    let visibleSamples: [TimelineSampleSnapshot]
+    let sourcesByMoveID: [UUID: TimelineMoveSourceFlags]
+    let importedMoveIDs: Set<UUID>
+    let hasImportedRouteData: Bool
+    let totalMoveCount: Int
+    let totalSampleCount: Int
+    let carriedOverPlace: TimelinePlaceSnapshot?
+
+    init(_ snapshot: TimelineDaySnapshot) {
+        visiblePlaces = snapshot.places
+        visibleMoves = snapshot.moves
+        visibleSamples = snapshot.samples
+        sourcesByMoveID = snapshot.sourcesByMoveID.mapValues { TimelineMoveSourceFlags(rawValue: $0) }
+        importedMoveIDs = snapshot.importedMoveIDs
+        hasImportedRouteData = snapshot.hasImportedRouteData
+        totalMoveCount = snapshot.totalMoveCount
+        totalSampleCount = snapshot.totalSampleCount
+        carriedOverPlace = snapshot.carriedOverPlace
+    }
+}
+
+@MainActor
+enum TimelinePresentationEpochLedger {
+    struct Token: Equatable, Sendable {
+        fileprivate let global: UInt64
+        fileprivate let day: UInt64
+    }
+
+    private static var global: UInt64 = 0
+    private static var days: [String: UInt64] = [:]
+
+    static func token(for dayKey: String) -> Token {
+        Token(global: global, day: days[dayKey, default: 0])
+    }
+
+    static func isCurrent(_ token: Token, for dayKey: String) -> Bool {
+        token == self.token(for: dayKey)
+    }
+
+    static func invalidate(dayKey: String) {
+        days[dayKey, default: 0] &+= 1
+    }
+
+    static func invalidateAll() {
+        global &+= 1
+        days.removeAll(keepingCapacity: true)
+    }
+}
+
+@MainActor
+private enum DayPresentationValueSourceCache {
+    private struct InFlightSnapshot {
+        let id: UUID
+        let task: Task<TimelineDaySnapshot, Error>
+    }
+
+    private static var entries: [String: TimelineDaySnapshot] = [:]
+    private static var inFlight: [String: InFlightSnapshot] = [:]
+    private static var usageOrder: [String] = []
+    private static let maximumEntryCount = 2
+
+    static func snapshot(
+        modelContainer: ModelContainer,
+        dayStart: Date,
+        dayKey: String,
+        generation: Int,
+        loadAll: Bool = false
+    ) async throws -> TimelineDaySnapshot {
+        let key = "\(dayKey)|\(generation)|\(loadAll ? "all" : "bounded")"
+        let requestEpoch = TimelinePresentationEpochLedger.token(for: dayKey)
+        if let cached = entries[key] {
+            touch(key)
+            return cached
+        }
+        let flight: InFlightSnapshot
+        if let existing = inFlight[key] {
+            flight = existing
+        } else {
+            flight = InFlightSnapshot(
+                id: UUID(),
+                task: Task {
+                    let worker = TimelineDayPresentationWorker(modelContainer: modelContainer)
+                    return try await worker.snapshot(dayStart: dayStart, loadAll: loadAll)
+                }
+            )
+            inFlight[key] = flight
+        }
+        do {
+            let result = try await flight.task.value
+            guard TimelinePresentationEpochLedger.isCurrent(requestEpoch, for: dayKey),
+                  inFlight[key]?.id == flight.id else {
+                throw CancellationError()
+            }
+            inFlight.removeValue(forKey: key)
+            entries[key] = result
+            touch(key)
+            while usageOrder.count > maximumEntryCount {
+                entries.removeValue(forKey: usageOrder.removeFirst())
+            }
+            return result
+        } catch {
+            if inFlight[key]?.id == flight.id {
+                inFlight.removeValue(forKey: key)
+            }
+            throw error
+        }
+    }
+
+    static func remove(dayKey: String) {
+        TimelinePresentationEpochLedger.invalidate(dayKey: dayKey)
+        entries = entries.filter { !$0.key.hasPrefix("\(dayKey)|") }
+        let staleFlightKeys = inFlight.keys.filter { $0.hasPrefix("\(dayKey)|") }
+        for key in staleFlightKeys {
+            inFlight.removeValue(forKey: key)?.task.cancel()
+        }
+        usageOrder.removeAll { $0.hasPrefix("\(dayKey)|") }
+    }
+
+    static func removeAll() {
+        TimelinePresentationEpochLedger.invalidateAll()
+        entries.removeAll(keepingCapacity: true)
+        inFlight.values.forEach { $0.task.cancel() }
+        inFlight.removeAll(keepingCapacity: true)
+        usageOrder.removeAll(keepingCapacity: true)
+    }
+
+    private static func touch(_ key: String) {
+        usageOrder.removeAll { $0 == key }
+        usageOrder.append(key)
+    }
+}
+
+@MainActor
+enum TimelineNotificationCoalescer {
+    static func events(named name: Notification.Name) -> AsyncStream<Notification> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let cancellable = NotificationCenter.default.publisher(for: name)
+                .collect(.byTime(RunLoop.main, .milliseconds(250)))
+                .sink { notifications in
+                    if let notification = merged(notifications, named: name) {
+                        continuation.yield(notification)
+                    }
+                }
+            continuation.onTermination = { _ in cancellable.cancel() }
+        }
+    }
+
+    static func merged(_ notifications: [Notification], named name: Notification.Name) -> Notification? {
+        guard let latest = notifications.last else { return nil }
+        var userInfo = latest.userInfo ?? [:]
+        let dayKeys = Set(notifications.compactMap {
+            $0.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
+        }.flatMap { [$0] } + notifications.flatMap {
+            $0.userInfo?["dayKeys"] as? [String] ?? []
+        })
+        if !dayKeys.isEmpty { userInfo["dayKeys"] = dayKeys.sorted() }
+        let objectIDs = Set(notifications.compactMap { $0.object as? UUID })
+        if !objectIDs.isEmpty { userInfo["objectIDs"] = objectIDs.map(\.uuidString).sorted() }
+        return Notification(name: name, object: latest.object, userInfo: userInfo)
+    }
+
+    static func affectedDayKeys(in notification: Notification) -> Set<String>? {
+        if let dayKeys = notification.userInfo?["dayKeys"] as? [String], !dayKeys.isEmpty {
+            return Set(dayKeys)
+        }
+        if let dayKey = notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String {
+            return [dayKey]
+        }
+        return nil
+    }
 }
 
 private struct DayPresentationSource {
@@ -1596,7 +1991,7 @@ private struct DayTimelinePresentationCache {
     let timelineRows: [TimelineEntryRow]
     let transportSummaryMetrics: [DayTransportSummaryMetric]
     let elevationProfile: DayElevationProfile?
-    let latestSample: LocationSample?
+    let latestSample: TimelineSampleSnapshot?
     let sampleCount: Int
     let omittedMoveCount: Int
     let hasImportedRouteData: Bool
@@ -1885,6 +2280,15 @@ private struct RawLocationFixMarker: Identifiable {
         source = sample.source
     }
 
+    init(_ sample: TimelineSampleSnapshot) {
+        id = sample.dedupeKey
+        moveID = sample.moveID
+        coordinate = sample.coordinate
+        timestamp = sample.timestamp
+        horizontalAccuracy = sample.horizontalAccuracy
+        source = sample.source
+    }
+
     var description: String {
         let accuracy = horizontalAccuracy.isFinite && horizontalAccuracy >= 0
             ? "±\(Int(horizontalAccuracy.rounded())) m"
@@ -2032,6 +2436,7 @@ enum TimelinePresentationCacheInvalidator {
             invalidateAll()
             return
         }
+        DayPresentationValueSourceCache.remove(dayKey: dayKey)
         DayPresentationSourceCache.remove(dayKey: dayKey)
         DayTimelinePresentationCacheStore.remove(dayKey: dayKey)
         DayMapPresentationCacheStore.remove(dayKey: dayKey)
@@ -2040,6 +2445,7 @@ enum TimelinePresentationCacheInvalidator {
     }
 
     static func invalidateAll() {
+        DayPresentationValueSourceCache.removeAll()
         DayPresentationSourceCache.removeAll()
         DayTimelinePresentationCacheStore.removeAll()
         DayMapPresentationCacheStore.removeAll()
@@ -2084,6 +2490,7 @@ private struct TimelineFullScreenMapButton: View {
 
 struct DayMapStrip: View {
     @EnvironmentObject private var captureManager: MovesLocationCaptureManager
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
     @AppStorage(TrackingRouteDisplayMode.storageKey) private var routeDisplayMode: TrackingRouteDisplayMode = .reconstructed
@@ -2092,6 +2499,7 @@ struct DayMapStrip: View {
     @Binding var selection: TimelineMapSelection?
     let fillsAvailableSpace: Bool
     let usesHeroStyle: Bool
+    var isTimelineScrollActive = false
     private let externalFullScreenMapState: Binding<Bool>?
     static let collapsedMapHeight: CGFloat = 180
     private static let collapsedMapCornerRadius: CGFloat = 14
@@ -2141,13 +2549,15 @@ struct DayMapStrip: View {
         selection: Binding<TimelineMapSelection?> = .constant(nil),
         fillsAvailableSpace: Bool = false,
         usesHeroStyle: Bool = false,
-        fullScreenMapState: Binding<Bool>? = nil
+        fullScreenMapState: Binding<Bool>? = nil,
+        isTimelineScrollActive: Bool = false
     ) {
         self.dayTimeline = dayTimeline
         self.isActive = isActive
         _selection = selection
         self.fillsAvailableSpace = fillsAvailableSpace
         self.usesHeroStyle = usesHeroStyle
+        self.isTimelineScrollActive = isTimelineScrollActive
         self.externalFullScreenMapState = fullScreenMapState
         let initialPresentation: DayMapPresentationCache
         let rawMode = UserDefaults.standard.string(forKey: TrackingRouteDisplayMode.storageKey) == TrackingRouteDisplayMode.rawOSLocationFixes.rawValue
@@ -2219,33 +2629,52 @@ struct DayMapStrip: View {
             }
             .onChange(of: routeDisplayMode) { _, _ in
                 presentationGeneration &+= 1
+                DayPresentationValueSourceCache.removeAll()
                 DayPresentationSourceCache.removeAll()
             }
             .task {
-                for await _ in NotificationCenter.default.notifications(
-                    named: .movesLocationSamplesDidChange
-                ) {
+                for await notification in TimelineNotificationCoalescer.events(named: .movesLocationSamplesDidChange) {
                     guard !Task.isCancelled else { return }
+                    if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                        guard affectedDayKeys.contains(dayTimeline.dayKey) else { continue }
+                        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayTimeline.dayKey)
+                    } else {
+                        TimelinePresentationCacheInvalidator.invalidateAll()
+                    }
                     presentationGeneration &+= 1
                 }
             }
             .task {
-                for await _ in NotificationCenter.default.notifications(
-                    named: .movesImportedRouteDataDidChange
-                ) {
+                for await _ in TimelineNotificationCoalescer.events(named: .movesImportedRouteDataDidChange) {
                     guard !Task.isCancelled else { return }
+                    DayPresentationValueSourceCache.remove(dayKey: dayTimeline.dayKey)
                     presentationGeneration &+= 1
                 }
             }
             .task {
-                for await notification in NotificationCenter.default.notifications(
+                for await notification in TimelineNotificationCoalescer.events(named: .movesVisitedPlaceDidChange) {
+                    guard !Task.isCancelled else { return }
+                    if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                        guard affectedDayKeys.contains(dayTimeline.dayKey) else { continue }
+                        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayTimeline.dayKey)
+                    } else {
+                        TimelinePresentationCacheInvalidator.invalidateAll()
+                    }
+                    presentationGeneration &+= 1
+                }
+            }
+            .task {
+                for await notification in TimelineNotificationCoalescer.events(
                     named: .movesMoveDataDidChange
                 ) {
                     guard !Task.isCancelled else { return }
+                    if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                        guard affectedDayKeys.contains(dayTimeline.dayKey) else { continue }
+                        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayTimeline.dayKey)
+                    } else {
+                        TimelinePresentationCacheInvalidator.invalidateAll()
+                    }
                     presentationGeneration &+= 1
-                    TimelinePresentationCacheInvalidator.invalidate(
-                        dayKey: notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
-                    )
                 }
             }
             .task(id: "presentation|\(presentationRefreshKey)") {
@@ -2258,17 +2687,25 @@ struct DayMapStrip: View {
                     return
                 }
                 let state = MovesStartupInstrumentation.signposter.beginInterval("selectedDayMapPresentationFetchAndBuild")
-                let source = DayPresentationSourceCache.source(
-                    for: dayTimeline,
-                    generation: presentationGeneration,
-                    loadAll: rawMode
-                )
-                let cache = Self.makePresentationCache(
-                    for: dayTimeline,
-                    source: source,
-                    generation: presentationGeneration,
-                    mode: routeDisplayMode
-                )
+                let cache: DayMapPresentationCache
+                do {
+                    let snapshot = try await DayPresentationValueSourceCache.snapshot(
+                        modelContainer: modelContext.container,
+                        dayStart: dayTimeline.dayStart,
+                        dayKey: dayTimeline.dayKey,
+                        generation: presentationGeneration
+                    )
+                    guard !Task.isCancelled else { return }
+                    cache = Self.makePresentationCache(
+                        for: dayTimeline,
+                        source: DayPresentationValueSource(snapshot),
+                        generation: presentationGeneration,
+                        mode: routeDisplayMode
+                    )
+                } catch {
+                    MovesStartupInstrumentation.signposter.endInterval("selectedDayMapPresentationFetchAndBuild", state)
+                    return
+                }
                 DayMapPresentationCacheStore.store(
                     cache,
                     for: dayTimeline.dayKey,
@@ -2280,13 +2717,22 @@ struct DayMapStrip: View {
             }
             .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)|\(routeDisplayMode.rawValue)") {
                 guard isActive, RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode), !Task.isCancelled else { return }
-                let source = DayPresentationSourceCache.source(
-                    for: dayTimeline,
+                guard let snapshot = try? await DayPresentationValueSourceCache.snapshot(
+                    modelContainer: modelContext.container,
+                    dayStart: dayTimeline.dayStart,
+                    dayKey: dayTimeline.dayKey,
                     generation: presentationGeneration
-                )
-                captureManager.prepareRouteMatches(
-                    for: Self.displayedMoves(from: source)
-                )
+                ), !Task.isCancelled else { return }
+                let requests = Self.displayedMoves(from: DayPresentationValueSource(snapshot)).compactMap { move -> InferredMoveRouteMatchRequest? in
+                    guard move.rawRouteCoordinates.count > 1 else { return nil }
+                    return InferredMoveRouteMatchRequest(
+                        moveID: move.id,
+                        cacheSignature: move.routeCacheSignature,
+                        transportMode: move.transportMode,
+                        fallback: move.rawRouteCoordinates
+                    )
+                }
+                captureManager.prepareRouteMatches(for: requests)
             }
     }
 
@@ -2364,7 +2810,7 @@ struct DayMapStrip: View {
                         .allowsHitTesting(false)
                 }
             }
-            .task(id: collapsedSnapshotRefreshKey(for: size)) {
+            .task(id: "\(collapsedSnapshotRefreshKey(for: size))|scrolling:\(isTimelineScrollActive)") {
                 await refreshCollapsedSnapshot(size: size)
             }
         }
@@ -2542,10 +2988,11 @@ struct DayMapStrip: View {
 
     @MainActor
     private func refreshCollapsedSnapshot(size: CGSize) async {
-        guard !isShowingFullScreenMap, size.width > 1, size.height > 1 else { return }
+        guard !isShowingFullScreenMap, !isTimelineScrollActive, size.width > 1, size.height > 1 else { return }
         guard presentationCache.routeRefreshKey != "initial" else { return }
         let cacheKey = collapsedSnapshotRefreshKey(for: size)
         if let cachedImage = await DayMapSnapshotCache.image(for: cacheKey) {
+            MovesStartupInstrumentation.event("collapsedMapSnapshotCacheHit")
             collapsedSnapshotImage = cachedImage
             collapsedSnapshotKey = cacheKey
             return
@@ -2561,11 +3008,16 @@ struct DayMapStrip: View {
         guard !Task.isCancelled else { return }
 
         if let cachedImage = await DayMapSnapshotCache.image(for: cacheKey) {
+            MovesStartupInstrumentation.event("collapsedMapSnapshotCacheHit")
             collapsedSnapshotImage = cachedImage
             collapsedSnapshotKey = cacheKey
             return
         }
 
+        let snapshotState = MovesStartupInstrumentation.signposter.beginInterval("collapsedMapSnapshotGeneration")
+        defer {
+            MovesStartupInstrumentation.signposter.endInterval("collapsedMapSnapshotGeneration", snapshotState)
+        }
         do {
             let image = try await Self.makeCollapsedSnapshot(
                 region: mapRegion,
@@ -2584,6 +3036,7 @@ struct DayMapStrip: View {
             DayMapSnapshotCache.store(image, for: cacheKey)
             collapsedSnapshotImage = image
             collapsedSnapshotKey = cacheKey
+            MovesStartupInstrumentation.event("collapsedMapSnapshotGenerated")
         } catch {
             guard !Task.isCancelled else { return }
             collapsedSnapshotImage = nil
@@ -2896,23 +3349,17 @@ struct DayMapStrip: View {
     }
 
     private static func renderedRoutes(
-        source: DayPresentationSource,
-        displayedMoves: [MoveSegment]
+        source: DayPresentationValueSource,
+        displayedMoves: [TimelineMoveSnapshot]
     ) -> [RenderedRoute] {
         displayedMoves
             .sorted(by: { $0.timelineStartDate < $1.timelineStartDate })
             .map { move in
                 let sources = source.sourcesByMoveID[move.id] ?? []
-                let fallback = MoveRouteGeometry.rawCoordinates(
-                    for: move,
-                    samples: source.samplesByMoveID[move.id] ?? [],
-                    usesHealthWorkoutRoute: sources.contains(.healthWorkout)
-                )
-                let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
-
                 return RenderedRoute(
                     id: move.id.uuidString,
-                    coordinates: move.manualRouteCoordinates ?? move.cachedRouteCoordinates(for: signature) ?? fallback,
+                    coordinates: (move.manualRouteCoordinates ?? move.cachedRouteCoordinates ?? move.rawRouteCoordinates)
+                        .map(\.coordinate),
                     usesHighAccuracyRouteTracking: sources.contains(.routeTracking),
                     usesHealthWorkoutRoute: sources.contains(.healthWorkout),
                     transportMode: move.transportMode
@@ -2936,7 +3383,7 @@ struct DayMapStrip: View {
 
     private static func makePresentationCache(
         for dayTimeline: DayTimeline,
-        source: DayPresentationSource,
+        source: DayPresentationValueSource,
         generation: Int,
         mode: TrackingRouteDisplayMode
     ) -> DayMapPresentationCache {
@@ -2966,7 +3413,7 @@ struct DayMapStrip: View {
         let routes = RawLocationFixPresentation.drawsConnectingGeometry(in: mode)
             ? renderedRoutes(source: source, displayedMoves: displayedMoves)
             : []
-        let rawLocationFixes = RawLocationFixPresentation.orderedOSFixes(from: source.visibleSamples)
+        let rawLocationFixes = TimelineMapRawFixPresentation.fixes(from: source.visibleSamples)
             .map(RawLocationFixMarker.init)
 
         return DayMapPresentationCache(
@@ -2980,8 +3427,8 @@ struct DayMapStrip: View {
         )
     }
 
-    private static func displayedMoves(from source: DayPresentationSource) -> [MoveSegment] {
-        TimelinePresentationLimits.selection(
+    private static func displayedMoves(from source: DayPresentationValueSource) -> [TimelineMoveSnapshot] {
+        TimelineValuePresentationLimits.selection(
             from: source.visibleMoves,
             maxImportedMoves: TimelinePresentationLimits.maxMapImportedMoves,
             maxTotalMoves: TimelinePresentationLimits.maxMapMoves,
@@ -2991,13 +3438,13 @@ struct DayMapStrip: View {
 
     private static func mapPlaces(
         for dayTimeline: DayTimeline,
-        source: DayPresentationSource,
-        displayedMoves: [MoveSegment]
-    ) -> [VisitPlace] {
+        source: DayPresentationValueSource,
+        displayedMoves: [TimelineMoveSnapshot]
+    ) -> [TimelinePlaceSnapshot] {
         let routePlaces = displayedMoves.flatMap { move in
             [move.startPlace, move.endPlace].compactMap { $0 }
         }
-        var placesByID: [UUID: VisitPlace] = [:]
+        var placesByID: [UUID: TimelinePlaceSnapshot] = [:]
         let dayPlaces = source.visiblePlaces.isEmpty
             ? [source.carriedOverPlace].compactMap { $0 }
             : source.visiblePlaces
@@ -3324,12 +3771,12 @@ struct TimelineEntryRow: Identifiable {
 }
 
 enum TimelineEntry: Identifiable {
-    case place(VisitPlace)
-    case move(MoveSegment)
+    case place(TimelinePlaceSnapshot)
+    case move(TimelineMoveSnapshot)
     case liveRoute(LiveRouteTrackingSnapshot)
-    case start(place: VisitPlace, timestamp: Date)
-    case sample(location: LocationSample, sampleCount: Int, resolvedName: String?)
-    case rawFix(LocationSample)
+    case start(place: TimelinePlaceSnapshot, timestamp: Date)
+    case sample(location: TimelineSampleSnapshot, sampleCount: Int, resolvedName: String?)
+    case rawFix(TimelineSampleSnapshot)
 
     var isDeletable: Bool {
         switch self {
@@ -3422,7 +3869,8 @@ enum TimelineEntry: Identifiable {
         case .place:
             return MovesPalette.place
         case .move(let segment):
-            return segment.routeDisplayTint
+            if segment.usesHealthWorkoutRoute { return MovesPalette.healthRoute }
+            return segment.usesRouteTracking ? MovesPalette.routeTracking : MovesPalette.move
         case .liveRoute:
             return MovesPalette.routeTracking
         case .start:
@@ -3540,7 +3988,7 @@ enum TimelineEntry: Identifiable {
         }
     }
 
-    private static func averageSpeedText(for segment: MoveSegment) -> String? {
+    private static func averageSpeedText(for segment: TimelineMoveSnapshot) -> String? {
         guard DurationFormatter.showsNonzeroMinutes(for: segment.timelineDuration) else {
             return nil
         }
@@ -3773,23 +4221,39 @@ private enum TimelineScreenshotPDFRenderer {
 
     private static func makeSnapshot(for dayTimeline: DayTimeline) -> TimelineScreenshotPDFSnapshot {
         let source = DayPresentationSource(dayTimeline: dayTimeline, loadAll: true)
+        let placeSnapshots = Dictionary(uniqueKeysWithValues: source.visiblePlaces.map {
+            ($0.id, TimelinePlaceSnapshot($0))
+        })
+        let moveSnapshots = source.visibleMoves.map { move in
+            let flags = source.sourcesByMoveID[move.id] ?? []
+            return TimelineMoveSnapshot(
+                move,
+                startPlace: move.startPlace.flatMap { placeSnapshots[$0.id] },
+                endPlace: move.endPlace.flatMap { placeSnapshots[$0.id] },
+                samples: source.samplesByMoveID[move.id] ?? [],
+                usesImportedRoute: flags.contains(.imported),
+                usesHealthWorkoutRoute: flags.contains(.healthWorkout),
+                usesRouteTracking: flags.contains(.routeTracking)
+            )
+        }
         let incomingPlaceIDs = Set(source.visibleMoves.compactMap { $0.endPlace?.id })
         let outgoingPlaceIDs = Set(source.visibleMoves.compactMap { $0.startPlace?.id })
         let places = source.visiblePlaces
             .filter { place in
-                hasExplicitUserLabel(place)
+                !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
                     || !(place.departureDate != nil
                         && incomingPlaceIDs.contains(place.id)
                         && outgoingPlaceIDs.contains(place.id)
                         && place.departureDate!.timeIntervalSince(place.arrivalDate) < 5 * 60)
             }
+            .compactMap { placeSnapshots[$0.id] }
             .map(TimelineEntry.place)
-        let moves = source.visibleMoves.map(TimelineEntry.move)
+        let moves = moveSnapshots.map(TimelineEntry.move)
         var entries = (places + moves).sorted { $0.startDate < $1.startDate }
 
-        if let firstMove = source.visibleMoves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
+        if let firstMove = moveSnapshots.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
            let startPlace = firstMove.startPlace,
-           !source.visiblePlaces.contains(where: { $0.id == startPlace.id }) {
+           !placeSnapshots.keys.contains(startPlace.id) {
             let startEntry = TimelineEntry.start(
                 place: startPlace,
                 timestamp: firstMove.timelineStartDate.addingTimeInterval(-1)
@@ -3804,13 +4268,13 @@ private enum TimelineScreenshotPDFRenderer {
         if entries.isEmpty, let latestSample = source.visibleSamples.max(by: { $0.timestamp < $1.timestamp }) {
             entries.append(
                 .sample(
-                    location: latestSample,
+                    location: TimelineSampleSnapshot(latestSample),
                     sampleCount: source.totalSampleCount,
                     resolvedName: nil
                 )
             )
         } else if entries.isEmpty, let carriedOverPlace = source.carriedOverPlace {
-            entries.append(.start(place: carriedOverPlace, timestamp: dayTimeline.dayStart))
+            entries.append(.start(place: TimelinePlaceSnapshot(carriedOverPlace), timestamp: dayTimeline.dayStart))
         }
 
         let rows = entries.map { entry in
@@ -3833,8 +4297,5 @@ private enum TimelineScreenshotPDFRenderer {
         )
     }
 
-    private static func hasExplicitUserLabel(_ place: VisitPlace) -> Bool {
-        !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-    }
 }
 #endif

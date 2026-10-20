@@ -294,13 +294,32 @@ final class TimelineRowPresentationTests: XCTestCase {
         importedSample.moveSegment = importedMove
         importedMove.samples = [importedSample]
 
+        func moveSnapshot(
+            _ move: MoveSegment,
+            samples: [LocationSample] = [],
+            imported: Bool = false,
+            health: Bool = false,
+            tracked: Bool = false
+        ) -> TimelineMoveSnapshot {
+            TimelineMoveSnapshot(
+                move,
+                startPlace: move.startPlace.map(TimelinePlaceSnapshot.init),
+                endPlace: move.endPlace.map(TimelinePlaceSnapshot.init),
+                samples: samples,
+                usesImportedRoute: imported,
+                usesHealthWorkoutRoute: health,
+                usesRouteTracking: tracked
+            )
+        }
+
+        let startPlaceSnapshot = TimelinePlaceSnapshot(startPlace)
         let entries: [(TimelineEntry, TimelineMoveSourceFlags, TimelineTintKind)] = [
-            (.move(normalMove), [], .move),
-            (.move(routeMove), [.routeTracking], .routeTracking),
-            (.move(healthMove), [.routeTracking, .healthWorkout], .healthRoute),
-            (.move(importedMove), [.imported, .routeTracking], .routeTracking),
-            (.place(startPlace), [], .place),
-            (.start(place: startPlace, timestamp: start.addingTimeInterval(-1)), [], .start)
+            (.move(moveSnapshot(normalMove)), [], .move),
+            (.move(moveSnapshot(routeMove, samples: [routeSample], tracked: true)), [.routeTracking], .routeTracking),
+            (.move(moveSnapshot(healthMove, samples: [healthSample], health: true, tracked: true)), [.routeTracking, .healthWorkout], .healthRoute),
+            (.move(moveSnapshot(importedMove, samples: [importedSample], imported: true)), [.imported, .routeTracking], .routeTracking),
+            (.place(startPlaceSnapshot), [], .place),
+            (.start(place: startPlaceSnapshot, timestamp: start.addingTimeInterval(-1)), [], .start)
         ]
 
         for (entry, sources, tintKind) in entries {
@@ -329,7 +348,7 @@ final class TimelineRowPresentationTests: XCTestCase {
             dedupeKey: "provisional"
         )
         let sampleEntry = TimelineEntry.sample(
-            location: provisionalSample,
+            location: TimelineSampleSnapshot(provisionalSample),
             sampleCount: 3,
             resolvedName: "Current place"
         )
@@ -355,7 +374,7 @@ final class TimelineRowPresentationTests: XCTestCase {
             dedupeKey: "os-fix-example"
         )
 
-        let entry = TimelineEntry.rawFix(sample)
+        let entry = TimelineEntry.rawFix(TimelineSampleSnapshot(sample))
         let row = TimelineRowPresentation(entry: entry)
 
         XCTAssertEqual(row.titleText, "OS location fix")
@@ -365,6 +384,41 @@ final class TimelineRowPresentationTests: XCTestCase {
         XCTAssertEqual(row.iconTintKind, .routeTracking)
         XCTAssertEqual(entry.startDate, date)
         XCTAssertEqual(entry.mapSelection, .sample("os-fix-example"))
+    }
+}
+
+final class TimelineScrollOverlayPresentationTests: XCTestCase {
+    func testScrollOpacityIsClampedAndFadesAcrossMapThreshold() {
+        XCTAssertEqual(TimelineScrollOverlayPresentation.buttonOpacity(for: -20), 1)
+        XCTAssertEqual(TimelineScrollOverlayPresentation.buttonOpacity(for: 0), 1)
+        XCTAssertEqual(TimelineScrollOverlayPresentation.buttonOpacity(for: 14), 0.5, accuracy: 0.001)
+        XCTAssertEqual(TimelineScrollOverlayPresentation.buttonOpacity(for: 28), 0)
+        XCTAssertEqual(TimelineScrollOverlayPresentation.buttonOpacity(for: 100), 0)
+    }
+
+    func testMapRawFixPresentationUsesAStableVisibleLimit() {
+        let start = Date(timeIntervalSince1970: 1_710_000_000)
+        let samples = (0..<(TimelinePresentationLimits.maxTimelineRawFixes + 100)).map { index in
+            TimelineSampleSnapshot(LocationSample(
+                location: CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: 41 + Double(index) / 100_000, longitude: -85),
+                    altitude: 0,
+                    horizontalAccuracy: 5,
+                    verticalAccuracy: -1,
+                    course: -1,
+                    speed: 0,
+                    timestamp: start.addingTimeInterval(Double(index))
+                ),
+                source: .routeTracking,
+                dedupeKey: "fix-\(index)"
+            ))
+        }
+
+        let fixes = TimelineMapRawFixPresentation.fixes(from: samples)
+
+        XCTAssertEqual(fixes.count, TimelinePresentationLimits.maxTimelineRawFixes)
+        XCTAssertEqual(fixes.first?.dedupeKey, "fix-100")
+        XCTAssertEqual(fixes.last?.dedupeKey, "fix-\(TimelinePresentationLimits.maxTimelineRawFixes + 99)")
     }
 }
 
@@ -3295,5 +3349,121 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         guard indices.contains(index) else { return nil }
         return self[index]
+    }
+}
+
+@MainActor
+final class TimelinePresentationEpochTests: XCTestCase {
+    func testDayInvalidationMakesAnInFlightSnapshotEpochStale() {
+        let dayKey = "2026-10-20"
+        let staleToken = TimelinePresentationEpochLedger.token(for: dayKey)
+        let otherDayToken = TimelinePresentationEpochLedger.token(for: "2026-10-19")
+
+        TimelinePresentationEpochLedger.invalidate(dayKey: dayKey)
+
+        XCTAssertFalse(TimelinePresentationEpochLedger.isCurrent(staleToken, for: dayKey))
+        XCTAssertTrue(TimelinePresentationEpochLedger.isCurrent(otherDayToken, for: "2026-10-19"))
+        XCTAssertTrue(TimelinePresentationEpochLedger.isCurrent(
+            TimelinePresentationEpochLedger.token(for: dayKey),
+            for: dayKey
+        ))
+    }
+
+    func testCoalescerMergesAllAffectedDaysAndPlaceIDs() throws {
+        let dayOne = UUID()
+        let dayTwo = UUID()
+        let notifications = [
+            Notification(name: .movesMoveDataDidChange, object: nil, userInfo: ["dayKey": "day-a"]),
+            Notification(name: .movesVisitedPlaceDidChange, object: dayOne, userInfo: ["dayKeys": ["day-b"]]),
+            Notification(name: .movesVisitedPlaceDidChange, object: dayTwo, userInfo: ["dayKeys": ["day-a", "day-c"]])
+        ]
+
+        let merged = try XCTUnwrap(TimelineNotificationCoalescer.merged(
+            notifications,
+            named: .movesVisitedPlaceDidChange
+        ))
+
+        XCTAssertEqual(TimelineNotificationCoalescer.affectedDayKeys(in: merged), Set(["day-a", "day-b", "day-c"]))
+        XCTAssertEqual(merged.userInfo?["objectIDs"] as? [String], [dayOne.uuidString, dayTwo.uuidString].sorted())
+    }
+
+    func testSampleChangeNotificationCarriesTargetedDayKeys() {
+        let notification = Notification(
+            name: .movesLocationSamplesDidChange,
+            object: nil,
+            userInfo: ["dayKeys": ["2026-10-20", "2026-10-19"]]
+        )
+
+        XCTAssertEqual(
+            TimelineNotificationCoalescer.affectedDayKeys(in: notification),
+            Set(["2026-10-20", "2026-10-19"])
+        )
+        XCTAssertNil(TimelineNotificationCoalescer.affectedDayKeys(in: Notification(
+            name: .movesLocationSamplesDidChange,
+            object: nil
+        )))
+        XCTAssertNil(TimelineNotificationCoalescer.affectedDayKeys(in: Notification(
+            name: .movesLocationSamplesDidChange,
+            object: nil,
+            userInfo: ["dayKeys": [String]()]
+        )))
+    }
+
+    func testGlobalInvalidationMakesEveryDayEpochStale() {
+        let first = TimelinePresentationEpochLedger.token(for: "2026-10-20")
+        let second = TimelinePresentationEpochLedger.token(for: "2026-10-19")
+
+        TimelinePresentationEpochLedger.invalidateAll()
+
+        XCTAssertFalse(TimelinePresentationEpochLedger.isCurrent(first, for: "2026-10-20"))
+        XCTAssertFalse(TimelinePresentationEpochLedger.isCurrent(second, for: "2026-10-19"))
+    }
+}
+
+@MainActor
+final class TimelineDayPresentationWorkerTests: XCTestCase {
+    func testBoundedSnapshotKeepsExactDenseDayCounts() async throws {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let dayStart = Date(timeIntervalSince1970: 1_790_000_000)
+        let dayEnd = dayStart.addingTimeInterval(86_400)
+        let context = container.mainContext
+
+        for index in 0...(TimelinePresentationLimits.maxLoadedMoves) {
+            let start = dayStart.addingTimeInterval(Double(index * 60))
+            context.insert(MoveSegment(
+                dedupeKey: "dense-move-\(index)",
+                startDate: start,
+                endDate: start.addingTimeInterval(30),
+                transportMode: .walking,
+                distanceMeters: 20,
+                stepCount: nil
+            ))
+        }
+        for index in 0...TimelinePresentationLimits.maxLoadedSamples {
+            context.insert(LocationSample(
+                location: CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: 52.5, longitude: 13.4),
+                    altitude: 10,
+                    horizontalAccuracy: 5,
+                    verticalAccuracy: -1,
+                    course: -1,
+                    speed: 0,
+                    timestamp: dayStart.addingTimeInterval(Double(index) * (dayEnd.timeIntervalSince(dayStart) / Double(TimelinePresentationLimits.maxLoadedSamples + 1)))
+                ),
+                source: .significantChange,
+                dedupeKey: "dense-sample-\(index)"
+            ))
+        }
+        try context.save()
+
+        let snapshot = try await TimelineDayPresentationWorker(modelContainer: container)
+            .snapshot(dayStart: dayStart)
+
+        XCTAssertEqual(snapshot.totalMoveCount, TimelinePresentationLimits.maxLoadedMoves + 1)
+        XCTAssertEqual(snapshot.moves.count, TimelinePresentationLimits.maxLoadedMoves)
+        XCTAssertEqual(snapshot.totalSampleCount, TimelinePresentationLimits.maxLoadedSamples + 1)
+        XCTAssertEqual(snapshot.samples.count, TimelinePresentationLimits.maxLoadedSamples)
     }
 }
