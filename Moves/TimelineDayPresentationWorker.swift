@@ -2,6 +2,13 @@ import CoreLocation
 import Foundation
 import SwiftData
 
+enum TimelineDayPresentationLimits {
+    static let maxLoadedMoves = 240
+    static let maxLoadedPlaces = 240
+    static let maxLoadedSamples = 4_000
+    static let maxRouteSamplesPerMove = 500
+}
+
 struct TimelinePlaceSnapshot: Identifiable, Sendable, Hashable {
     let id: UUID
     let deviceIdentifier: String
@@ -191,17 +198,17 @@ actor TimelineDayPresentationWorker {
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         if !loadAll {
-            moveDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedMoves + 1
-            placeDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedPlaces + 1
-            sampleDescriptor.fetchLimit = TimelinePresentationLimits.maxLoadedSamples + 1
+            moveDescriptor.fetchLimit = TimelineDayPresentationLimits.maxLoadedMoves + 1
+            placeDescriptor.fetchLimit = TimelineDayPresentationLimits.maxLoadedPlaces + 1
+            sampleDescriptor.fetchLimit = TimelineDayPresentationLimits.maxLoadedSamples + 1
         }
 
         let fetchedMoves = try modelContext.fetch(moveDescriptor)
         let fetchedPlaces = try modelContext.fetch(placeDescriptor)
         let fetchedSamples = try modelContext.fetch(sampleDescriptor)
-        let moves = loadAll ? fetchedMoves : Array(fetchedMoves.prefix(TimelinePresentationLimits.maxLoadedMoves))
-        let places = loadAll ? fetchedPlaces : Array(fetchedPlaces.prefix(TimelinePresentationLimits.maxLoadedPlaces))
-        let samples = loadAll ? fetchedSamples : Array(fetchedSamples.prefix(TimelinePresentationLimits.maxLoadedSamples))
+        let moves = loadAll ? fetchedMoves : Array(fetchedMoves.prefix(TimelineDayPresentationLimits.maxLoadedMoves))
+        let places = loadAll ? fetchedPlaces : Array(fetchedPlaces.prefix(TimelineDayPresentationLimits.maxLoadedPlaces))
+        let samples = loadAll ? fetchedSamples : Array(fetchedSamples.prefix(TimelineDayPresentationLimits.maxLoadedSamples))
         // Keep exact summary counts without materializing records beyond the interactive cap.
         let totalMoveCount = try modelContext.fetchCount(FetchDescriptor(predicate: movePredicate))
         let totalSampleCount = try modelContext.fetchCount(FetchDescriptor(predicate: samplePredicate))
@@ -277,9 +284,9 @@ actor TimelineDayPresentationWorker {
     }
 
     private static func routeSamples(_ samples: [LocationSample]) -> [LocationSample] {
-        guard samples.count > TimelinePresentationLimits.maxRouteSamplesPerMove else { return samples }
+        guard samples.count > TimelineDayPresentationLimits.maxRouteSamplesPerMove else { return samples }
         let ordered = samples.sorted { $0.timestamp < $1.timestamp }
-        let limit = TimelinePresentationLimits.maxRouteSamplesPerMove
+        let limit = TimelineDayPresentationLimits.maxRouteSamplesPerMove
         let step = Double(ordered.count - 1) / Double(limit - 1)
         return (0..<limit).map { ordered[Int((Double($0) * step).rounded())] }
     }

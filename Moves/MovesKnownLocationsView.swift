@@ -32,6 +32,8 @@ struct RegularPlacesSettingsView: View {
     @State private var frequentSummaries: [RegularPlaceSummaryDTO] = []
     @State private var legacyCandidates: [RegularPlaceVisitDTO] = []
     @State private var historyRevision = 0
+    @State private var historyCacheNeedsInvalidation = false
+    @State private var queryWorker: RegularPlaceQueryWorker?
     private var definitions: [RegularPlaceDefinitionDTO] { locations.map(RegularPlaceDefinitionDTO.init) }
 
     var body: some View {
@@ -96,9 +98,17 @@ struct RegularPlacesSettingsView: View {
                             }
                             Button("Remove label", role: .destructive) {
                                 if let model = resolveVisit(visit.id) {
+                                    let previousLabel = model.userLabel
                                     model.userLabel = nil
-                                    try? modelContext.save()
-                                    legacyCandidates.removeAll { $0.id == visit.id }
+                                    do {
+                                        try modelContext.save()
+                                        NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: model.id,
+                                                                        userInfo: ["dayKeys": [model.dayTimeline?.dayKey ?? DayTimeline.makeDayKey(for: model.arrivalDate)]])
+                                        TimelineMutationNotifier.didChange(dayKey: model.dayTimeline?.dayKey, objectID: model.id)
+                                        legacyCandidates.removeAll { $0.id == visit.id }
+                                    } catch {
+                                        model.userLabel = previousLabel
+                                    }
                                 }
                             }.font(.caption)
                         }
@@ -122,24 +132,38 @@ struct RegularPlacesSettingsView: View {
             await loadSummaries(for: definitions)
         }
         .onReceive(NotificationCenter.default.publisher(for: .movesVisitedPlaceDidChange)) { _ in
-            visitCounts = [:]
-            frequentSummaries = []
-            legacyCandidates = []
-            historyRevision += 1
+            invalidateHistorySummaries()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .movesCloudKitImportObserved)) { _ in
+            invalidateHistorySummaries()
         }
     }
 
+    private func invalidateHistorySummaries() {
+        visitCounts = [:]
+        frequentSummaries = []
+        legacyCandidates = []
+        historyCacheNeedsInvalidation = true
+        historyRevision += 1
+    }
+
     private func loadSummaries(for definitions: [RegularPlaceDefinitionDTO]) async {
-        let worker = RegularPlaceQueryWorker(modelContainer: modelContext.container)
+        let requestedRevision = historyRevision
+        let worker: RegularPlaceQueryWorker
+        if let queryWorker {
+            worker = queryWorker
+        } else {
+            worker = RegularPlaceQueryWorker(modelContainer: modelContext.container)
+            queryWorker = worker
+        }
         do {
-            async let summaries = worker.frequentUnnamedSummaries()
-            async let counts = worker.counts(for: definitions)
-            async let legacy = worker.legacyLabelCandidates(definitions: definitions, offset: 0, limit: 100)
-            let result = try await (summaries, counts, legacy)
+            if historyCacheNeedsInvalidation { await worker.invalidateSettingsSnapshot() }
+            let result = try await worker.settingsSnapshot(definitions: definitions)
             guard !Task.isCancelled else { return }
-            frequentSummaries = result.0
-            visitCounts = Dictionary(uniqueKeysWithValues: result.1.map { ($0.regularPlaceID, $0.count) })
-            legacyCandidates = result.2.visits
+            frequentSummaries = result.summaries
+            visitCounts = Dictionary(uniqueKeysWithValues: result.counts.map { ($0.regularPlaceID, $0.count) })
+            legacyCandidates = result.legacyCandidates.visits
+            if requestedRevision == historyRevision { historyCacheNeedsInvalidation = false }
         } catch is CancellationError {
         } catch {
             // Saved Regular Place names remain visible when optional history summaries fail.

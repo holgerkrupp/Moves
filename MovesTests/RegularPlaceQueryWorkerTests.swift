@@ -150,6 +150,109 @@ final class RegularPlaceQueryWorkerTests: XCTestCase {
     }
 
     @MainActor
+    func testMidBatchCancellationRollsBackCurrentReconcileAndRemoveBatch() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let saved = KnownLocation(name: "Saved", latitude: 53.55, longitude: 9.99, radiusMeters: 200)
+        let moved = KnownLocation(name: "Moved", latitude: 53.7, longitude: 9.99, radiusMeters: 200)
+        let visits = (0..<3).map { index in
+            VisitPlace(arrivalDate: Date(timeIntervalSince1970: 1_704_067_200 + Double(index) * 86_400), departureDate: nil,
+                       latitude: 53.551, longitude: 9.99, horizontalAccuracy: 5)
+        }
+        for visit in visits {
+            visit.regularPlaceID = saved.id
+            visit.regularPlaceName = saved.name
+            context.insert(visit)
+        }
+        context.insert(saved)
+        context.insert(moved)
+        try context.save()
+
+        let worker = RegularPlaceQueryWorker(modelContainer: container)
+        let previous = RegularPlaceDefinitionDTO(saved)
+        saved.latitude = moved.latitude
+        try context.save()
+        let changed = RegularPlaceDefinitionDTO(saved)
+        let noRolledBackReconcileNotification = expectation(forNotification: .movesVisitedPlaceDidChange, object: nil)
+        noRolledBackReconcileNotification.isInverted = true
+        do {
+            _ = try await worker.reconcile(location: changed, replacedID: saved.id, previousDefinition: previous,
+                                           definitions: [changed], batchSize: 1, cancelAfterMutationsForTesting: 1)
+            XCTFail("Expected mid-batch cancellation")
+        } catch is CancellationError {
+        }
+        await fulfillment(of: [noRolledBackReconcileNotification], timeout: 0.05)
+        let afterReconcile = try await worker.visits(regularPlaceID: saved.id, offset: 0, limit: 10)
+        XCTAssertEqual(Set(afterReconcile.visits.map(\.id)), Set(visits.map(\.id)))
+
+        let firstCommittedDayKey = DayTimeline.makeDayKey(for: visits[0].arrivalDate)
+        let committedOnlyNotification = expectation(forNotification: .movesVisitedPlaceDidChange, object: nil) { notification in
+            guard let keys = notification.userInfo?["dayKeys"] as? [String] else { return false }
+            XCTAssertEqual(keys, [firstCommittedDayKey])
+            return true
+        }
+        do {
+            _ = try await worker.remove(locationID: saved.id, definitions: [], batchSize: 1,
+                                        cancelAfterMutationsForTesting: 2)
+            XCTFail("Expected mid-batch removal cancellation")
+        } catch is CancellationError {
+        }
+        await fulfillment(of: [committedOnlyNotification], timeout: 1)
+        let afterRemove = try await worker.visits(regularPlaceID: saved.id, offset: 0, limit: 10)
+        XCTAssertEqual(Set(afterRemove.visits.map(\.id)), Set(visits.dropFirst().map(\.id)))
+    }
+
+    @MainActor
+    func testCancellationBetweenCommittedBatchesPublishesSavedDayKeys() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let place = KnownLocation(name: "Saved", latitude: 53.55, longitude: 9.99, radiusMeters: 200)
+        let visits = (0..<3).map { index in
+            VisitPlace(arrivalDate: Date(timeIntervalSince1970: 1_704_067_200 + Double(index) * 86_400), departureDate: nil,
+                       latitude: 53.551, longitude: 9.99, horizontalAccuracy: 5)
+        }
+        for visit in visits {
+            visit.regularPlaceID = place.id
+            visit.regularPlaceName = place.name
+            context.insert(visit)
+        }
+        context.insert(place)
+        try context.save()
+
+        let expectedDayKey = DayTimeline.makeDayKey(for: visits[0].arrivalDate)
+        let notification = expectation(forNotification: .movesVisitedPlaceDidChange, object: nil) { notification in
+            notification.userInfo?["dayKeys"] as? [String] == [expectedDayKey]
+        }
+        let worker = RegularPlaceQueryWorker(modelContainer: container)
+        do {
+            _ = try await worker.remove(locationID: place.id, definitions: [], batchSize: 1,
+                                        cancelAfterCommittedBatchesForTesting: 1)
+            XCTFail("Expected cancellation after the first committed batch")
+        } catch is CancellationError {
+        }
+        await fulfillment(of: [notification], timeout: 1)
+
+        let remaining = try await worker.visits(regularPlaceID: place.id, offset: 0, limit: 10)
+        XCTAssertEqual(Set(remaining.visits.map(\.id)), Set(visits.dropFirst().map(\.id)))
+    }
+
+    @MainActor
+    func testSettingsSnapshotCachesHistoryAggregationUntilInvalidated() async throws {
+        let container = try makeContainer()
+        let worker = RegularPlaceQueryWorker(modelContainer: container)
+        let place = RegularPlaceDefinitionDTO(id: UUID(), name: "Home", latitude: 53.55, longitude: 9.99, radiusMeters: 150)
+        _ = try await worker.settingsSnapshot(definitions: [place])
+        _ = try await worker.settingsSnapshot(definitions: [place])
+        let calculationsAfterCacheHit = await worker.settingsSnapshotCalculationCount
+        XCTAssertEqual(calculationsAfterCacheHit, 1)
+
+        await worker.invalidateSettingsSnapshot()
+        _ = try await worker.settingsSnapshot(definitions: [place])
+        let calculationsAfterInvalidation = await worker.settingsSnapshotCalculationCount
+        XCTAssertEqual(calculationsAfterInvalidation, 2)
+    }
+
+    @MainActor
     func testCountsAndReconciliationPreserveManualLabelsAndCommentsAcrossOverlap() async throws {
         let container = try makeContainer()
         let context = container.mainContext

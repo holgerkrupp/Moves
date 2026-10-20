@@ -82,7 +82,9 @@ struct OtherVisitsAtPlaceView: View {
             }
         }
         .navigationTitle("Other Visits")
+#if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+#endif
         .task(id: "\(reference.id.uuidString):\(refreshID.uuidString)") {
             resetResults()
             await loadNextPage()
@@ -284,7 +286,22 @@ private struct VisitPlaceByIDView: View {
 
     var body: some View {
         if let place = matches.first {
+#if os(iOS)
             PlaceMapDetailView(place: place)
+#else
+            VStack(alignment: .leading, spacing: 10) {
+                Text(place.userLabel ?? place.autoLabel ?? place.regularPlaceName ?? "Visit")
+                    .font(.title2.weight(.semibold))
+                Text(place.arrivalDate.formatted(date: .complete, time: .shortened))
+                if let departure = place.departureDate {
+                    Text("Duration: \(Int(max(0, departure.timeIntervalSince(place.arrivalDate)) / 60)) min")
+                }
+                Text("\(place.latitude), \(place.longitude)").foregroundStyle(.secondary)
+                if let comment = place.comment, !comment.isEmpty { Text(comment) }
+            }
+            .padding()
+            .navigationTitle("Visit Details")
+#endif
         } else {
             ContentUnavailableView("Visit Unavailable", systemImage: "mappin.slash", description: Text("This visit may have been deleted or changed on another device."))
         }

@@ -21,7 +21,12 @@ import AppKit
 @MainActor
 protocol InferredMoveRouteMatchingScheduler: AnyObject {
     func scheduleRouteMatching(for move: MoveSegment)
+    func scheduleRouteMatching(for request: InferredMoveRouteMatchRequest)
     func schedulePendingRouteMatches(limit: Int)
+}
+
+extension InferredMoveRouteMatchingScheduler {
+    func scheduleRouteMatching(for request: InferredMoveRouteMatchRequest) {}
 }
 #endif
 
@@ -944,6 +949,11 @@ final class AutomaticInferredMoveRouteMatchingScheduler: InferredMoveRouteMatchi
             return
         }
         guard let request = makeRequest(for: move) else { return }
+        enqueue(request)
+    }
+
+    func scheduleRouteMatching(for request: InferredMoveRouteMatchRequest) {
+        guard !ProcessInfo.processInfo.isRunningUnitTests, request.fallback.count > 1 else { return }
         enqueue(request)
     }
 

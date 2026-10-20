@@ -4208,7 +4208,7 @@ private enum TimelineScreenshotPDFRenderer {
 
         let pageCount = max(Int(ceil(contentHeight / pageHeight)), 1)
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
-        let data = try? renderer.pdfData { context in
+        let data = renderer.pdfData { context in
             for pageIndex in 0..<pageCount {
                 context.beginPage()
                 context.cgContext.saveGState()

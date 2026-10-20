@@ -85,6 +85,12 @@ struct RegularPlaceVisitCountDTO: Sendable, Identifiable {
     let count: Int
 }
 
+struct RegularPlaceSettingsSnapshotDTO: Sendable {
+    let summaries: [RegularPlaceSummaryDTO]
+    let counts: [RegularPlaceVisitCountDTO]
+    let legacyCandidates: RegularPlacePage
+}
+
 enum RegularPlaceQueryError: Error {
     case invalidCoordinateOrRadius
 }
@@ -95,6 +101,26 @@ enum RegularPlaceQueryError: Error {
 actor RegularPlaceQueryWorker {
     private let batchSize = 400
     private static let maximumQueryRadiusMeters = 20_100_000.0
+    private var cachedSettingsSnapshot: (definitions: [RegularPlaceDefinitionDTO], value: RegularPlaceSettingsSnapshotDTO)?
+    private(set) var settingsSnapshotCalculationCount = 0
+
+    func settingsSnapshot(definitions: [RegularPlaceDefinitionDTO]) throws -> RegularPlaceSettingsSnapshotDTO {
+        if let cachedSettingsSnapshot, cachedSettingsSnapshot.definitions == definitions {
+            return cachedSettingsSnapshot.value
+        }
+        let value = RegularPlaceSettingsSnapshotDTO(
+            summaries: try frequentUnnamedSummaries(),
+            counts: try counts(for: definitions),
+            legacyCandidates: try legacyLabelCandidates(definitions: definitions, offset: 0, limit: 100)
+        )
+        settingsSnapshotCalculationCount += 1
+        cachedSettingsSnapshot = (definitions, value)
+        return value
+    }
+
+    func invalidateSettingsSnapshot() {
+        cachedSettingsSnapshot = nil
+    }
 
     func visits(regularPlaceID: UUID, offset: Int = 0, limit: Int = 50) throws -> RegularPlacePage {
         let predicate = #Predicate<VisitPlace> { $0.regularPlaceID == regularPlaceID }
@@ -375,7 +401,9 @@ actor RegularPlaceQueryWorker {
         replacedID: UUID? = nil,
         previousDefinition: RegularPlaceDefinitionDTO? = nil,
         definitions: [RegularPlaceDefinitionDTO],
-        batchSize requestedBatchSize: Int = 300
+        batchSize requestedBatchSize: Int = 300,
+        cancelAfterMutationsForTesting: Int? = nil,
+        cancelAfterCommittedBatchesForTesting: Int? = nil
     ) throws -> Int {
         try Self.validate(latitude: location.latitude, longitude: location.longitude, radiusMeters: location.radiusMeters)
         if let previousDefinition {
@@ -390,6 +418,10 @@ actor RegularPlaceQueryWorker {
         let pageSize = min(max(requestedBatchSize, 1), 1_000)
         var changedCount = 0
         var changedDayKeys = Set<String>()
+        var committedBatchCount = 0
+        defer {
+            if changedCount > 0 { Self.postVisitChanges(dayKeys: changedDayKeys) }
+        }
         let old = previousDefinition ?? location
         let oldLongitudeRadius = min(max(old.radiusMeters, 0) / (111_320 * max(abs(cos(old.latitude * .pi / 180)), 0.01)), 180)
         let newLongitudeRadius = min(max(location.radiusMeters, 0) / (111_320 * max(abs(cos(location.latitude * .pi / 180)), 0.01)), 180)
@@ -410,6 +442,7 @@ actor RegularPlaceQueryWorker {
         let currentID = location.id
         let oldID = replacedID ?? location.id
         var cursor: (arrivalDate: Date, id: UUID)?
+        var totalMutationCount = 0
         while true {
             try Task.checkCancellation()
             let cursorDate = cursor?.arrivalDate ?? .distantPast
@@ -454,49 +487,68 @@ actor RegularPlaceQueryWorker {
             descriptor.fetchLimit = pageSize
             let batch = try modelContext.fetch(descriptor)
             guard !batch.isEmpty else { break }
-            for visit in batch {
-                try Task.checkCancellation()
-                let previousID = visit.regularPlaceID
-                let previousName = visit.regularPlaceName
-                let hasManualLabel = visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                if hasManualLabel {
-                    if visit.regularPlaceID == location.id, visit.regularPlaceName != location.name {
-                        visit.regularPlaceName = location.name
+            var batchChangedCount = 0
+            var batchChangedDayKeys = Set<String>()
+            do {
+                for visit in batch {
+                    try Task.checkCancellation()
+                    let previousID = visit.regularPlaceID
+                    let previousName = visit.regularPlaceName
+                    let hasManualLabel = visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    if hasManualLabel {
+                        if visit.regularPlaceID == location.id, visit.regularPlaceName != location.name {
+                            visit.regularPlaceName = location.name
+                        }
+                    } else {
+                        if previousID == location.id || previousID == replacedID {
+                            visit.regularPlaceID = nil
+                            visit.regularPlaceName = nil
+                        }
+                        if let match = RegularPlaceMatcher.match(coordinate: visit.coordinate,
+                                                                accuracy: visit.horizontalAccuracy,
+                                                                among: definitionsToUse) {
+                            visit.regularPlaceID = match.id
+                            visit.regularPlaceName = match.name
+                        }
                     }
-                } else {
-                    if previousID == location.id || previousID == replacedID {
-                        visit.regularPlaceID = nil
-                        visit.regularPlaceName = nil
-                    }
-                    if let match = RegularPlaceMatcher.match(coordinate: visit.coordinate,
-                                                            accuracy: visit.horizontalAccuracy,
-                                                            among: definitionsToUse) {
-                        visit.regularPlaceID = match.id
-                        visit.regularPlaceName = match.name
+                    if previousID != visit.regularPlaceID || previousName != visit.regularPlaceName {
+                        batchChangedCount += 1
+                        batchChangedDayKeys.insert(Self.dayKey(for: visit))
+                        totalMutationCount += 1
+                        if totalMutationCount == cancelAfterMutationsForTesting {
+                            throw CancellationError()
+                        }
                     }
                 }
-                if previousID != visit.regularPlaceID || previousName != visit.regularPlaceName {
-                    changedCount += 1
-                    changedDayKeys.insert(Self.dayKey(for: visit))
-                }
+                try modelContext.save()
+                changedCount += batchChangedCount
+                changedDayKeys.formUnion(batchChangedDayKeys)
+            } catch {
+                modelContext.rollback()
+                throw error
             }
-            try modelContext.save()
+            committedBatchCount += 1
+            if committedBatchCount == cancelAfterCommittedBatchesForTesting { throw CancellationError() }
             if let last = batch.last { cursor = (last.arrivalDate, last.id) }
             if batch.count < pageSize { break }
-        }
-        if changedCount > 0 {
-            Self.postVisitChanges(dayKeys: changedDayKeys)
         }
         return changedCount
     }
 
-    func remove(locationID: UUID, definitions: [RegularPlaceDefinitionDTO], batchSize requestedBatchSize: Int = 300) throws -> Int {
+    func remove(locationID: UUID, definitions: [RegularPlaceDefinitionDTO], batchSize requestedBatchSize: Int = 300,
+                cancelAfterMutationsForTesting: Int? = nil,
+                cancelAfterCommittedBatchesForTesting: Int? = nil) throws -> Int {
         for definition in definitions {
             try Self.validate(latitude: definition.latitude, longitude: definition.longitude, radiusMeters: definition.radiusMeters)
         }
         let pageSize = min(max(requestedBatchSize, 1), 1_000)
         var changedCount = 0
         var changedDayKeys = Set<String>()
+        var totalMutationCount = 0
+        var committedBatchCount = 0
+        defer {
+            if changedCount > 0 { Self.postVisitChanges(dayKeys: changedDayKeys) }
+        }
         while true {
             try Task.checkCancellation()
             let predicate = #Predicate<VisitPlace> { $0.regularPlaceID == locationID }
@@ -507,26 +559,38 @@ actor RegularPlaceQueryWorker {
             descriptor.fetchLimit = pageSize
             let batch = try modelContext.fetch(descriptor)
             guard !batch.isEmpty else { break }
-            for visit in batch {
-                try Task.checkCancellation()
-                guard visit.regularPlaceID == locationID else { continue }
-                changedDayKeys.insert(Self.dayKey(for: visit))
-                visit.regularPlaceID = nil
-                visit.regularPlaceName = nil
-                if visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
-                   let match = RegularPlaceMatcher.match(coordinate: visit.coordinate,
-                                                         accuracy: visit.horizontalAccuracy,
-                                                         among: definitions) {
-                    visit.regularPlaceID = match.id
-                    visit.regularPlaceName = match.name
+            var batchChangedCount = 0
+            var batchChangedDayKeys = Set<String>()
+            do {
+                for visit in batch {
+                    try Task.checkCancellation()
+                    guard visit.regularPlaceID == locationID else { continue }
+                    batchChangedDayKeys.insert(Self.dayKey(for: visit))
+                    visit.regularPlaceID = nil
+                    visit.regularPlaceName = nil
+                    if visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+                       let match = RegularPlaceMatcher.match(coordinate: visit.coordinate,
+                                                             accuracy: visit.horizontalAccuracy,
+                                                             among: definitions) {
+                        visit.regularPlaceID = match.id
+                        visit.regularPlaceName = match.name
+                    }
+                    batchChangedCount += 1
+                    totalMutationCount += 1
+                    if totalMutationCount == cancelAfterMutationsForTesting {
+                        throw CancellationError()
+                    }
                 }
-                changedCount += 1
+                try modelContext.save()
+                changedCount += batchChangedCount
+                changedDayKeys.formUnion(batchChangedDayKeys)
+            } catch {
+                modelContext.rollback()
+                throw error
             }
-            try modelContext.save()
+            committedBatchCount += 1
+            if committedBatchCount == cancelAfterCommittedBatchesForTesting { throw CancellationError() }
             if batch.count < pageSize { break }
-        }
-        if changedCount > 0 {
-            Self.postVisitChanges(dayKeys: changedDayKeys)
         }
         return changedCount
     }
