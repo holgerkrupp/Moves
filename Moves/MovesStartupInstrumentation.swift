@@ -7,6 +7,16 @@ enum MovesStartupInstrumentation {
         category: "Startup"
     )
 
+    @MainActor
+    static func measureConstruction<Value>(
+        _ name: StaticString,
+        construct: () -> Value
+    ) -> Value {
+        let interval = signposter.beginInterval(name)
+        defer { signposter.endInterval(name, interval) }
+        return construct()
+    }
+
     static func event(_ name: StaticString) {
         signposter.emitEvent(name)
         #if DEBUG

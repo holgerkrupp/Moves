@@ -225,12 +225,14 @@ final class LaunchReliabilityTests: XCTestCase {
     func testRuntimePublishesReadyBeforeDiagnosticsObservationCompletes() async throws {
         let container = try makeInMemoryContainer()
         let tracker = CancellationTracker()
+        let diagnosticsFactoryCalls = LockedCounter()
         let runtime = MovesAppRuntime(
             applicationContainerFactory: { container },
             localFallbackContainerFactory: { container },
             initializesServices: false,
             diagnosticsFactory: { modelContainer in
-                MovesSyncDiagnostics(
+                diagnosticsFactoryCalls.increment()
+                return MovesSyncDiagnostics(
                     modelContainer: modelContainer,
                     userDefaults: self.makeIsolatedDefaults(),
                     notificationCenter: NotificationCenter(),
@@ -248,16 +250,18 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertEqual(runtime.preparationState, .ready)
         XCTAssertTrue(runtime.isReady)
         XCTAssertIdentical(runtime.container, container)
+        XCTAssertEqual(diagnosticsFactoryCalls.value, 0, "Diagnostics construction must not gate the first usable screen")
         let startedBeforeDeferredPhase = await tracker.started
         XCTAssertFalse(startedBeforeDeferredPhase)
         runtime.startDeferredRuntimeServices()
+        XCTAssertEqual(diagnosticsFactoryCalls.value, 1)
         runtime.startDeferredDiagnostics()
         let didStart = await waitUntil { await tracker.started }
         XCTAssertTrue(didStart)
         XCTAssertNil(runtime.syncDiagnostics?.latestSnapshot)
     }
 
-    func testInitialTodaySelectionUsesOneBoundedWindowLoadWithTenThousandDays() throws {
+    func testInitialTodaySelectionUsesOneBoundedWindowLoadWithTenThousandDays() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
         let today = Calendar.current.startOfDay(for: .now)
@@ -269,6 +273,8 @@ final class LaunchReliabilityTests: XCTestCase {
 
         let window = TimelineDayWindowStore()
         window.loadInitial(using: context)
+        let loaded = await waitUntil { window.pagerDays.count == TimelineDayWindowStore.pagerWindowSize }
+        XCTAssertTrue(loaded)
         let selected = window.selectLoadedDay(dayKey: DayTimeline.makeDayKey(for: today))
 
         XCTAssertTrue(selected)

@@ -17,16 +17,6 @@ private struct HistoryMapPlaceDTO: Sendable {
 @ModelActor
 private actor HistoryMapPlaceLoader {
     func load(period: MovesSharePeriod, periodStart: Date) throws -> [HistoryMapPlaceDTO] {
-        let places: [VisitPlace]
-        if let interval = period.dateInterval(containing: periodStart) {
-            let predicate = #Predicate<VisitPlace> { place in
-                place.arrivalDate >= interval.start && place.arrivalDate < interval.end
-            }
-            places = try modelContext.fetch(FetchDescriptor(predicate: predicate))
-        } else {
-            places = try modelContext.fetch(FetchDescriptor<VisitPlace>())
-        }
-
         struct Accumulator {
             var title: String
             var latitude: Double
@@ -34,20 +24,42 @@ private actor HistoryMapPlaceLoader {
             var visitCount: Int
         }
         var grouped = [String: Accumulator]()
-        for place in places {
-            let latitudeBucket = Int((place.latitude * 10_000).rounded())
-            let longitudeBucket = Int((place.longitude * 10_000).rounded())
-            let key = "\(latitudeBucket)|\(longitudeBucket)"
-            var accumulator = grouped[key] ?? Accumulator(
-                title: place.displayTitle,
-                latitude: place.latitude,
-                longitude: place.longitude,
-                visitCount: 0
-            )
-            accumulator.visitCount += 1
-            grouped[key] = accumulator
+        let interval = period.dateInterval(containing: periodStart)
+        var offset = 0
+        let pageSize = 400
+        while true {
+            try Task.checkCancellation()
+            let predicate: Predicate<VisitPlace>?
+            if let interval {
+                predicate = #Predicate<VisitPlace> { place in
+                    place.arrivalDate >= interval.start && place.arrivalDate < interval.end
+                }
+            } else {
+                predicate = nil
+            }
+            var descriptor = FetchDescriptor<VisitPlace>(predicate: predicate)
+            descriptor.sortBy = [SortDescriptor(\.arrivalDate)]
+            descriptor.fetchOffset = offset
+            descriptor.fetchLimit = pageSize
+            let page = try modelContext.fetch(descriptor)
+            guard !page.isEmpty else { break }
+            for place in page {
+                let latitudeBucket = Int((place.latitude * 10_000).rounded())
+                let longitudeBucket = Int((place.longitude * 10_000).rounded())
+                let key = "\(latitudeBucket)|\(longitudeBucket)"
+                var accumulator = grouped[key] ?? Accumulator(
+                    title: place.displayTitle,
+                    latitude: place.latitude,
+                    longitude: place.longitude,
+                    visitCount: 0
+                )
+                accumulator.visitCount += 1
+                grouped[key] = accumulator
+            }
+            offset += page.count
         }
-        return grouped.map { key, value in
+        // Keep map annotations bounded even when a decade contains many distinct places.
+        return grouped.sorted { $0.value.visitCount > $1.value.visitCount }.prefix(500).map { key, value in
             HistoryMapPlaceDTO(
                 id: key,
                 title: value.title,
@@ -55,6 +67,91 @@ private actor HistoryMapPlaceLoader {
                 longitude: value.longitude,
                 visitCount: value.visitCount
             )
+        }
+    }
+}
+
+private struct HistoryMapTrackDTO: Sendable {
+    let id: UUID
+    let transportModeRawValue: String
+    let coordinates: [HistoryMapCoordinateDTO]
+    let usesDetailedRoute: Bool
+}
+
+private struct HistoryMapCoordinateDTO: Sendable {
+    let latitude: Double
+    let longitude: Double
+}
+
+@ModelActor
+private actor HistoryMapTrackLoader {
+    func load(
+        period: MovesSharePeriod,
+        periodStart: Date,
+        maximumTracks: Int = 1_200,
+        onBatch: @escaping @Sendable ([HistoryMapTrackDTO], Double) -> Void
+    ) throws {
+        let interval = period.dateInterval(containing: periodStart)
+        let predicate: Predicate<MoveSegment>?
+        if let interval {
+            predicate = #Predicate<MoveSegment> { move in
+                move.startDate >= interval.start && move.startDate < interval.end
+            }
+        } else {
+            predicate = nil
+        }
+        let count = try modelContext.fetchCount(FetchDescriptor<MoveSegment>(predicate: predicate))
+        guard count > 0 else { onBatch([], 1); return }
+        let stride = max(1, Int(ceil(Double(count) / Double(maximumTracks))))
+        var offset = 0
+        let pageSize = 120
+        while true {
+            try Task.checkCancellation()
+            var descriptor = FetchDescriptor<MoveSegment>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.startDate)]
+            )
+            descriptor.fetchOffset = offset
+            descriptor.fetchLimit = pageSize
+            let page = try modelContext.fetch(descriptor)
+            guard !page.isEmpty else { break }
+            var batch: [HistoryMapTrackDTO] = []
+            for (pageIndex, move) in page.enumerated() where (offset + pageIndex) % stride == 0 {
+                try Task.checkCancellation()
+                let fallback = MoveRouteGeometry.rawCoordinates(for: move)
+                let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+                let coordinates = move.manualRouteCoordinates
+                    ?? move.cachedRouteCoordinates(for: signature)
+                    ?? fallback
+                guard coordinates.count > 1 else { continue }
+                let maximumCoordinates = period == .forever ? 60 : 180
+                let sampled = Self.downsample(coordinates, maximumCount: maximumCoordinates).map {
+                    HistoryMapCoordinateDTO(latitude: $0.latitude, longitude: $0.longitude)
+                }
+                let track = HistoryMapTrackDTO(
+                    id: move.id,
+                    transportModeRawValue: move.transportModeRawValue,
+                    coordinates: sampled,
+                    usesDetailedRoute: move.usesHighAccuracyRouteTracking
+                )
+                batch.append(track)
+            }
+            offset += page.count
+            onBatch(batch, min(Double(offset) / Double(count), 0.95))
+            if page.count < pageSize { break }
+        }
+        try Task.checkCancellation()
+        onBatch([], 1)
+    }
+
+    private static func downsample(
+        _ coordinates: [CLLocationCoordinate2D],
+        maximumCount: Int
+    ) -> [CLLocationCoordinate2D] {
+        guard coordinates.count > maximumCount, maximumCount > 1 else { return coordinates }
+        let step = Double(coordinates.count - 1) / Double(maximumCount - 1)
+        return (0..<maximumCount).map { index in
+            coordinates[min(Int((Double(index) * step).rounded()), coordinates.count - 1)]
         }
     }
 }
@@ -111,6 +208,15 @@ struct MovesHistoryMapView: View {
         let transportMode: TransportMode
         let coordinates: [CLLocationCoordinate2D]
         let usesDetailedRoute: Bool
+        let polylineSegments: [[CLLocationCoordinate2D]]
+
+        init(id: UUID, transportMode: TransportMode, coordinates: [CLLocationCoordinate2D], usesDetailedRoute: Bool) {
+            self.id = id
+            self.transportMode = transportMode
+            self.coordinates = coordinates
+            self.usesDetailedRoute = usesDetailedRoute
+            self.polylineSegments = RouteCoordinateOps.mapPolylineSegments(coordinates)
+        }
     }
 
     fileprivate struct Place: Identifiable {
@@ -123,7 +229,6 @@ struct MovesHistoryMapView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var importedRouteDataSummary: ImportedRouteDataSummaryStore
 
-    private let dayTimelines: [DayTimeline]
     @State private var selectedPeriod: MovesSharePeriod = .day
     @State private var selectedDate: Date
     @State private var display: Display = .standard
@@ -139,8 +244,7 @@ struct MovesHistoryMapView: View {
     @State private var shareImage: UIImage?
     @State private var isShowingShareSheet = false
 
-    init(dayTimelines: [DayTimeline], initialDate: Date) {
-        self.dayTimelines = dayTimelines
+    init(initialDate: Date) {
         _selectedDate = State(initialValue: initialDate)
         let region = MapRegionFactory.region(for: [])
         _camera = State(initialValue: .region(region))
@@ -157,13 +261,6 @@ struct MovesHistoryMapView: View {
 #else
         Display.allCases.filter { $0 != .fog }
 #endif
-    }
-
-    private var selectedTimelines: [DayTimeline] {
-        guard selectedPeriod != .forever else { return dayTimelines }
-        return dayTimelines.filter {
-            selectedPeriod.contains($0.dayStart, periodStart: selectedPeriodStart)
-        }
     }
 
     @State private var places: [Place] = []
@@ -258,8 +355,9 @@ struct MovesHistoryMapView: View {
     private var map: some View {
         Map(position: $camera, interactionModes: [.pan, .zoom, .rotate, .pitch]) {
             ForEach(tracks) { track in
-                let coordinates = displayedCoordinates(for: track)
-                ForEach(Array(RouteCoordinateOps.mapPolylineSegments(coordinates).enumerated()), id: \.offset) { _, segment in
+                let segments = track.transportMode == .plane && !track.usesDetailedRoute
+                    ? [] : track.polylineSegments
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                     if display == .fog {
                         MapPolyline(coordinates: segment)
                             .stroke(.white.opacity(0.62), lineWidth: 5)
@@ -407,7 +505,6 @@ struct MovesHistoryMapView: View {
 
         let period = selectedPeriod
         let periodStart = selectedPeriodStart
-        let selectedDays = selectedTimelines
         let container = modelContext.container
 
         if let loadedPlaces = try? await HistoryMapPlaceLoader(modelContainer: container)
@@ -428,7 +525,6 @@ struct MovesHistoryMapView: View {
             return ShareMapAggregateStore.cachedTracks(
                 for: period,
                 periodStart: periodStart,
-                timelines: selectedDays,
                 in: cacheContext
             )
         }
@@ -436,48 +532,59 @@ struct MovesHistoryMapView: View {
         var sourceTracks: [ShareMapAggregateTrack]?
         if ShareMapAggregateStore.supports(period) {
             sourceTracks = cachedTracks()
-            if sourceTracks == nil {
-                cacheBuildProgress = 0
-                await ShareMapAggregateBuilder.refresh(
-                    period: period,
-                    periodStart: periodStart,
-                    in: container,
-                    progress: { progress in
-                        Task { @MainActor in
-                            cacheBuildProgress = progress
-                        }
-                    }
-                )
-                guard !Task.isCancelled else { return }
-                sourceTracks = cachedTracks()
-            }
         }
 
         guard !Task.isCancelled else { return }
         if let sourceTracks {
-            tracks = sourceTracks.map {
-                Track(
-                    id: $0.id,
-                    transportMode: $0.transportMode,
-                    coordinates: $0.coordinates,
-                    usesDetailedRoute: $0.usesDetailedRoute
+            let sampleIndices = ShareMapAggregateStore.boundedSampleIndices(
+                total: sourceTracks.count,
+                limit: 1_200
+            )
+            tracks = sampleIndices.map { index in
+                let source = sourceTracks[index]
+                return Track(
+                    id: source.id,
+                    transportMode: source.transportMode,
+                    coordinates: source.coordinates,
+                    usesDetailedRoute: source.usesDetailedRoute
                 )
             }
         } else {
-            tracks = selectedDays.flatMap(\.moves).compactMap { move in
-                let fallback = MoveRouteGeometry.rawCoordinates(for: move)
-                let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
-                let coordinates = move.manualRouteCoordinates
-                    ?? move.cachedRouteCoordinates(for: signature)
-                    ?? fallback
-                guard coordinates.count > 1 else { return nil }
-                return Track(
-                    id: move.id,
-                    transportMode: move.transportMode,
-                    coordinates: downsampled(coordinates, maximumCount: period == .forever ? 60 : 240),
-                    usesDetailedRoute: move.usesHighAccuracyRouteTracking
+            tracks = []
+            cacheBuildProgress = 0
+            let requestKey = dataRefreshKey
+            do {
+                try await HistoryMapTrackLoader(modelContainer: container).load(
+                    period: period,
+                    periodStart: periodStart,
+                    onBatch: { batch, progress in
+                        Task { @MainActor in
+                            guard dataRefreshKey == requestKey else { return }
+                            cacheBuildProgress = progress
+                            guard !batch.isEmpty else { return }
+                            let shouldFrameMap = tracks.isEmpty
+                            tracks.append(contentsOf: batch.map { dto in
+                                Track(
+                                    id: dto.id,
+                                    transportMode: TransportMode(rawValue: dto.transportModeRawValue) ?? .unknown,
+                                    coordinates: dto.coordinates.map {
+                                        CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                                    },
+                                    usesDetailedRoute: dto.usesDetailedRoute
+                                )
+                            })
+                            if shouldFrameMap {
+                                let region = MapRegionFactory.region(for: allCoordinates)
+                                visibleRegion = region
+                                camera = .region(region)
+                            }
+                        }
+                    }
                 )
+            } catch {
+                cacheBuildProgress = nil
             }
+            guard !Task.isCancelled else { return }
         }
 
         let region = MapRegionFactory.region(for: allCoordinates)
@@ -514,19 +621,6 @@ struct MovesHistoryMapView: View {
         return MovesShareHeatScale.intensity(frequency: place.visitCount, maximum: maximum)
     }
 
-    private func displayedCoordinates(for track: Track) -> [CLLocationCoordinate2D] {
-        // Long-distance jumps make a world map misleading. Keep their endpoints
-        // visible, but never draw a straight route across countries or oceans.
-        track.transportMode == .plane && !track.usesDetailedRoute ? [] : track.coordinates
-    }
-
-    private func downsampled(_ coordinates: [CLLocationCoordinate2D], maximumCount: Int) -> [CLLocationCoordinate2D] {
-        guard coordinates.count > maximumCount, maximumCount > 1 else { return coordinates }
-        let step = Double(coordinates.count - 1) / Double(maximumCount - 1)
-        return (0..<maximumCount).map { index in
-            coordinates[min(Int((Double(index) * step).rounded()), coordinates.count - 1)]
-        }
-    }
 }
 
 private struct HeatMapDot: View {

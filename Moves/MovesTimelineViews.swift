@@ -391,7 +391,8 @@ struct DayTimelinePageContent: View {
                     modelContainer: modelContext.container,
                     dayStart: dayTimeline.dayStart,
                     dayKey: dayTimeline.dayKey,
-                    generation: presentationGeneration
+                    generation: presentationGeneration,
+                    includeRouteGeometry: false
                 )
                 guard !Task.isCancelled else { return }
                 source = DayPresentationValueSource(snapshot)
@@ -407,10 +408,33 @@ struct DayTimelinePageContent: View {
             let cache = Self.makePresentationCache(for: dayTimeline, source: source, mode: routeDisplayMode)
             MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
             guard !Task.isCancelled else { return }
-            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey, rawMode: rawMode)
             presentationCache = cache
             MovesStartupInstrumentation.event("selectedDayPresentationEnd")
             markTimelineInteractiveIfNeeded()
+
+            // Publish row content before constructing route geometry. Keep this
+            // follow-up in the same task so navigation cancels it with the page.
+            do {
+                let geometrySnapshot = try await DayPresentationValueSourceCache.snapshot(
+                    modelContainer: modelContext.container,
+                    dayStart: dayTimeline.dayStart,
+                    dayKey: dayTimeline.dayKey,
+                    generation: presentationGeneration,
+                    includeRouteGeometry: true
+                )
+                guard !Task.isCancelled else { return }
+                let geometryCache = Self.makePresentationCache(
+                    for: dayTimeline,
+                    source: DayPresentationValueSource(geometrySnapshot),
+                    mode: routeDisplayMode
+                )
+                guard !Task.isCancelled else { return }
+                DayTimelinePresentationCacheStore.store(geometryCache, for: dayTimeline.dayKey, rawMode: rawMode)
+                presentationCache = geometryCache
+            } catch {
+                // The already-published rows remain usable if optional route
+                // preparation fails or the worker is cancelled.
+            }
         }
         .task {
             for await notification in TimelineNotificationCoalescer.events(named: .movesLocationSamplesDidChange) {
@@ -1650,9 +1674,11 @@ enum DayPresentationValueSourceCache {
         dayStart: Date,
         dayKey: String,
         generation: Int,
-        loadAll: Bool = false
+        loadAll: Bool = false,
+        includeExactCounts: Bool = true,
+        includeRouteGeometry: Bool = true
     ) async throws -> TimelineDaySnapshot {
-        let key = "\(dayKey)|\(generation)|\(loadAll ? "all" : "bounded")"
+        let key = "\(dayKey)|\(generation)|\(loadAll ? "all" : "bounded")|counts:\(includeExactCounts)|geometry:\(includeRouteGeometry)"
         let requestEpoch = TimelinePresentationEpochLedger.token(for: dayKey)
         if let cached = entries[key] {
             touch(key)
@@ -1666,7 +1692,12 @@ enum DayPresentationValueSourceCache {
                 id: UUID(),
                 task: Task {
                     let worker = TimelineDayPresentationWorker(modelContainer: modelContainer)
-                    return try await worker.snapshot(dayStart: dayStart, loadAll: loadAll)
+                    return try await worker.snapshot(
+                        dayStart: dayStart,
+                        loadAll: loadAll,
+                        includeExactCounts: includeExactCounts,
+                        includeRouteGeometry: includeRouteGeometry
+                    )
                 }
             )
             inFlight[key] = flight
@@ -2378,8 +2409,8 @@ private enum DayMapPresentationCacheStore {
 }
 
 @MainActor
-private enum DayMapSnapshotCache {
-    private static let diskCacheVersion = "v2"
+enum DayMapSnapshotCache {
+    private static let diskCacheVersion = "v3"
     private static let maximumDiskEntryCount = 24
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -2387,24 +2418,113 @@ private enum DayMapSnapshotCache {
         cache.totalCostLimit = 32 * 1_024 * 1_024
         return cache
     }()
+    private static var memoryKeysByDay: [String: Set<String>] = [:]
+    private static var memoryKeyOrder: [String] = []
+    private struct InFlightSnapshot {
+        let id: UUID
+        let dayKey: String
+        let task: Task<UIImage, Error>
+        var consumerIDs: Set<UUID>
+    }
+    private static var inFlight: [String: InFlightSnapshot] = [:]
+    private static var inFlightKeysByDay: [String: Set<String>] = [:]
 
-    static func image(for key: String) async -> UIImage? {
+    /// Memory lookup is synchronous so an already-rendered day map can be used in
+    /// the first collapsed-map frame, before SwiftUI creates any MapKit view.
+    static func cachedImage(for key: String) -> UIImage? {
+        cache.object(forKey: key as NSString)
+    }
+
+    static func image(for key: String, dayKey: String) async -> UIImage? {
         if let image = cache.object(forKey: key as NSString) {
             return image
         }
 
-        let fileURL = diskFileURL(for: key)
+        let fileURL = diskFileURL(for: key, dayKey: dayKey)
         let image = await Task.detached(priority: .userInitiated) {
             UIImage(contentsOfFile: fileURL.path)
         }.value
         guard let image else { return nil }
-        storeInMemory(image, for: key)
+        storeInMemory(image, for: key, dayKey: dayKey)
         return image
     }
 
-    static func store(_ image: UIImage, for key: String) {
-        storeInMemory(image, for: key)
-        let fileURL = diskFileURL(for: key)
+    static func imageOrGenerate(
+        for key: String,
+        dayKey: String,
+        generate: @escaping @MainActor () async throws -> UIImage
+    ) async throws -> UIImage {
+        if let cached = await image(for: key, dayKey: dayKey) { return cached }
+        let requestID: UUID
+        let request: Task<UIImage, Error>
+        if var existing = inFlight[key], existing.dayKey == dayKey {
+            let consumerID = UUID()
+            existing.consumerIDs.insert(consumerID)
+            inFlight[key] = existing
+            requestID = existing.id
+            request = existing.task
+            let image = try await waitForSnapshot(
+                request, key: key, requestID: requestID, consumerID: consumerID
+            )
+            store(image, for: key, dayKey: dayKey)
+            return image
+        } else {
+            let id = UUID()
+            let consumerID = UUID()
+            let task = Task { @MainActor in try await generate() }
+            inFlight[key] = InFlightSnapshot(
+                id: id,
+                dayKey: dayKey,
+                task: task,
+                consumerIDs: [consumerID]
+            )
+            inFlightKeysByDay[dayKey, default: []].insert(key)
+            requestID = id
+            request = task
+            let image = try await waitForSnapshot(
+                request, key: key, requestID: requestID, consumerID: consumerID
+            )
+            store(image, for: key, dayKey: dayKey)
+            return image
+        }
+    }
+
+    private static func waitForSnapshot(
+        _ request: Task<UIImage, Error>,
+        key: String,
+        requestID: UUID,
+        consumerID: UUID
+    ) async throws -> UIImage {
+        defer { releaseConsumer(for: key, requestID: requestID, consumerID: consumerID) }
+        return try await withTaskCancellationHandler {
+            let image = try await request.value
+            try Task.checkCancellation()
+            return image
+        } onCancel: {
+            Task { @MainActor in
+                releaseConsumer(for: key, requestID: requestID, consumerID: consumerID)
+            }
+        }
+    }
+
+    private static func releaseConsumer(for key: String, requestID: UUID, consumerID: UUID) {
+        guard var request = inFlight[key], request.id == requestID else { return }
+        request.consumerIDs.remove(consumerID)
+        if !request.consumerIDs.isEmpty {
+            inFlight[key] = request
+            return
+        }
+        inFlight.removeValue(forKey: key)
+        inFlightKeysByDay[request.dayKey]?.remove(key)
+        if inFlightKeysByDay[request.dayKey]?.isEmpty == true {
+            inFlightKeysByDay.removeValue(forKey: request.dayKey)
+        }
+        request.task.cancel()
+    }
+
+    static func store(_ image: UIImage, for key: String, dayKey: String) {
+        storeInMemory(image, for: key, dayKey: dayKey)
+        let fileURL = diskFileURL(for: key, dayKey: dayKey)
         let diskEntryLimit = maximumDiskEntryCount
 
         Task.detached(priority: .utility) {
@@ -2427,16 +2547,58 @@ private enum DayMapSnapshotCache {
         }
     }
 
-    private static func storeInMemory(_ image: UIImage, for key: String) {
+    private static func storeInMemory(_ image: UIImage, for key: String, dayKey: String) {
         let pixelCost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
         cache.setObject(image, forKey: key as NSString, cost: pixelCost)
+        memoryKeyOrder.removeAll { $0 == key }
+        memoryKeyOrder.append(key)
+        memoryKeysByDay[dayKey, default: []].insert(key)
+        while memoryKeyOrder.count > 12 {
+            let oldestKey = memoryKeyOrder.removeFirst()
+            cache.removeObject(forKey: oldestKey as NSString)
+            for indexedDayKey in Array(memoryKeysByDay.keys) {
+                memoryKeysByDay[indexedDayKey]?.remove(oldestKey)
+                if memoryKeysByDay[indexedDayKey]?.isEmpty == true {
+                    memoryKeysByDay.removeValue(forKey: indexedDayKey)
+                }
+            }
+        }
     }
 
     static func removeAll() {
         cache.removeAllObjects()
+        for request in inFlight.values { request.task.cancel() }
+        inFlight.removeAll()
+        inFlightKeysByDay.removeAll()
+        memoryKeysByDay.removeAll()
+        memoryKeyOrder.removeAll()
     }
 
-    private static func diskFileURL(for key: String) -> URL {
+    static func remove(dayKey: String) {
+        let keysForDay = memoryKeysByDay.removeValue(forKey: dayKey) ?? []
+        for key in keysForDay {
+            cache.removeObject(forKey: key as NSString)
+        }
+        memoryKeyOrder.removeAll { keysForDay.contains($0) }
+        for key in inFlightKeysByDay.removeValue(forKey: dayKey) ?? [] {
+            inFlight.removeValue(forKey: key)?.task.cancel()
+        }
+
+        let directory = diskFileURL(for: "", dayKey: dayKey).deletingLastPathComponent()
+        let prefix = safeDayKey(dayKey) + "-"
+        Task.detached(priority: .utility) {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { return }
+            for file in files where file.lastPathComponent.hasPrefix(prefix) {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    private static func diskFileURL(for key: String, dayKey: String) -> URL {
         let digest = SHA256.hash(data: Data(key.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
@@ -2444,7 +2606,11 @@ private enum DayMapSnapshotCache {
         return root
             .appendingPathComponent("DayMapSnapshots", isDirectory: true)
             .appendingPathComponent(diskCacheVersion, isDirectory: true)
-            .appendingPathComponent("\(digest).png")
+            .appendingPathComponent("\(safeDayKey(dayKey))-\(digest).png")
+    }
+
+    private static func safeDayKey(_ dayKey: String) -> String {
+        String(dayKey.map { $0.isLetter || $0.isNumber ? $0 : "_" })
     }
 
     nonisolated private static func pruneDiskCache(
@@ -2481,8 +2647,7 @@ enum TimelinePresentationCacheInvalidator {
         DayPresentationSourceCache.remove(dayKey: dayKey)
         DayTimelinePresentationCacheStore.remove(dayKey: dayKey)
         DayMapPresentationCacheStore.remove(dayKey: dayKey)
-        // Snapshot keys include the day but are opaque hashes, so clear this small memory cache.
-        DayMapSnapshotCache.removeAll()
+        DayMapSnapshotCache.remove(dayKey: dayKey)
     }
 
     static func invalidateAll() {
@@ -2841,18 +3006,18 @@ struct DayMapStrip: View {
 
             ZStack {
                 let refreshKey = collapsedSnapshotRefreshKey(for: size)
-                if let collapsedSnapshotImage, collapsedSnapshotKey == refreshKey {
+                if let collapsedSnapshotImage = (collapsedSnapshotKey == refreshKey ? collapsedSnapshotImage : nil)
+                    ?? DayMapSnapshotCache.cachedImage(for: refreshKey) {
                     Image(uiImage: collapsedSnapshotImage)
                         .resizable()
                         .scaledToFill()
                         .frame(width: size.width, height: size.height)
                         .clipped()
                 } else {
-                    Map(position: $camera, interactionModes: []) {
-                        mapContent
-                    }
-                        .mapStyle(.standard(elevation: .flat, emphasis: .muted))
-                        .allowsHitTesting(false)
+                    // A collapsed map is decorative. Keep its cache miss cheap and
+                    // let the snapshot task populate it without constructing a live
+                    // SwiftUI Map/MapKit renderer during the first Timeline frame.
+                    Color(uiColor: .secondarySystemBackground)
                 }
             }
             .task(id: "\(collapsedSnapshotRefreshKey(for: size))|scrolling:\(isTimelineScrollActive)") {
@@ -3007,6 +3172,7 @@ struct DayMapStrip: View {
 
     private func collapsedSnapshotRefreshKey(for size: CGSize) -> String {
         [
+            dayTimeline.dayKey,
             "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))@\(Int(Self.screenScale.rounded()))",
             mapRegionSnapshotKey,
             presentationCache.routeRefreshKey,
@@ -3035,23 +3201,7 @@ struct DayMapStrip: View {
         guard !isShowingFullScreenMap, !isTimelineScrollActive, size.width > 1, size.height > 1 else { return }
         guard presentationCache.routeRefreshKey != "initial" else { return }
         let cacheKey = collapsedSnapshotRefreshKey(for: size)
-        if let cachedImage = await DayMapSnapshotCache.image(for: cacheKey) {
-            MovesStartupInstrumentation.event("collapsedMapSnapshotCacheHit")
-            collapsedSnapshotImage = cachedImage
-            collapsedSnapshotKey = cacheKey
-            return
-        }
-
-        // Give the already-visible live map first access to MapKit's tile pipeline. Snapshot
-        // generation then runs as a background cache fill instead of competing at first paint.
-        do {
-            try await Task.sleep(for: .milliseconds(600))
-        } catch {
-            return
-        }
-        guard !Task.isCancelled else { return }
-
-        if let cachedImage = await DayMapSnapshotCache.image(for: cacheKey) {
+        if let cachedImage = await DayMapSnapshotCache.image(for: cacheKey, dayKey: dayTimeline.dayKey) {
             MovesStartupInstrumentation.event("collapsedMapSnapshotCacheHit")
             collapsedSnapshotImage = cachedImage
             collapsedSnapshotKey = cacheKey
@@ -3063,21 +3213,22 @@ struct DayMapStrip: View {
             MovesStartupInstrumentation.signposter.endInterval("collapsedMapSnapshotGeneration", snapshotState)
         }
         do {
-            let image = try await Self.makeCollapsedSnapshot(
-                region: mapRegion,
-                size: size,
-                scale: Self.screenScale,
-                routes: historicalRoutes,
-                liveRouteSnapshot: liveRouteSnapshot,
-                placeMarkers: placeMarkers,
-                latestSampleCoordinate: latestSampleCoordinate,
-                showsBigMarkers: showsBigMarkers,
-                userInterfaceStyle: colorScheme == .dark ? .dark : .light,
-                selection: selection
-            )
+            let image = try await DayMapSnapshotCache.imageOrGenerate(for: cacheKey, dayKey: dayTimeline.dayKey) {
+                try await Self.makeCollapsedSnapshot(
+                    region: mapRegion,
+                    size: size,
+                    scale: Self.screenScale,
+                    routes: historicalRoutes,
+                    liveRouteSnapshot: liveRouteSnapshot,
+                    placeMarkers: placeMarkers,
+                    latestSampleCoordinate: latestSampleCoordinate,
+                    showsBigMarkers: showsBigMarkers,
+                    userInterfaceStyle: colorScheme == .dark ? .dark : .light,
+                    selection: selection
+                )
+            }
 
             guard !Task.isCancelled else { return }
-            DayMapSnapshotCache.store(image, for: cacheKey)
             collapsedSnapshotImage = image
             collapsedSnapshotKey = cacheKey
             MovesStartupInstrumentation.event("collapsedMapSnapshotGenerated")

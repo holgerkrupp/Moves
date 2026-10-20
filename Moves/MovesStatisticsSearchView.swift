@@ -594,7 +594,6 @@ struct MovesStatisticsSearchView: View {
                 SettingsCard(title: "Create") {
                     NavigationLink {
                         MovesHistoryMapView(
-                            dayTimelines: dayTimelines,
                             initialDate: initialDate
                         )
                     } label: {

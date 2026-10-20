@@ -198,6 +198,14 @@ enum ShareMapAggregateStore {
         period == .month || period == .year
     }
 
+    static func boundedSampleIndices(total: Int, limit: Int) -> [Int] {
+        guard total > 0, limit > 0 else { return [] }
+        guard total > limit else { return Array(0..<total) }
+        guard limit > 1 else { return [0] }
+        let step = Double(total - 1) / Double(limit - 1)
+        return (0..<limit).map { Int((Double($0) * step).rounded()) }
+    }
+
     static func periodKey(
         for period: MovesSharePeriod,
         date: Date,
@@ -278,6 +286,25 @@ enum ShareMapAggregateStore {
         return SHA256.hash(data: Data(source.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+
+    static func cachedTracks(
+        for period: MovesSharePeriod,
+        periodStart: Date,
+        in context: ModelContext
+    ) -> [ShareMapAggregateTrack]? {
+        guard let key = periodKey(for: period, date: periodStart) else { return nil }
+        guard !ShareMapAggregateDirtyPeriods.contains(key) else { return nil }
+        var descriptor = FetchDescriptor<ShareMapAggregate>(
+            predicate: #Predicate { $0.periodKey == key },
+            sortBy: [SortDescriptor(\.generatedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        guard let aggregate = try? context.fetch(descriptor).first,
+              let data = aggregate.tracksData else {
+            return nil
+        }
+        return decodeTracks(data)
     }
 
     static func cachedTracks(

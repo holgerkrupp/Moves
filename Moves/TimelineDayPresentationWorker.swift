@@ -73,6 +73,30 @@ struct TimelineSampleSnapshot: Identifiable, Sendable, Hashable {
         LocationSampleSource(rawValue: sourceRawValue) ?? .significantChange
     }
 
+    init(
+        dedupeKey: String,
+        deviceIdentifier: String,
+        timestamp: Date,
+        latitude: Double,
+        longitude: Double,
+        altitude: Double,
+        horizontalAccuracy: Double,
+        speed: Double,
+        sourceRawValue: String,
+        moveID: UUID?
+    ) {
+        self.dedupeKey = dedupeKey
+        self.deviceIdentifier = deviceIdentifier
+        self.timestamp = timestamp
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = altitude
+        self.horizontalAccuracy = horizontalAccuracy
+        self.speed = speed
+        self.sourceRawValue = sourceRawValue
+        self.moveID = moveID
+    }
+
     init(_ sample: LocationSample) {
         dedupeKey = sample.dedupeKey
         deviceIdentifier = sample.deviceIdentifier
@@ -128,7 +152,8 @@ struct TimelineMoveSnapshot: Identifiable, Sendable, Hashable {
         samples: [LocationSample],
         usesImportedRoute: Bool,
         usesHealthWorkoutRoute: Bool,
-        usesRouteTracking: Bool
+        usesRouteTracking: Bool,
+        includeRouteGeometry: Bool = true
     ) {
         id = move.id
         deviceIdentifier = move.deviceIdentifier
@@ -150,20 +175,85 @@ struct TimelineMoveSnapshot: Identifiable, Sendable, Hashable {
         // manual route data must remain nil so map presentation can fall back to
         // cached or recorded geometry.
         manualRouteCoordinates = move.manualRouteCoordinates?.map(RouteCoordinateStoragePoint.init)
-        let fallback = MoveRouteGeometry.rawCoordinates(
-            for: move,
-            samples: samples,
-            usesHealthWorkoutRoute: usesHealthWorkoutRoute
-        )
-        let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
-        routeCacheSignature = signature
-        // Preserve the former presentation path's device-local cache fallback.
-        // The method checks the CloudKit-backed cache first, then the rebuildable
-        // on-device cache, all while the model remains inside this ModelActor.
-        let cached = move.cachedRouteCoordinates(for: signature) ?? []
-        cachedRouteCoordinates = cached.isEmpty ? nil : cached.map(RouteCoordinateStoragePoint.init)
-        rawRouteCoordinates = fallback.map(RouteCoordinateStoragePoint.init)
+        if includeRouteGeometry {
+            let fallback = MoveRouteGeometry.rawCoordinates(
+                for: move,
+                samples: samples,
+                usesHealthWorkoutRoute: usesHealthWorkoutRoute
+            )
+            let signature = MoveRouteGeometry.cacheSignature(for: move, fallback: fallback)
+            routeCacheSignature = signature
+            // Preserve the former presentation path's device-local cache fallback.
+            let cached = move.cachedRouteCoordinates(for: signature) ?? []
+            cachedRouteCoordinates = cached.isEmpty ? nil : cached.map(RouteCoordinateStoragePoint.init)
+            rawRouteCoordinates = fallback.map(RouteCoordinateStoragePoint.init)
+        } else {
+            routeCacheSignature = "deferred|\(move.id.uuidString)"
+            cachedRouteCoordinates = nil
+            rawRouteCoordinates = []
+        }
         dayKey = move.dayTimeline?.dayKey
+    }
+}
+
+/// Bounded, model-free inputs needed to construct route geometry after the
+/// first Timeline rows are on screen. Imported route payload decoding and route
+/// deduplication are intentionally deferred by the staged snapshot API.
+struct TimelineMoveRouteGeometryInput: Sendable, Hashable {
+    let moveID: UUID
+    let importedRouteData: Data?
+    let startPlace: TimelinePlaceSnapshot?
+    let endPlace: TimelinePlaceSnapshot?
+    let samples: [TimelineSampleSnapshot]
+    let usesHealthWorkoutRoute: Bool
+}
+
+struct TimelinePreparedRouteGeometry: Sendable, Hashable {
+    let moveID: UUID
+    let rawCoordinates: [RouteCoordinateStoragePoint]
+}
+
+enum TimelineRouteGeometryPreparer {
+    /// Pure value work suitable for a detached task. Its input is capped by
+    /// `maxRouteSamplesPerMove` before crossing the actor boundary.
+    nonisolated static func prepare(
+        _ inputs: [TimelineMoveRouteGeometryInput]
+    ) async throws -> [TimelinePreparedRouteGeometry] {
+        var prepared: [TimelinePreparedRouteGeometry] = []
+        prepared.reserveCapacity(inputs.count)
+        for input in inputs {
+            try Task.checkCancellation()
+            let coordinates: [CLLocationCoordinate2D]
+            if let imported = ImportedRoutePayloadCodec.decode(input.importedRouteData), imported.count > 1 {
+                coordinates = imported.map {
+                    CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                }
+            } else {
+                let routeSamples = input.samples.filter { $0.source.isRouteTrack }
+                let selectedSamples = routeSamples.isEmpty ? input.samples : routeSamples
+                let orderedSamples = selectedSamples
+                    .sorted {
+                        if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+                        return $0.dedupeKey < $1.dedupeKey
+                    }
+                    .map(\.coordinate)
+                if input.usesHealthWorkoutRoute, orderedSamples.count > 1 {
+                    coordinates = orderedSamples
+                } else {
+                    coordinates = (input.startPlace.map { [$0.coordinate] } ?? [])
+                        + orderedSamples
+                        + (input.endPlace.map { [$0.coordinate] } ?? [])
+                }
+            }
+            prepared.append(TimelinePreparedRouteGeometry(
+                moveID: input.moveID,
+                rawCoordinates: RouteCoordinateOps.dedupeSequentialCoordinates(
+                    coordinates,
+                    minimumDistanceMeters: input.usesHealthWorkoutRoute ? 0 : 6
+                ).map(RouteCoordinateStoragePoint.init)
+            ))
+        }
+        return prepared
     }
 }
 
@@ -177,11 +267,18 @@ struct TimelineDaySnapshot: Sendable {
     let totalMoveCount: Int
     let totalSampleCount: Int
     let hasImportedRouteData: Bool
+    let routeGeometryInputs: [TimelineMoveRouteGeometryInput]
+    let countsAreExact: Bool
 }
 
 @ModelActor
 actor TimelineDayPresentationWorker {
-    func snapshot(dayStart: Date, loadAll: Bool = false) throws -> TimelineDaySnapshot {
+    func snapshot(
+        dayStart: Date,
+        loadAll: Bool = false,
+        includeExactCounts: Bool = true,
+        includeRouteGeometry: Bool = true
+    ) throws -> TimelineDaySnapshot {
         let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
             ?? dayStart.addingTimeInterval(24 * 60 * 60)
         let movePredicate = #Predicate<MoveSegment> { $0.startDate < dayEnd && $0.endDate >= dayStart }
@@ -217,8 +314,15 @@ actor TimelineDayPresentationWorker {
         let places = loadAll ? fetchedPlaces : Array(fetchedPlaces.prefix(TimelineDayPresentationLimits.maxLoadedPlaces))
         let samples = loadAll ? fetchedSamples : Array(fetchedSamples.prefix(TimelineDayPresentationLimits.maxLoadedSamples))
         // Keep exact summary counts without materializing records beyond the interactive cap.
-        let totalMoveCount = try modelContext.fetchCount(FetchDescriptor(predicate: movePredicate))
-        let totalSampleCount = try modelContext.fetchCount(FetchDescriptor(predicate: samplePredicate))
+        let totalMoveCount: Int
+        let totalSampleCount: Int
+        if includeExactCounts {
+            totalMoveCount = try modelContext.fetchCount(FetchDescriptor(predicate: movePredicate))
+            totalSampleCount = try modelContext.fetchCount(FetchDescriptor(predicate: samplePredicate))
+        } else {
+            totalMoveCount = loadAll ? fetchedMoves.count : min(fetchedMoves.count, TimelineDayPresentationLimits.maxLoadedMoves)
+            totalSampleCount = loadAll ? fetchedSamples.count : min(fetchedSamples.count, TimelineDayPresentationLimits.maxLoadedSamples)
+        }
         var importedDescriptor = FetchDescriptor<LocationSample>(predicate: importedPredicate)
         importedDescriptor.fetchLimit = 1
         let hasImportedSamples = try !modelContext.fetch(importedDescriptor).isEmpty
@@ -260,9 +364,21 @@ actor TimelineDayPresentationWorker {
                 samples: routeSamples,
                 usesImportedRoute: isImported,
                 usesHealthWorkoutRoute: isHealth,
-                usesRouteTracking: sourceFlags[move.id, default: 0] & (1 << 1) != 0
+                usesRouteTracking: sourceFlags[move.id, default: 0] & (1 << 1) != 0,
+                includeRouteGeometry: includeRouteGeometry
             )
         }
+        let geometryInputs: [TimelineMoveRouteGeometryInput] = includeRouteGeometry ? visibleMoves.map { move in
+            let routeSamples = samplesByMoveID[move.id] ?? []
+            return TimelineMoveRouteGeometryInput(
+                moveID: move.id,
+                importedRouteData: move.importedRouteData,
+                startPlace: move.startPlace.flatMap { placeSnapshots[$0.id] },
+                endPlace: move.endPlace.flatMap { placeSnapshots[$0.id] },
+                samples: routeSamples.map(TimelineSampleSnapshot.init),
+                usesHealthWorkoutRoute: sourceFlags[move.id, default: 0] & (1 << 2) != 0
+            )
+        } : []
         let carriedOverPlace: TimelinePlaceSnapshot?
         if visibleMoves.isEmpty, visiblePlaces.isEmpty, totalSampleCount == 0 {
             var carriedDescriptor = FetchDescriptor<VisitPlace>(
@@ -286,7 +402,9 @@ actor TimelineDayPresentationWorker {
             carriedOverPlace: carriedOverPlace,
             totalMoveCount: totalMoveCount,
             totalSampleCount: totalSampleCount,
-            hasImportedRouteData: hasImportedSamples || importedMoveIDs.isEmpty == false
+            hasImportedRouteData: hasImportedSamples || importedMoveIDs.isEmpty == false,
+            routeGeometryInputs: geometryInputs,
+            countsAreExact: includeExactCounts || loadAll
         )
     }
 
