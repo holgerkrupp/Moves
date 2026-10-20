@@ -17,6 +17,23 @@ struct TimelineDayNavigationWindow: Sendable, Equatable {
     let hasNewerDays: Bool
 }
 
+/// Invalidates asynchronous date/ID lookup chains as soon as a newer selection starts.
+@MainActor
+final class TimelineDayNavigationRequestGate {
+    struct Token: Equatable, Sendable {
+        fileprivate let generation: UInt64
+    }
+
+    private var generation: UInt64 = 0
+
+    func begin() -> Token {
+        generation &+= 1
+        return Token(generation: generation)
+    }
+
+    func isCurrent(_ token: Token) -> Bool { token.generation == generation }
+}
+
 /// Runs the bounded day-index queries away from the UI executor. Full day content is
 /// loaded by TimelineDayPresentationWorker only after the selected page is presented.
 @ModelActor

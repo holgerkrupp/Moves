@@ -4,6 +4,28 @@ import XCTest
 @testable import Moves
 
 final class TimelineDayNavigationWorkerTests: XCTestCase {
+    @MainActor
+    func testLaterSelectionInvalidatesAnOlderSuspendedDayLookup() async throws {
+        let gate = TimelineDayNavigationRequestGate()
+        let olderLookup = gate.begin()
+        let continuationReady = expectation(description: "older lookup suspended")
+        var resumeLookup: CheckedContinuation<Bool, Never>?
+        let suspendedLookup = Task { @MainActor in
+            await withCheckedContinuation { continuation in
+                resumeLookup = continuation
+                continuationReady.fulfill()
+            }
+        }
+
+        await fulfillment(of: [continuationReady])
+        let newerSelection = gate.begin()
+        resumeLookup?.resume(returning: gate.isCurrent(olderLookup))
+
+        let olderResult = await suspendedLookup.value
+        XCTAssertFalse(olderResult)
+        XCTAssertTrue(gate.isCurrent(newerSelection))
+    }
+
     func testNavigationMetadataIsBoundedAndRelationshipFreeForLargeHistory() async throws {
         let container = try MovesTimelineStore.makeApplicationContainer(
             isStoredInMemoryOnly: true,

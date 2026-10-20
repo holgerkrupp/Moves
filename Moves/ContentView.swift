@@ -373,7 +373,7 @@ final class TimelineDayWindowStore: ObservableObject {
 
     private var modelContext: ModelContext?
     private var navigationWorker: TimelineDayNavigationWorker?
-    private var asyncRequestGeneration: UInt64 = 0
+    private let asyncRequestGate = TimelineDayNavigationRequestGate()
 
     func loadInitial(using modelContext: ModelContext) {
         MovesStartupInstrumentation.event("initialTimelineWindowLoadStart")
@@ -410,16 +410,16 @@ final class TimelineDayWindowStore: ObservableObject {
             async let pagerResult = worker.recentWindow(limit: Self.pagerWindowSize, sidebarLimit: Self.recentSidebarWindowSize)
             async let sidebarResult = worker.newestDays(limit: Self.recentSidebarWindowSize)
             let (window, sidebar) = try await (pagerResult, sidebarResult)
-            guard request == asyncRequestGeneration else { return }
+            guard asyncRequestGate.isCurrent(request) else { return }
             let days = try hydrate(window.days, in: modelContext)
             let recent = try hydrate(sidebar, in: modelContext)
-            guard request == asyncRequestGeneration else { return }
+            guard asyncRequestGate.isCurrent(request) else { return }
             pagerDays = days
             recentDays = recent
             hasOlderDays = window.hasOlderDays
             hasNewerDays = window.hasNewerDays
         } catch {
-            guard request == asyncRequestGeneration else { return }
+            guard asyncRequestGate.isCurrent(request) else { return }
             pagerDays = []
             recentDays = []
             hasOlderDays = false
@@ -429,17 +429,27 @@ final class TimelineDayWindowStore: ObservableObject {
 
     @MainActor
     func loadWindowInBackground(around date: Date, refreshRecentDays: Bool = false) async -> Bool {
+        await loadWindowInBackground(around: date, refreshRecentDays: refreshRecentDays, request: nextAsyncRequest())
+    }
+
+    @MainActor
+    private func loadWindowInBackground(
+        around date: Date,
+        refreshRecentDays: Bool,
+        request: TimelineDayNavigationRequestGate.Token
+    ) async -> Bool {
         guard let worker = navigationWorker, let modelContext else { return false }
-        let request = nextAsyncRequest()
         launchQueryCounts.explicitWindowReloads += 1
+        MovesStartupInstrumentation.event("dayTimelineExplicitWindowReload")
         do {
             guard let center = try await worker.nearestDay(to: date) else { return false }
+            guard asyncRequestGate.isCurrent(request) else { return false }
             let window = try await worker.window(around: center.dayStart, limit: Self.pagerWindowSize)
             let sidebar = refreshRecentDays ? try await worker.newestDays(limit: Self.recentSidebarWindowSize) : nil
-            guard request == asyncRequestGeneration else { return false }
+            guard asyncRequestGate.isCurrent(request) else { return false }
             let days = try hydrate(window.days, in: modelContext)
             let recent = try sidebar.map { try hydrate($0, in: modelContext) }
-            guard request == asyncRequestGeneration else { return false }
+            guard asyncRequestGate.isCurrent(request) else { return false }
             pagerDays = days
             if let recent { recentDays = recent }
             hasOlderDays = window.hasOlderDays
@@ -450,15 +460,19 @@ final class TimelineDayWindowStore: ObservableObject {
 
     @MainActor
     func loadDayKeyInBackground(_ dayKey: String) async -> Bool {
-        guard let worker = navigationWorker, let day = try? await worker.day(dayKey: dayKey) else { return false }
-        return await loadWindowInBackground(around: day.dayStart)
+        guard let worker = navigationWorker else { return false }
+        let request = nextAsyncRequest()
+        guard let day = try? await worker.day(dayKey: dayKey), asyncRequestGate.isCurrent(request) else { return false }
+        return await loadWindowInBackground(around: day.dayStart, refreshRecentDays: false, request: request)
     }
 
     @MainActor
     func loadPlaceDayInBackground(_ placeID: UUID) async -> String? {
-        guard let worker = navigationWorker,
-              let day = try? await worker.day(containingPlaceID: placeID),
-              await loadWindowInBackground(around: day.dayStart) else { return nil }
+        guard let worker = navigationWorker else { return nil }
+        let request = nextAsyncRequest()
+        guard let day = try? await worker.day(containingPlaceID: placeID),
+              asyncRequestGate.isCurrent(request),
+              await loadWindowInBackground(around: day.dayStart, refreshRecentDays: false, request: request) else { return nil }
         return day.dayKey
     }
 
@@ -473,9 +487,9 @@ final class TimelineDayWindowStore: ObservableObject {
             let candidate = older
                 ? probe.days.last(where: { $0.dayStart < edge.dayStart })
                 : probe.days.first(where: { $0.dayStart > edge.dayStart })
-            guard let candidate, request == asyncRequestGeneration else { return nil }
+            guard let candidate, asyncRequestGate.isCurrent(request) else { return nil }
             let neighbor = try hydrate([candidate], in: modelContext).first
-            guard let neighbor, request == asyncRequestGeneration else { return nil }
+            guard let neighbor, asyncRequestGate.isCurrent(request) else { return nil }
             if older {
                 pagerDays.insert(neighbor, at: 0)
                 if pagerDays.count > Self.pagerWindowSize { pagerDays.removeLast() }
@@ -490,9 +504,8 @@ final class TimelineDayWindowStore: ObservableObject {
         } catch { return nil }
     }
 
-    private func nextAsyncRequest() -> UInt64 {
-        asyncRequestGeneration &+= 1
-        return asyncRequestGeneration
+    private func nextAsyncRequest() -> TimelineDayNavigationRequestGate.Token {
+        asyncRequestGate.begin()
     }
 
     private func hydrate(_ metadata: [TimelineDayNavigationMetadata], in context: ModelContext) throws -> [DayTimeline] {
@@ -515,88 +528,6 @@ final class TimelineDayWindowStore: ObservableObject {
         }
     }
 
-    /// Loads a bounded window around the nearest stored day to the requested date.
-    /// This is used by date jumps and never scans the complete DayTimeline collection.
-    @discardableResult
-    func loadWindow(around date: Date, refreshRecentDays: Bool = false) -> Bool {
-        guard let modelContext else { return false }
-        launchQueryCounts.explicitWindowReloads += 1
-        MovesStartupInstrumentation.event("dayTimelineExplicitWindowReload")
-
-        do {
-            let center = try nearestDay(to: date, in: modelContext)
-            guard let center else { return false }
-            pagerDays = try fetchWindow(around: center.dayStart, in: modelContext)
-            if refreshRecentDays {
-                recentDays = try fetchRecentDays(in: modelContext)
-            }
-            updateBoundaries()
-            return !pagerDays.isEmpty
-        } catch {
-            return false
-        }
-    }
-
-    /// Adds one older day while preserving the bounded pager window.
-    @discardableResult
-    func loadOlderDay() -> DayTimeline? {
-        guard let modelContext, let firstDay = pagerDays.first else { return nil }
-        let boundary = firstDay.dayStart
-
-        do {
-            var descriptor = FetchDescriptor<DayTimeline>(
-                predicate: #Predicate { day in
-                    day.dayStart < boundary
-                },
-                sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
-            )
-            descriptor.fetchLimit = 1
-            guard let olderDay = try modelContext.fetch(descriptor).first else {
-                updateBoundaries()
-                return nil
-            }
-
-            pagerDays.insert(olderDay, at: 0)
-            if pagerDays.count > Self.pagerWindowSize {
-                pagerDays.removeLast()
-            }
-            updateBoundaries()
-            return olderDay
-        } catch {
-            return nil
-        }
-    }
-
-    /// Adds one newer day while preserving the bounded pager window.
-    @discardableResult
-    func loadNewerDay() -> DayTimeline? {
-        guard let modelContext, let lastDay = pagerDays.last else { return nil }
-        let boundary = lastDay.dayStart
-
-        do {
-            var descriptor = FetchDescriptor<DayTimeline>(
-                predicate: #Predicate { day in
-                    day.dayStart > boundary
-                },
-                sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
-            )
-            descriptor.fetchLimit = 1
-            guard let newerDay = try modelContext.fetch(descriptor).first else {
-                updateBoundaries()
-                return nil
-            }
-
-            pagerDays.append(newerDay)
-            if pagerDays.count > Self.pagerWindowSize {
-                pagerDays.removeFirst()
-            }
-            updateBoundaries()
-            return newerDay
-        } catch {
-            return nil
-        }
-    }
-
     /// Prefetches beyond the selected page, keeping the selected day stable if the
     /// bounded window has to slide.
     func prefetch(around index: Int) -> Int? {
@@ -612,114 +543,7 @@ final class TimelineDayWindowStore: ObservableObject {
         return index
     }
 
-    private func fetchRecentDays(in modelContext: ModelContext) throws -> [DayTimeline] {
-        var descriptor = FetchDescriptor<DayTimeline>(
-            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
-        )
-        descriptor.fetchLimit = Self.recentSidebarWindowSize
-        return try modelContext.fetch(descriptor)
-    }
 
-    private func nearestDay(to date: Date, in modelContext: ModelContext) throws -> DayTimeline? {
-        var beforeDescriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { day in
-                day.dayStart <= date
-            },
-            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
-        )
-        beforeDescriptor.fetchLimit = 1
-
-        var afterDescriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { day in
-                day.dayStart > date
-            },
-            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
-        )
-        afterDescriptor.fetchLimit = 1
-
-        let candidates = try modelContext.fetch(beforeDescriptor) + modelContext.fetch(afterDescriptor)
-        return candidates.min {
-            abs($0.dayStart.timeIntervalSince(date)) < abs($1.dayStart.timeIntervalSince(date))
-        }
-    }
-
-    private func fetchWindow(around date: Date, in modelContext: ModelContext) throws -> [DayTimeline] {
-        let olderCount = Self.pagerWindowSize / 2
-        let newerCount = Self.pagerWindowSize - olderCount - 1
-
-        var olderDescriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { day in
-                day.dayStart < date
-            },
-            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .reverse)]
-        )
-        olderDescriptor.fetchLimit = olderCount
-
-        var newerDescriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { day in
-                day.dayStart > date
-            },
-            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
-        )
-        newerDescriptor.fetchLimit = newerCount
-
-        let older = try modelContext.fetch(olderDescriptor).reversed()
-        var centerDescriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { day in
-                day.dayStart == date
-            },
-            sortBy: [SortDescriptor(\DayTimeline.dayStart, order: .forward)]
-        )
-        centerDescriptor.fetchLimit = 1
-        let center = try modelContext.fetch(centerDescriptor)
-        let newer = try modelContext.fetch(newerDescriptor)
-        return Array(older) + center + newer
-    }
-
-    private func fetchDay(withKey dayKey: String) -> DayTimeline? {
-        guard let modelContext else { return nil }
-        var descriptor = FetchDescriptor<DayTimeline>(
-            predicate: #Predicate { day in
-                day.dayKey == dayKey
-            }
-        )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
-    }
-
-    private func updateBoundaries() {
-        guard let modelContext,
-              let firstDay = pagerDays.first,
-              let lastDay = pagerDays.last else {
-            hasOlderDays = false
-            hasNewerDays = false
-            return
-        }
-
-        do {
-            let olderBoundary = firstDay.dayStart
-            let newerBoundary = lastDay.dayStart
-            var olderDescriptor = FetchDescriptor<DayTimeline>(
-                predicate: #Predicate { day in
-                    day.dayStart < olderBoundary
-                }
-            )
-            olderDescriptor.fetchLimit = 1
-
-            var newerDescriptor = FetchDescriptor<DayTimeline>(
-                predicate: #Predicate { day in
-                    day.dayStart > newerBoundary
-                }
-            )
-            newerDescriptor.fetchLimit = 1
-
-            hasOlderDays = try !modelContext.fetch(olderDescriptor).isEmpty
-            hasNewerDays = try !modelContext.fetch(newerDescriptor).isEmpty
-        } catch {
-            hasOlderDays = false
-            hasNewerDays = false
-        }
-    }
 }
 
 struct ContentView: View {
