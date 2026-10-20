@@ -553,36 +553,38 @@ struct MovesHistoryMapView: View {
             tracks = []
             cacheBuildProgress = 0
             let requestKey = dataRefreshKey
-            let loaded = try? await HistoryMapTrackLoader(modelContainer: container).load(
-                period: period,
-                periodStart: periodStart,
-                onBatch: { batch, progress in
-                    Task { @MainActor in
-                        guard dataRefreshKey == requestKey else { return }
-                        cacheBuildProgress = progress
-                        guard !batch.isEmpty else { return }
-                        let shouldFrameMap = tracks.isEmpty
-                        tracks.append(contentsOf: batch.map { dto in
-                            Track(
-                                id: dto.id,
-                                transportMode: TransportMode(rawValue: dto.transportModeRawValue) ?? .unknown,
-                                coordinates: dto.coordinates.map {
-                                    CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
-                                },
-                                usesDetailedRoute: dto.usesDetailedRoute
-                            )
-                        })
-                        if shouldFrameMap {
-                            let region = MapRegionFactory.region(for: allCoordinates)
-                            visibleRegion = region
-                            camera = .region(region)
+            do {
+                try await HistoryMapTrackLoader(modelContainer: container).load(
+                    period: period,
+                    periodStart: periodStart,
+                    onBatch: { batch, progress in
+                        Task { @MainActor in
+                            guard dataRefreshKey == requestKey else { return }
+                            cacheBuildProgress = progress
+                            guard !batch.isEmpty else { return }
+                            let shouldFrameMap = tracks.isEmpty
+                            tracks.append(contentsOf: batch.map { dto in
+                                Track(
+                                    id: dto.id,
+                                    transportMode: TransportMode(rawValue: dto.transportModeRawValue) ?? .unknown,
+                                    coordinates: dto.coordinates.map {
+                                        CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                                    },
+                                    usesDetailedRoute: dto.usesDetailedRoute
+                                )
+                            })
+                            if shouldFrameMap {
+                                let region = MapRegionFactory.region(for: allCoordinates)
+                                visibleRegion = region
+                                camera = .region(region)
+                            }
                         }
                     }
-                }
-            )
+                )
+            } catch {
+                cacheBuildProgress = nil
+            }
             guard !Task.isCancelled else { return }
-            // If fetching failed before the first batch, keep the map empty and clear its progress.
-            if loaded == nil { cacheBuildProgress = nil }
         }
 
         let region = MapRegionFactory.region(for: allCoordinates)

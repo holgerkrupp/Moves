@@ -11,6 +11,13 @@ need a physical iPhone with a representative local store. No device traces or
 before/after measurements are checked into this change unless they were captured
 on hardware; do not infer performance numbers from simulator runs.
 
+On 2026-10-20, the focused iOS Simulator run on iPhone 18 Pro (iOS 27.0)
+passed 14 tests across `DayMapSnapshotCacheTests`,
+`HistoryMapScalabilityTests`, `TimelineDayPresentationStagingTests`, and
+`TimelineDayNavigationWorkerTests`. The `Moves` scheme built for generic iOS
+Simulator and generic macOS destinations. Physical-device p50/p95 and hitch
+measurements remain outstanding.
+
 ## Build and test
 
 Discover the current schemes and destinations before running these commands:
@@ -22,8 +29,11 @@ xcodebuild -showdestinations -scheme Moves -project Moves.xcodeproj
 
 Run the focused test classes for launch reliability, day navigation, selected-day
 presentation, snapshot invalidation, and History Map aggregation first. Then run
-the full `MovesTests` suite on an iOS Simulator and build both `Moves` and
-`Moves Mac` schemes. Record Xcode version, destination, test command, and result.
+the full `MovesTests` suite on an iOS Simulator and build the `Moves` scheme for
+both `generic/platform=iOS` and `generic/platform=macOS`. Record Xcode version,
+destination, test command, and result. The `Moves Mac` scheme currently has no
+configured build action in this checkout, so use the main scheme for the macOS
+build.
 
 ## Physical-device procedure
 

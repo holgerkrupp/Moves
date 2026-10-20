@@ -391,7 +391,8 @@ struct DayTimelinePageContent: View {
                     modelContainer: modelContext.container,
                     dayStart: dayTimeline.dayStart,
                     dayKey: dayTimeline.dayKey,
-                    generation: presentationGeneration
+                    generation: presentationGeneration,
+                    includeRouteGeometry: false
                 )
                 guard !Task.isCancelled else { return }
                 source = DayPresentationValueSource(snapshot)
@@ -407,10 +408,33 @@ struct DayTimelinePageContent: View {
             let cache = Self.makePresentationCache(for: dayTimeline, source: source, mode: routeDisplayMode)
             MovesStartupInstrumentation.signposter.endInterval("selectedDayPresentationFetchAndBuild", state)
             guard !Task.isCancelled else { return }
-            DayTimelinePresentationCacheStore.store(cache, for: dayTimeline.dayKey, rawMode: rawMode)
             presentationCache = cache
             MovesStartupInstrumentation.event("selectedDayPresentationEnd")
             markTimelineInteractiveIfNeeded()
+
+            // Publish row content before constructing route geometry. Keep this
+            // follow-up in the same task so navigation cancels it with the page.
+            do {
+                let geometrySnapshot = try await DayPresentationValueSourceCache.snapshot(
+                    modelContainer: modelContext.container,
+                    dayStart: dayTimeline.dayStart,
+                    dayKey: dayTimeline.dayKey,
+                    generation: presentationGeneration,
+                    includeRouteGeometry: true
+                )
+                guard !Task.isCancelled else { return }
+                let geometryCache = Self.makePresentationCache(
+                    for: dayTimeline,
+                    source: DayPresentationValueSource(geometrySnapshot),
+                    mode: routeDisplayMode
+                )
+                guard !Task.isCancelled else { return }
+                DayTimelinePresentationCacheStore.store(geometryCache, for: dayTimeline.dayKey, rawMode: rawMode)
+                presentationCache = geometryCache
+            } catch {
+                // The already-published rows remain usable if optional route
+                // preparation fails or the worker is cancelled.
+            }
         }
         .task {
             for await notification in TimelineNotificationCoalescer.events(named: .movesLocationSamplesDidChange) {
@@ -1650,9 +1674,11 @@ enum DayPresentationValueSourceCache {
         dayStart: Date,
         dayKey: String,
         generation: Int,
-        loadAll: Bool = false
+        loadAll: Bool = false,
+        includeExactCounts: Bool = true,
+        includeRouteGeometry: Bool = true
     ) async throws -> TimelineDaySnapshot {
-        let key = "\(dayKey)|\(generation)|\(loadAll ? "all" : "bounded")"
+        let key = "\(dayKey)|\(generation)|\(loadAll ? "all" : "bounded")|counts:\(includeExactCounts)|geometry:\(includeRouteGeometry)"
         let requestEpoch = TimelinePresentationEpochLedger.token(for: dayKey)
         if let cached = entries[key] {
             touch(key)
@@ -1666,7 +1692,12 @@ enum DayPresentationValueSourceCache {
                 id: UUID(),
                 task: Task {
                     let worker = TimelineDayPresentationWorker(modelContainer: modelContainer)
-                    return try await worker.snapshot(dayStart: dayStart, loadAll: loadAll)
+                    return try await worker.snapshot(
+                        dayStart: dayStart,
+                        loadAll: loadAll,
+                        includeExactCounts: includeExactCounts,
+                        includeRouteGeometry: includeRouteGeometry
+                    )
                 }
             )
             inFlight[key] = flight

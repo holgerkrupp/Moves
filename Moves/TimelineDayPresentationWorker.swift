@@ -368,7 +368,7 @@ actor TimelineDayPresentationWorker {
                 includeRouteGeometry: includeRouteGeometry
             )
         }
-        let geometryInputs = visibleMoves.map { move in
+        let geometryInputs: [TimelineMoveRouteGeometryInput] = includeRouteGeometry ? visibleMoves.map { move in
             let routeSamples = samplesByMoveID[move.id] ?? []
             return TimelineMoveRouteGeometryInput(
                 moveID: move.id,
@@ -378,7 +378,7 @@ actor TimelineDayPresentationWorker {
                 samples: routeSamples.map(TimelineSampleSnapshot.init),
                 usesHealthWorkoutRoute: sourceFlags[move.id, default: 0] & (1 << 2) != 0
             )
-        }
+        } : []
         let carriedOverPlace: TimelinePlaceSnapshot?
         if visibleMoves.isEmpty, visiblePlaces.isEmpty, totalSampleCount == 0 {
             var carriedDescriptor = FetchDescriptor<VisitPlace>(

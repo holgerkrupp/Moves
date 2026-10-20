@@ -36,8 +36,15 @@ final class TimelineDayPresentationStagingTests: XCTestCase {
 
         XCTAssertFalse(snapshot.countsAreExact)
         XCTAssertEqual(moveSnapshot.rawRouteCoordinates, [])
-        XCTAssertNotNil(snapshot.routeGeometryInputs.first?.importedRouteData)
-        XCTAssertEqual(snapshot.routeGeometryInputs.first?.moveID, move.id)
+        XCTAssertTrue(snapshot.routeGeometryInputs.isEmpty)
+
+        let fullSnapshot = try await TimelineDayPresentationWorker(modelContainer: container).snapshot(
+            dayStart: dayStart,
+            includeExactCounts: false,
+            includeRouteGeometry: true
+        )
+        XCTAssertNotNil(fullSnapshot.routeGeometryInputs.first?.importedRouteData)
+        XCTAssertEqual(fullSnapshot.routeGeometryInputs.first?.moveID, move.id)
     }
 
     func testDeferredImportedGeometryPreparationPreservesRecordedCoordinates() async throws {
