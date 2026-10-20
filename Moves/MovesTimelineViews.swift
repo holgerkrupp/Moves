@@ -436,6 +436,35 @@ struct DayTimelinePageContent: View {
                 // preparation fails or the worker is cancelled.
             }
         }
+        .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)|\(routeDisplayMode.rawValue)") {
+            guard isActive,
+                  RawLocationFixPresentation.schedulesRouteMatching(in: routeDisplayMode),
+                  !Task.isCancelled else { return }
+            do {
+                // Start road matching from the selected day page itself. The
+                // embedded map can be deferred by the scrolling hero, so its
+                // lifecycle must not decide whether first-load matching runs.
+                let snapshot = try await DayPresentationValueSourceCache.snapshot(
+                    modelContainer: modelContext.container,
+                    dayStart: dayTimeline.dayStart,
+                    dayKey: dayTimeline.dayKey,
+                    generation: presentationGeneration,
+                    includeRouteGeometry: true
+                )
+                guard !Task.isCancelled else { return }
+                let displayedMoves = TimelineValuePresentationLimits.selection(
+                    from: snapshot.moves,
+                    maxImportedMoves: TimelinePresentationLimits.maxMapImportedMoves,
+                    maxTotalMoves: TimelinePresentationLimits.maxMapMoves,
+                    importedMoveIDs: snapshot.importedMoveIDs
+                ).moves
+                let requests = TimelineRouteMatchRequestBuilder.requests(from: displayedMoves)
+                captureManager.prepareRouteMatches(for: requests)
+            } catch {
+                // Keep the raw recorded route visible; the next day/lifecycle
+                // pass can retry matching if the snapshot could not be loaded.
+            }
+        }
         .task {
             for await notification in TimelineNotificationCoalescer.events(named: .movesLocationSamplesDidChange) {
                 guard !Task.isCancelled else { return }
@@ -2924,25 +2953,6 @@ struct DayMapStrip: View {
                 MovesStartupInstrumentation.signposter.endInterval("selectedDayMapPresentationFetchAndBuild", state)
                 applyPresentation(cache)
                 MovesStartupInstrumentation.event("selectedDayMapPresentationEnd")
-            }
-            .task(id: "route-matching|\(presentationRefreshKey)|\(isActive ? 1 : 0)|\(routeDisplayMode.rawValue)") {
-                guard isActive, !Task.isCancelled else { return }
-                guard let snapshot = try? await DayPresentationValueSourceCache.snapshot(
-                    modelContainer: modelContext.container,
-                    dayStart: dayTimeline.dayStart,
-                    dayKey: dayTimeline.dayKey,
-                    generation: presentationGeneration
-                ), !Task.isCancelled else { return }
-                let requests = Self.displayedMoves(from: DayPresentationValueSource(snapshot)).compactMap { move -> InferredMoveRouteMatchRequest? in
-                    guard move.rawRouteCoordinates.count > 1 else { return nil }
-                    return InferredMoveRouteMatchRequest(
-                        moveID: move.id,
-                        cacheSignature: move.routeCacheSignature,
-                        transportMode: move.transportMode,
-                        fallback: move.rawRouteCoordinates
-                    )
-                }
-                captureManager.prepareRouteMatches(for: requests)
             }
     }
 

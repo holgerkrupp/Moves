@@ -100,4 +100,64 @@ final class TimelineDayPresentationStagingTests: XCTestCase {
         XCTAssertEqual(prepared.rawCoordinates.first?.latitude, start.latitude)
         XCTAssertEqual(prepared.rawCoordinates.last?.longitude, end.longitude)
     }
+
+    func testFirstDaySnapshotCreatesStreetMatchRequestAndCachedMatchIsNotRescheduled() async throws {
+        let schema = Schema([DayTimeline.self, VisitPlace.self, KnownLocation.self, MoveSegment.self, LocationSample.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let dayStart = Date(timeIntervalSince1970: 1_790_000_000)
+        let move = MoveSegment(
+            dedupeKey: "first-paint-road-match",
+            startDate: dayStart.addingTimeInterval(60),
+            endDate: dayStart.addingTimeInterval(600),
+            transportMode: .automotive,
+            distanceMeters: 1_500,
+            stepCount: nil
+        )
+        let samples = [
+            LocationSample(
+                location: CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: 52.5200, longitude: 13.4050),
+                    altitude: 0, horizontalAccuracy: 5, verticalAccuracy: -1,
+                    course: -1, speed: 4, timestamp: dayStart.addingTimeInterval(120)
+                ),
+                source: .significantChange,
+                dedupeKey: "match-a"
+            ),
+            LocationSample(
+                location: CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: 52.5300, longitude: 13.4150),
+                    altitude: 0, horizontalAccuracy: 5, verticalAccuracy: -1,
+                    course: -1, speed: 4, timestamp: dayStart.addingTimeInterval(540)
+                ),
+                source: .significantChange,
+                dedupeKey: "match-b"
+            )
+        ]
+        move.samples = samples
+        for sample in samples {
+            sample.moveSegment = move
+            container.mainContext.insert(sample)
+        }
+        container.mainContext.insert(move)
+        try container.mainContext.save()
+
+        let worker = TimelineDayPresentationWorker(modelContainer: container)
+        let firstSnapshot = try await worker.snapshot(dayStart: dayStart, includeRouteGeometry: true)
+        let firstRequest = try XCTUnwrap(TimelineRouteMatchRequestBuilder.requests(from: firstSnapshot.moves).first)
+        XCTAssertEqual(firstRequest.moveID, move.id)
+        XCTAssertEqual(firstRequest.fallback.count, 2)
+
+        move.storeSyncedRouteCoordinates(
+            [
+                CLLocationCoordinate2D(latitude: 52.5201, longitude: 13.4051),
+                CLLocationCoordinate2D(latitude: 52.5301, longitude: 13.4151)
+            ],
+            signature: firstRequest.cacheSignature
+        )
+        try container.mainContext.save()
+
+        let matchedSnapshot = try await worker.snapshot(dayStart: dayStart, includeRouteGeometry: true)
+        XCTAssertTrue(TimelineRouteMatchRequestBuilder.requests(from: matchedSnapshot.moves).isEmpty)
+    }
 }

@@ -271,6 +271,29 @@ struct TimelineDaySnapshot: Sendable {
     let countsAreExact: Bool
 }
 
+enum TimelineRouteMatchRequestBuilder {
+    static func requests(from moves: [TimelineMoveSnapshot]) -> [InferredMoveRouteMatchRequest] {
+        moves.compactMap { move in
+            guard RoadRouteMatchingPolicy.shouldMatch(move.transportMode),
+                  move.manualRouteCoordinates == nil,
+                  move.cachedRouteCoordinates == nil,
+                  !move.usesImportedRoute,
+                  !move.usesRouteTracking,
+                  move.rawRouteCoordinates.count > 1
+            else {
+                return nil
+            }
+
+            return InferredMoveRouteMatchRequest(
+                moveID: move.id,
+                cacheSignature: move.routeCacheSignature,
+                transportMode: move.transportMode,
+                fallback: move.rawRouteCoordinates
+            )
+        }
+    }
+}
+
 @ModelActor
 actor TimelineDayPresentationWorker {
     func snapshot(
