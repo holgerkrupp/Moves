@@ -11,29 +11,30 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+private struct RegularPlaceSettingsQueryKey: Hashable {
+    let definitions: [RegularPlaceDefinitionDTO]
+    let historyRevision: Int
+}
+
+private struct RegularPlaceReconciliationRequest: Sendable {
+    let location: RegularPlaceDefinitionDTO
+    let replacedID: UUID?
+    let previousDefinition: RegularPlaceDefinitionDTO?
+    let definitions: [RegularPlaceDefinitionDTO]
+    let selectedVisitID: UUID?
+}
+
 struct RegularPlacesSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \KnownLocation.name, order: .forward) private var locations: [KnownLocation]
-    @Query private var visits: [VisitPlace]
     @State private var isCreating = false
-
-    private var unlabeledFrequentLocations: [MovesLocationSummary] {
-        let groups = Dictionary(grouping: visits.filter {
-            ($0.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-                && ($0.regularPlaceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        }) { visit in
-            "\(Int((visit.latitude * 1_000).rounded()))|\(Int((visit.longitude * 1_000).rounded()))"
-        }
-        return groups.values.filter { $0.count >= 2 }.map { group in
-            let sorted = group.sorted { $0.arrivalDate > $1.arrivalDate }
-            let duration = sorted.reduce(0.0) { total, visit in
-                total + max((visit.departureDate ?? .now).timeIntervalSince(visit.arrivalDate), 0)
-            }
-            return MovesLocationSummary(id: "unlabeled:\(Int((sorted[0].latitude * 1_000).rounded()))|\(Int((sorted[0].longitude * 1_000).rounded()))",
-                                        title: "\(sorted[0].latitude.formatted(.number.precision(.fractionLength(3)))), \(sorted[0].longitude.formatted(.number.precision(.fractionLength(3))))",
-                                        visits: sorted, totalDuration: duration)
-        }.sorted { $0.visitCount > $1.visitCount }
-    }
+    @State private var visitCounts: [UUID: Int] = [:]
+    @State private var frequentSummaries: [RegularPlaceSummaryDTO] = []
+    @State private var legacyCandidates: [RegularPlaceVisitDTO] = []
+    @State private var historyRevision = 0
+    @State private var historyCacheNeedsInvalidation = false
+    @State private var queryWorker: RegularPlaceQueryWorker?
+    private var definitions: [RegularPlaceDefinitionDTO] { locations.map(RegularPlaceDefinitionDTO.init) }
 
     var body: some View {
         List {
@@ -43,7 +44,7 @@ struct RegularPlacesSettingsView: View {
             if !locations.isEmpty { Section("Named Regular Places") {
             ForEach(locations) { location in
                 NavigationLink {
-                    KnownLocationEditorView(knownLocation: location, suggestedLocation: nil, allVisits: visits)
+                    KnownLocationEditorView(knownLocation: location, suggestedLocation: nil)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
@@ -51,8 +52,8 @@ struct RegularPlacesSettingsView: View {
                             Spacer()
                             Text(KnownLocationFormatting.radius(location.radiusMeters)).font(.caption).foregroundStyle(.secondary)
                         }
-                        let count = visits.filter { location.contains($0.coordinate) }.count
-                        Text("\(count) matching visits · \(location.latitude.formatted(.number.precision(.fractionLength(3)))), \(location.longitude.formatted(.number.precision(.fractionLength(3))))")
+                        let count = visitCounts[location.id]
+                        Text("\(count.map { String($0) } ?? "…") matching visits · \(location.latitude.formatted(.number.precision(.fractionLength(3)))), \(location.longitude.formatted(.number.precision(.fractionLength(3))))")
                             .font(.caption).foregroundStyle(.secondary)
                         if locations.contains(where: { $0.id != location.id && location.distance(from: $0.coordinate) < location.radiusMeters + $0.radiusMeters }) {
                             Label("Overlaps another Regular Place", systemImage: "exclamationmark.triangle.fill")
@@ -64,12 +65,12 @@ struct RegularPlacesSettingsView: View {
             }
             }}
             Section("Often Visited · Unnamed") {
-                if unlabeledFrequentLocations.isEmpty {
+                if frequentSummaries.isEmpty {
                     Text("Repeated visits without a name will appear here.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(unlabeledFrequentLocations) { summary in
+                    ForEach(frequentSummaries) { summary in
                         NavigationLink {
-                            KnownLocationEditorView(knownLocation: nil, suggestedLocation: summary, allVisits: visits)
+                            KnownLocationEditorView(knownLocation: nil, suggestedLocation: summary)
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(summary.title).font(.headline)
@@ -84,10 +85,10 @@ struct RegularPlacesSettingsView: View {
                 Section("Legacy labels to review") {
                     Text("These visits have a label matching a Regular Place name but are outside its saved radius. Keep labels that you assigned manually; remove only labels that were propagated by mistake.")
                         .font(.caption).foregroundStyle(.secondary)
-                    ForEach(legacyCandidates, id: \.id) { visit in
+                    ForEach(legacyCandidates) { visit in
                         HStack {
                             NavigationLink {
-                                PlaceMapDetailView(place: visit)
+                                if let model = resolveVisit(visit.id) { PlaceMapDetailView(place: model) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(visit.userLabel ?? "Visit")
@@ -96,8 +97,19 @@ struct RegularPlacesSettingsView: View {
                                 }
                             }
                             Button("Remove label", role: .destructive) {
-                                visit.userLabel = nil
-                                try? modelContext.save()
+                                if let model = resolveVisit(visit.id) {
+                                    let previousLabel = model.userLabel
+                                    model.userLabel = nil
+                                    do {
+                                        try modelContext.save()
+                                        NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: model.id,
+                                                                        userInfo: ["dayKeys": [model.dayTimeline?.dayKey ?? DayTimeline.makeDayKey(for: model.arrivalDate)]])
+                                        TimelineMutationNotifier.didChange(dayKey: model.dayTimeline?.dayKey, objectID: model.id)
+                                        legacyCandidates.removeAll { $0.id == visit.id }
+                                    } catch {
+                                        model.userLabel = previousLabel
+                                    }
+                                }
                             }.font(.caption)
                         }
                     }
@@ -113,18 +125,56 @@ struct RegularPlacesSettingsView: View {
         }
         .sheet(isPresented: $isCreating) {
             NavigationStack {
-                KnownLocationEditorView(knownLocation: nil, suggestedLocation: nil, allVisits: visits)
+                KnownLocationEditorView(knownLocation: nil, suggestedLocation: nil)
             }
+        }
+        .task(id: RegularPlaceSettingsQueryKey(definitions: definitions, historyRevision: historyRevision)) {
+            await loadSummaries(for: definitions)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .movesVisitedPlaceDidChange)) { _ in
+            invalidateHistorySummaries()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .movesCloudKitImportObserved)) { _ in
+            invalidateHistorySummaries()
         }
     }
 
-    private var legacyCandidates: [VisitPlace] {
-        visits.filter { visit in
-            visit.regularPlaceID == nil && locations.contains { location in
-                visit.userLabel?.localizedCaseInsensitiveCompare(location.name) == .orderedSame
-                    && !location.contains(visit.coordinate)
-            }
-        }.sorted { $0.arrivalDate > $1.arrivalDate }
+    private func invalidateHistorySummaries() {
+        visitCounts = [:]
+        frequentSummaries = []
+        legacyCandidates = []
+        historyCacheNeedsInvalidation = true
+        historyRevision += 1
+    }
+
+    private func loadSummaries(for definitions: [RegularPlaceDefinitionDTO]) async {
+        let requestedRevision = historyRevision
+        let worker: RegularPlaceQueryWorker
+        if let queryWorker {
+            worker = queryWorker
+        } else {
+            worker = RegularPlaceQueryWorker(modelContainer: modelContext.container)
+            queryWorker = worker
+        }
+        do {
+            if historyCacheNeedsInvalidation { await worker.invalidateSettingsSnapshot() }
+            let result = try await worker.settingsSnapshot(definitions: definitions)
+            guard !Task.isCancelled else { return }
+            frequentSummaries = result.summaries
+            visitCounts = Dictionary(uniqueKeysWithValues: result.counts.map { ($0.regularPlaceID, $0.count) })
+            legacyCandidates = result.legacyCandidates.visits
+            if requestedRevision == historyRevision { historyCacheNeedsInvalidation = false }
+        } catch is CancellationError {
+        } catch {
+            // Saved Regular Place names remain visible when optional history summaries fail.
+        }
+    }
+
+    private func resolveVisit(_ id: UUID) -> VisitPlace? {
+        let predicate = #Predicate<VisitPlace> { $0.id == id }
+        var descriptor = FetchDescriptor<VisitPlace>(predicate: predicate)
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 }
 
@@ -134,10 +184,9 @@ struct KnownLocationEditorView: View {
     @Query(sort: \KnownLocation.name, order: .forward) private var allKnownLocations: [KnownLocation]
 
     let knownLocation: KnownLocation?
-    let suggestedLocation: MovesLocationSummary?
+    let suggestedLocation: RegularPlaceSummaryDTO?
     let selectedVisit: VisitPlace?
-    let allVisits: [VisitPlace]
-    private let visitsNewestFirst: [VisitPlace]
+    let previousDefinition: RegularPlaceDefinitionDTO?
 
     @State private var draftName: String
     @State private var radiusMeters: Double
@@ -147,18 +196,28 @@ struct KnownLocationEditorView: View {
     @State private var isConfirmingDeletion = false
     @State private var errorMessage = ""
     @State private var isShowingError = false
+    @State private var matchingVisits: [RegularPlaceVisitDTO] = []
+    @State private var isLoadingVisits = false
+    @State private var visitsOffset = 0
+    @State private var hasMoreVisits = false
+    @State private var queryGeneration = UUID()
+    @State private var isReconciling = false
+    @State private var pendingDeletionID: UUID?
+    @State private var pendingDeletionDefinitions: [RegularPlaceDefinitionDTO] = []
+    @State private var pendingReconciliation: RegularPlaceReconciliationRequest?
+    @State private var visitRevision = 0
+
+    private var queryKey: String { "\(centerLatitude)|\(centerLongitude)|\(radiusMeters)" }
 
     init(
         knownLocation: KnownLocation?,
-        suggestedLocation: MovesLocationSummary?,
-        allVisits: [VisitPlace],
+        suggestedLocation: RegularPlaceSummaryDTO?,
         selectedVisit: VisitPlace? = nil
     ) {
         self.knownLocation = knownLocation
         self.suggestedLocation = suggestedLocation
         self.selectedVisit = selectedVisit
-        self.allVisits = allVisits
-        self.visitsNewestFirst = allVisits.sorted { $0.arrivalDate > $1.arrivalDate }
+        self.previousDefinition = knownLocation.map(RegularPlaceDefinitionDTO.init)
 
         let center: CLLocationCoordinate2D
         let initialRadius: Double
@@ -171,8 +230,8 @@ struct KnownLocationEditorView: View {
             initialRadius = 120
             _draftName = State(initialValue: selectedVisit.userLabel ?? selectedVisit.autoLabel ?? "")
         } else if let suggestedLocation {
-            center = Self.suggestedCenter(for: suggestedLocation.visits)
-            initialRadius = Self.suggestedRadius(for: suggestedLocation.visits, around: center)
+            center = CLLocationCoordinate2D(latitude: suggestedLocation.latitude, longitude: suggestedLocation.longitude)
+            initialRadius = 120
             _draftName = State(initialValue: suggestedLocation.title)
         } else {
             center = CLLocationCoordinate2D(latitude: 0, longitude: 0)
@@ -190,24 +249,16 @@ struct KnownLocationEditorView: View {
         CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude)
     }
 
-    private var visitsInsideRadius: [VisitPlace] {
-        let centerLocation = CLLocation(latitude: centerLatitude, longitude: centerLongitude)
-        return visitsNewestFirst.filter { visit in
-            centerLocation.distance(from: CLLocation(latitude: visit.latitude, longitude: visit.longitude)) <= radiusMeters
-        }
-    }
-
     private var trimmedName: String {
         draftName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
-        let matchingVisits = visitsInsideRadius
         ScrollView {
             LazyVStack(spacing: 14) {
                 proximityMap(matchingVisits: matchingVisits)
 
-                SettingsCard(title: knownLocation == nil ? "Create Known Location" : "Location Settings") {
+                SettingsCard(title: knownLocation == nil ? "Create Regular Place" : "Regular Place Settings") {
                     TextField("Location name", text: $draftName)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
@@ -248,17 +299,17 @@ struct KnownLocationEditorView: View {
                     }
 
                     Label(
-                        "\(matchingVisits.count) recorded visit\(matchingVisits.count == 1 ? "" : "s") inside this area",
+                        "\(matchingVisits.count) recorded visit\(matchingVisits.count == 1 ? "" : "s") on this page",
                         systemImage: "clock.arrow.circlepath"
                     )
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
 
-                    Button(knownLocation == nil ? "Create Regular Place" : "Save Changes") {
+                    Button(isReconciling ? "Updating Visits…" : (knownLocation == nil ? "Create Regular Place" : "Save Changes")) {
                         save()
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(trimmedName.isEmpty)
+                    .disabled(trimmedName.isEmpty || isReconciling)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
 
@@ -280,11 +331,15 @@ struct KnownLocationEditorView: View {
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Use visit at \(visit.arrivalDate.formatted(date: .abbreviated, time: .shortened)) as Regular Place center")
                                 NavigationLink {
-                                    PlaceMapDetailView(place: visit)
+                                    if let model = resolveVisit(visit.id) { PlaceMapDetailView(place: model) }
                                 } label: {
                                     Image(systemName: "chevron.right").foregroundStyle(.secondary)
                                 }
                             }
+                        }
+                        if hasMoreVisits {
+                            Button(isLoadingVisits ? "Loading…" : "Load More Visits") { Task { await loadMoreVisits() } }
+                                .disabled(isLoadingVisits)
                         }
                     }
                 }
@@ -299,7 +354,7 @@ struct KnownLocationEditorView: View {
             )
             .ignoresSafeArea()
         }
-        .navigationTitle(knownLocation?.name ?? suggestedLocation?.title ?? "Location")
+        .navigationTitle(knownLocation?.name ?? suggestedLocation?.title ?? "Regular Place")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if knownLocation != nil {
@@ -313,7 +368,7 @@ struct KnownLocationEditorView: View {
             }
         }
         .confirmationDialog(
-            "Delete Known Location?",
+            "Delete Regular Place?",
             isPresented: $isConfirmingDeletion,
             titleVisibility: .visible
         ) {
@@ -322,20 +377,41 @@ struct KnownLocationEditorView: View {
         } message: {
             Text("Recorded visits remain in your timeline. Only the saved name and proximity area are removed.")
         }
-        .alert("Could Not Save Location", isPresented: $isShowingError) {
+        .alert(pendingReconciliation != nil || pendingDeletionID != nil ? "Could Not Update Visits" : "Could Not Save Location", isPresented: $isShowingError) {
+            if pendingReconciliation != nil {
+                Button("Retry Visit Updates") { Task { await retryReconciliation(container: nil) } }
+            } else if pendingDeletionID != nil {
+                Button("Retry Visit Updates") { Task { await reconcileDeletion() } }
+            }
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
         }
+        .task(id: "\(queryKey)|\(visitRevision)") {
+            let generation = UUID()
+            queryGeneration = generation
+            isLoadingVisits = false
+            matchingVisits = []
+            visitsOffset = 0
+            hasMoreVisits = false
+            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+            await loadMoreVisits(reset: true, generation: generation)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .movesVisitedPlaceDidChange)) { _ in
+            matchingVisits = []
+            visitsOffset = 0
+            hasMoreVisits = false
+            visitRevision += 1
+        }
     }
 
-    private func proximityMap(matchingVisits: [VisitPlace]) -> some View {
+    private func proximityMap(matchingVisits: [RegularPlaceVisitDTO]) -> some View {
         Map(position: $camera) {
             MapCircle(center: center, radius: radiusMeters)
                 .foregroundStyle(MovesPalette.place.opacity(0.15))
                 .stroke(MovesPalette.place, lineWidth: 2)
 
-            Marker(trimmedName.isEmpty ? "Known location" : trimmedName, coordinate: center)
+            Marker(trimmedName.isEmpty ? "Regular Place" : trimmedName, coordinate: center)
                 .tint(MovesPalette.place)
 
             ForEach(matchingVisits.prefix(250)) { visit in
@@ -394,36 +470,63 @@ struct KnownLocationEditorView: View {
             modelContext.insert(location)
         }
 
-        KnownLocationLabeler.reconcile(location: location, replacedID: originalID, definitions: allKnownLocations, to: allVisits)
-
         do {
             try modelContext.save()
-            dismiss()
+            let definitions = allKnownLocations.map(RegularPlaceDefinitionDTO.init)
+            let definition = RegularPlaceDefinitionDTO(location)
+            let container = modelContext.container
+            pendingReconciliation = RegularPlaceReconciliationRequest(
+                location: definition,
+                replacedID: originalID,
+                previousDefinition: previousDefinition,
+                definitions: definitions,
+                selectedVisitID: selectedVisit?.id
+            )
+            Task { await retryReconciliation(container: container) }
         } catch {
             modelContext.rollback()
             errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+
+    @MainActor
+    private func retryReconciliation(container suppliedContainer: ModelContainer?) async {
+        guard let request = pendingReconciliation else { return }
+        isReconciling = true
+        defer { isReconciling = false }
+        do {
+            let worker = RegularPlaceQueryWorker(modelContainer: suppliedContainer ?? modelContext.container)
+            _ = try await worker.reconcile(location: request.location,
+                                           replacedID: request.replacedID,
+                                           previousDefinition: request.previousDefinition,
+                                           definitions: request.definitions)
+            if let selectedVisitID = request.selectedVisitID {
+                let didAssign = try await worker.assignSelectedVisit(visitID: selectedVisitID, to: request.location)
+                guard didAssign else {
+                    errorMessage = "This visit’s location accuracy does not fit inside the Regular Place radius. Adjust the center or radius, then retry visit updates."
+                    isShowingError = true
+                    return
+                }
+            }
+            pendingReconciliation = nil
+            dismiss()
+        } catch {
+            errorMessage = "The Regular Place was saved, but its visits could not be updated: \(error.localizedDescription)"
             isShowingError = true
         }
     }
 
     private func delete() {
         guard let knownLocation else { return }
-        for visit in allVisits where visit.regularPlaceID == knownLocation.id {
-            visit.regularPlaceID = nil
-            visit.regularPlaceName = nil
-            if let replacement = RegularPlaceMatcher.match(
-                coordinate: visit.coordinate,
-                accuracy: visit.horizontalAccuracy,
-                among: allKnownLocations.filter { $0.id != knownLocation.id }
-            ) {
-                visit.regularPlaceID = replacement.id
-                visit.regularPlaceName = replacement.name
-            }
-        }
+        let deletedID = knownLocation.id
         modelContext.delete(knownLocation)
         do {
             try modelContext.save()
-            dismiss()
+            let definitions = allKnownLocations.filter { $0.id != deletedID }.map(RegularPlaceDefinitionDTO.init)
+            pendingDeletionID = deletedID
+            pendingDeletionDefinitions = definitions
+            Task { await reconcileDeletion() }
         } catch {
             modelContext.rollback()
             errorMessage = error.localizedDescription
@@ -431,23 +534,53 @@ struct KnownLocationEditorView: View {
         }
     }
 
-    private static func suggestedCenter(for visits: [VisitPlace]) -> CLLocationCoordinate2D {
-        guard !visits.isEmpty else { return CLLocationCoordinate2D(latitude: 0, longitude: 0) }
-        let latitude = visits.reduce(0) { $0 + $1.latitude } / Double(visits.count)
-        let longitude = visits.reduce(0) { $0 + $1.longitude } / Double(visits.count)
-        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    @MainActor
+    private func reconcileDeletion() async {
+        guard let deletedID = pendingDeletionID else { return }
+        isReconciling = true
+        defer { isReconciling = false }
+        do {
+            let worker = RegularPlaceQueryWorker(modelContainer: modelContext.container)
+            _ = try await worker.remove(locationID: deletedID, definitions: pendingDeletionDefinitions)
+            pendingDeletionID = nil
+            dismiss()
+        } catch {
+            errorMessage = "The Regular Place was deleted, but related visit classifications could not be updated: \(error.localizedDescription)"
+            isShowingError = true
+        }
     }
 
-    private static func suggestedRadius(
-        for visits: [VisitPlace],
-        around center: CLLocationCoordinate2D
-    ) -> Double {
-        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        let farthest = visits.map { visit in
-            centerLocation.distance(from: CLLocation(latitude: visit.latitude, longitude: visit.longitude))
-                + max(visit.horizontalAccuracy, 0)
-        }.max() ?? 120
-        return min(max((farthest / 25).rounded(.up) * 25, 75), 1_000)
+    private func loadMoreVisits(reset: Bool = false, generation requestedGeneration: UUID? = nil) async {
+        let generation = requestedGeneration ?? queryGeneration
+        guard generation == queryGeneration, reset || !isLoadingVisits else { return }
+        isLoadingVisits = true
+        defer { if generation == queryGeneration { isLoadingVisits = false } }
+        let worker = RegularPlaceQueryWorker(modelContainer: modelContext.container)
+        do {
+            let page = try await worker.visits(
+                nearLatitude: centerLatitude,
+                longitude: centerLongitude,
+                radiusMeters: radiusMeters,
+                offset: reset ? 0 : visitsOffset,
+                limit: 100
+            )
+            guard !Task.isCancelled, generation == queryGeneration else { return }
+            if reset { matchingVisits = page.visits } else { matchingVisits.append(contentsOf: page.visits) }
+            visitsOffset = page.nextOffset
+            hasMoreVisits = page.hasMore
+        } catch is CancellationError {
+        } catch {
+            guard generation == queryGeneration else { return }
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+
+    private func resolveVisit(_ id: UUID) -> VisitPlace? {
+        let predicate = #Predicate<VisitPlace> { $0.id == id }
+        var descriptor = FetchDescriptor<VisitPlace>(predicate: predicate)
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     private static func region(
@@ -467,7 +600,7 @@ struct KnownLocationEditorView: View {
 }
 
 private struct KnownLocationVisitRow: View {
-    let visit: VisitPlace
+    let visit: RegularPlaceVisitDTO
 
     var body: some View {
         HStack(spacing: 12) {
@@ -505,19 +638,19 @@ enum KnownLocationLabeler {
     ) {
         let candidates = definitions.contains(where: { $0.id == location.id }) ? definitions : definitions + [location]
         for visit in visits {
+            if visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                if visit.regularPlaceID == location.id { visit.regularPlaceName = location.name }
+                continue
+            }
             if visit.regularPlaceID == location.id || visit.regularPlaceID == replacedID {
                 visit.regularPlaceID = nil
                 visit.regularPlaceName = nil
             }
-            if let match = RegularPlaceMatcher.match(
-                coordinate: visit.coordinate,
-                accuracy: visit.horizontalAccuracy,
-                among: candidates
-            ), visit.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                if visit.regularPlaceID == nil {
-                    visit.regularPlaceID = match.id
-                    visit.regularPlaceName = match.name
-                }
+            if let match = RegularPlaceMatcher.match(coordinate: visit.coordinate,
+                                                     accuracy: visit.horizontalAccuracy,
+                                                     among: candidates) {
+                visit.regularPlaceID = match.id
+                visit.regularPlaceName = match.name
             }
         }
     }

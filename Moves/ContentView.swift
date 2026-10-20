@@ -357,7 +357,7 @@ private struct VisibleTimelinePage: Identifiable {
 @MainActor
 final class TimelineDayWindowStore: ObservableObject {
     static let pagerWindowSize = 5
-    static let recentSidebarWindowSize = 60
+    nonisolated static let recentSidebarWindowSize = 60
 
     struct LaunchQueryCounts: Equatable {
         var initialRecentWindowFetches = 0
@@ -853,12 +853,21 @@ struct ContentView: View {
             // Do not derive these maintenance triggers from the complete timeline. A bulk
             // import can contain tens of thousands of related records, and evaluating a
             // body-level signature would materialize and sort all of them on the main actor.
-            for await _ in NotificationCenter.default.notifications(
+            for await notification in TimelineNotificationCoalescer.events(
                 named: .movesLocationSamplesDidChange
             ) {
                 guard !Task.isCancelled else { return }
-                TimelinePresentationCacheInvalidator.invalidateAll()
-                timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                    for dayKey in affectedDayKeys {
+                        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayKey)
+                    }
+                    if affectedDayKeys.contains(selectedDayKey) {
+                        timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                    }
+                } else {
+                    TimelinePresentationCacheInvalidator.invalidateAll()
+                    timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                }
                 cloudDataPresencePublisher.publishSoon()
             }
         }
@@ -876,24 +885,45 @@ struct ContentView: View {
             }
         }
         .task {
-            for await notification in NotificationCenter.default.notifications(
+            for await notification in TimelineNotificationCoalescer.events(
                 named: .movesVisitedPlaceDidChange
             ) {
                 guard !Task.isCancelled else { return }
-                if let id = notification.object as? UUID {
+                let objectIDs = notification.userInfo?["objectIDs"] as? [String] ?? []
+                for rawID in objectIDs {
+                    if let id = UUID(uuidString: rawID) { VisitedPlaceSpotlightStateStore.enqueue(id) }
+                }
+                if objectIDs.isEmpty, let id = notification.object as? UUID {
                     VisitedPlaceSpotlightStateStore.enqueue(id)
+                }
+                if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                    for dayKey in affectedDayKeys {
+                        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayKey)
+                    }
+                    if affectedDayKeys.contains(selectedDayKey) {
+                        timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                    }
+                } else {
+                    TimelinePresentationCacheInvalidator.invalidateAll()
+                    timelineWindow.reloadPreserving(dayKey: selectedDayKey)
                 }
                 refreshSpotlightIndex()
             }
         }
         .task {
-            for await notification in NotificationCenter.default.notifications(
+            for await notification in TimelineNotificationCoalescer.events(
                 named: .movesMoveDataDidChange
             ) {
                 guard !Task.isCancelled else { return }
-                let changedDayKey = notification.userInfo?[TimelineMutationNotifier.dayKeyUserInfoKey] as? String
-                TimelinePresentationCacheInvalidator.invalidate(dayKey: changedDayKey)
-                if changedDayKey == nil || changedDayKey == selectedDayKey {
+                if let affectedDayKeys = TimelineNotificationCoalescer.affectedDayKeys(in: notification) {
+                    for dayKey in affectedDayKeys {
+                        TimelinePresentationCacheInvalidator.invalidate(dayKey: dayKey)
+                    }
+                    if affectedDayKeys.contains(selectedDayKey) {
+                        timelineWindow.reloadPreserving(dayKey: selectedDayKey)
+                    }
+                } else {
+                    TimelinePresentationCacheInvalidator.invalidateAll()
                     timelineWindow.reloadPreserving(dayKey: selectedDayKey)
                 }
                 cloudDataPresencePublisher.publishSoon()

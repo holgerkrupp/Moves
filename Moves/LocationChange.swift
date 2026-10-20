@@ -369,7 +369,12 @@ protocol TimelineAssembler {
 @MainActor
 protocol InferredMoveRouteMatchingScheduler: AnyObject {
     func scheduleRouteMatching(for move: MoveSegment)
+    func scheduleRouteMatching(for request: InferredMoveRouteMatchRequest)
     func schedulePendingRouteMatches(limit: Int)
+}
+
+extension InferredMoveRouteMatchingScheduler {
+    func scheduleRouteMatching(for request: InferredMoveRouteMatchRequest) {}
 }
 
 enum VisitGapFillingSettings {
@@ -965,12 +970,17 @@ final class DefaultTimelineAssembler: TimelineAssembler {
         guard pendingLiveSampleCount > 0 else { return }
 
         try repository.saveIfNeeded()
-        for dayKey in pendingLiveDayKeys {
+        let changedDayKeys = pendingLiveDayKeys.sorted()
+        for dayKey in changedDayKeys {
             ExplorationIncrementalHooks.enqueueLiveDay(dayKey)
         }
         pendingLiveSampleCount = 0
         pendingLiveDayKeys.removeAll(keepingCapacity: true)
-        NotificationCenter.default.post(name: .movesLocationSamplesDidChange, object: nil)
+        NotificationCenter.default.post(
+            name: .movesLocationSamplesDidChange,
+            object: nil,
+            userInfo: ["dayKeys": changedDayKeys]
+        )
     }
 
     private func movementLocations(
@@ -1313,6 +1323,14 @@ final class MovesLocationCaptureManager: NSObject, ObservableObject, LocationCap
     func prepareRouteMatches(for moves: [MoveSegment]) {
         for move in moves {
             routeMatchingScheduler.scheduleRouteMatching(for: move)
+        }
+    }
+
+    /// Accepts immutable requests prepared by the timeline worker so route geometry
+    /// does not require moving SwiftData models to the main actor.
+    func prepareRouteMatches(for requests: [InferredMoveRouteMatchRequest]) {
+        for request in requests {
+            routeMatchingScheduler.scheduleRouteMatching(for: request)
         }
     }
 

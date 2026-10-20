@@ -1258,18 +1258,9 @@ enum RegularPlaceMatcher {
         accuracy: CLLocationAccuracy,
         among locations: [KnownLocation]
     ) -> KnownLocation? {
-        guard accuracy.isFinite, accuracy >= 0 else { return nil }
-        return locations
-            .compactMap { location -> (KnownLocation, CLLocationDistance)? in
-                let distance = location.distance(from: coordinate)
-                guard distance + accuracy <= max(location.radiusMeters, 0) else { return nil }
-                return (location, distance)
-            }
-            .sorted {
-                if $0.1 != $1.1 { return $0.1 < $1.1 }
-                return $0.0.id.uuidString < $1.0.id.uuidString
-            }
-            .first?.0
+        let definitions = locations.map(RegularPlaceDefinitionDTO.init)
+        let match = self.match(coordinate: coordinate, accuracy: accuracy, among: definitions)
+        return match.flatMap { match in locations.first(where: { $0.id == match.id }) }
     }
 }
 

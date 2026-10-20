@@ -18,7 +18,6 @@ struct PlaceMapDetailView: View {
     @EnvironmentObject private var undoController: AppUndoController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query private var allVisitPlaces: [VisitPlace]
     @Query(sort: \KnownLocation.name, order: .forward) private var knownLocations: [KnownLocation]
     @Bindable var place: VisitPlace
     @AppStorage(MapMarkerDisplaySettings.showsBigMarkersKey) private var showsBigMarkers = false
@@ -30,6 +29,7 @@ struct PlaceMapDetailView: View {
     @State private var isDeleting = false
     @State private var deleteErrorMessage = ""
     @State private var isShowingDeleteError = false
+    @State private var isShowingRegularPlaceEditor = false
 
     init(place: VisitPlace) {
         self.place = place
@@ -108,6 +108,15 @@ struct PlaceMapDetailView: View {
         } message: {
             Text(deleteErrorMessage)
         }
+        .sheet(isPresented: $isShowingRegularPlaceEditor) {
+            NavigationStack {
+                if let location = regularPlaceForVisit {
+                    KnownLocationEditorView(knownLocation: location, suggestedLocation: nil)
+                } else {
+                    KnownLocationEditorView(knownLocation: nil, suggestedLocation: nil, selectedVisit: place)
+                }
+            }
+        }
     }
 
     private var placeMap: some View {
@@ -163,8 +172,33 @@ struct PlaceMapDetailView: View {
                     .buttonStyle(.borderedProminent)
                 }
 
-                Text("Saving a name also creates or updates a Regular Place for future visits.")
+                Text("This label applies to this visit only.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                Button {
+                    isShowingRegularPlaceEditor = true
+                } label: {
+                    if let location = regularPlaceForVisit {
+                        Label("Regular Place: \(location.name)", systemImage: "mappin.and.ellipse")
+                    } else {
+                        Label("Create Regular Place…", systemImage: "plus.circle")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint(regularPlaceForVisit == nil
+                    ? "Create a saved place centered on this visit"
+                    : "View or edit the saved place for this visit")
+
+                NavigationLink {
+                    OtherVisitsAtPlaceView(
+                        reference: RegularPlaceVisitDTO(place),
+                        regularPlace: regularPlaceForVisit.map(RegularPlaceDefinitionDTO.init)
+                    )
+                } label: {
+                    Label("Other visits here", systemImage: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Browse other visits to this place")
 
                 HStack(spacing: 8) {
                     QuickLabelButton(label: "Home") {
@@ -205,61 +239,34 @@ struct PlaceMapDetailView: View {
     }
 
     private func saveLabel() {
-        let trimmed = draftLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            place.userLabel = nil
-        } else {
-            place.userLabel = trimmed
-            place.autoLabel = nil
-            let existingLocation = knownLocations.first { $0.id == place.regularPlaceID }
-            let matchingLocation = knownLocations.first {
-                $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
-            }
-            let location: KnownLocation
-            if let existingLocation, existingLocation.name.localizedCaseInsensitiveCompare(trimmed) != .orderedSame {
-                existingLocation.name = trimmed
-                existingLocation.updatedAt = .now
-                location = existingLocation
-                KnownLocationLabeler.reconcile(
-                    location: location,
-                    replacedID: location.id,
-                    definitions: knownLocations,
-                    to: allVisitPlaces
-                )
-            } else if let matchingLocation {
-                location = matchingLocation
-            } else {
-                location = KnownLocation(
-                    name: trimmed,
-                    latitude: place.latitude,
-                    longitude: place.longitude,
-                    radiusMeters: min(max(place.horizontalAccuracy.isFinite ? place.horizontalAccuracy * 2 : 120, 120), 500)
-                )
-                modelContext.insert(location)
-            }
-            place.regularPlaceID = location.id
-            place.regularPlaceName = location.name
-            if matchingLocation == nil || existingLocation != nil {
-                KnownLocationLabeler.reconcile(
-                    location: location,
-                    replacedID: nil,
-                    definitions: knownLocations,
-                    to: allVisitPlaces
-                )
-                // The visit being edited has a manual label and is intentionally not
-                // touched by automatic reconciliation, so link it explicitly.
-                place.regularPlaceID = location.id
-                place.regularPlaceName = location.name
-            }
-        }
+        let previousUserLabel = place.userLabel
+        let previousAutoLabel = place.autoLabel
+        VisitPlaceLabelMutation.apply(draftLabel, to: place)
 
         do {
             try modelContext.save()
             NotificationCenter.default.post(name: .movesVisitedPlaceDidChange, object: place.id)
             TimelineMutationNotifier.didChange(dayKey: place.dayTimeline?.dayKey, objectID: place.id)
         } catch {
+            place.userLabel = previousUserLabel
+            place.autoLabel = previousAutoLabel
+            draftLabel = previousUserLabel ?? previousAutoLabel ?? ""
             print("Failed to save place label: \(error.localizedDescription)")
         }
+    }
+
+    private var regularPlaceForVisit: KnownLocation? {
+        if let id = place.regularPlaceID {
+            // A stale authoritative link must not silently resolve to a different
+            // nearby saved place. Treat it as unlinked so the user can explicitly
+            // relink through the editor.
+            return knownLocations.first(where: { $0.id == id })
+        }
+        return RegularPlaceMatcher.match(
+            coordinate: place.coordinate,
+            accuracy: place.horizontalAccuracy,
+            among: knownLocations
+        )
     }
 
     private func saveComment() {
@@ -315,6 +322,14 @@ struct PlaceMapDetailView: View {
             deleteErrorMessage = error.localizedDescription
             isShowingDeleteError = true
         }
+    }
+}
+
+enum VisitPlaceLabelMutation {
+    static func apply(_ draft: String, to place: VisitPlace) {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        place.userLabel = trimmed.isEmpty ? nil : trimmed
+        if !trimmed.isEmpty { place.autoLabel = nil }
     }
 }
 
