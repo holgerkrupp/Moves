@@ -4053,11 +4053,17 @@ final class TimelineScreenshotServiceCoordinator: NSObject, ObservableObject, UI
             return
         }
 
-        let result = TimelineScreenshotPDFRenderer.render(
-            dayTimeline: dayTimeline,
-            windowScene: screenshotService.windowScene ?? attachedScene
-        )
-        completionHandler(result.data, result.currentPageIndex, result.visibleRect)
+        let windowScene = screenshotService.windowScene ?? attachedScene
+        Task { @MainActor in
+            guard let result = await TimelineScreenshotPDFRenderer.render(
+                dayTimeline: dayTimeline,
+                windowScene: windowScene
+            ) else {
+                completionHandler(nil, 0, .zero)
+                return
+            }
+            completionHandler(result.data, result.currentPageIndex, result.visibleRect)
+        }
     }
 }
 
@@ -4170,8 +4176,8 @@ private enum TimelineScreenshotPDFRenderer {
         let visibleRect: CGRect
     }
 
-    static func render(dayTimeline: DayTimeline, windowScene: UIWindowScene?) -> Result {
-        let snapshot = makeSnapshot(for: dayTimeline)
+    static func render(dayTimeline: DayTimeline, windowScene: UIWindowScene?) async -> Result? {
+        guard let snapshot = try? await makeSnapshot(for: dayTimeline) else { return nil }
         let windowSize = windowScene?.windows.first(where: { $0.isKeyWindow })?.bounds.size
             ?? windowScene?.windows.first?.bounds.size
             ?? CGSize(width: 390, height: 844)
@@ -4219,41 +4225,33 @@ private enum TimelineScreenshotPDFRenderer {
         )
     }
 
-    private static func makeSnapshot(for dayTimeline: DayTimeline) -> TimelineScreenshotPDFSnapshot {
-        let source = DayPresentationSource(dayTimeline: dayTimeline, loadAll: true)
-        let placeSnapshots = Dictionary(uniqueKeysWithValues: source.visiblePlaces.map {
-            ($0.id, TimelinePlaceSnapshot($0))
-        })
-        let moveSnapshots = source.visibleMoves.map { move in
-            let flags = source.sourcesByMoveID[move.id] ?? []
-            return TimelineMoveSnapshot(
-                move,
-                startPlace: move.startPlace.flatMap { placeSnapshots[$0.id] },
-                endPlace: move.endPlace.flatMap { placeSnapshots[$0.id] },
-                samples: source.samplesByMoveID[move.id] ?? [],
-                usesImportedRoute: flags.contains(.imported),
-                usesHealthWorkoutRoute: flags.contains(.healthWorkout),
-                usesRouteTracking: flags.contains(.routeTracking)
-            )
+    private static func makeSnapshot(for dayTimeline: DayTimeline) async throws -> TimelineScreenshotPDFSnapshot {
+        guard let modelContainer = dayTimeline.modelContext?.container else {
+            throw CancellationError()
         }
+        let worker = TimelineDayPresentationWorker(modelContainer: modelContainer)
+        let valueSnapshot = try await worker.snapshot(dayStart: dayTimeline.dayStart, loadAll: true)
+        let source = DayPresentationValueSource(valueSnapshot)
+        let dayPlaceIDs = Set(source.visiblePlaces.map(\.id))
         let incomingPlaceIDs = Set(source.visibleMoves.compactMap { $0.endPlace?.id })
         let outgoingPlaceIDs = Set(source.visibleMoves.compactMap { $0.startPlace?.id })
         let places = source.visiblePlaces
             .filter { place in
-                !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-                    || !(place.departureDate != nil
-                        && incomingPlaceIDs.contains(place.id)
+                let hasExplicitLabel = !(place.userLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                let isShortTransitStop = place.departureDate.map {
+                    incomingPlaceIDs.contains(place.id)
                         && outgoingPlaceIDs.contains(place.id)
-                        && place.departureDate!.timeIntervalSince(place.arrivalDate) < 5 * 60)
+                        && $0.timeIntervalSince(place.arrivalDate) < 5 * 60
+                } ?? false
+                return hasExplicitLabel || !isShortTransitStop
             }
-            .compactMap { placeSnapshots[$0.id] }
             .map(TimelineEntry.place)
-        let moves = moveSnapshots.map(TimelineEntry.move)
+        let moves = source.visibleMoves.map(TimelineEntry.move)
         var entries = (places + moves).sorted { $0.startDate < $1.startDate }
 
-        if let firstMove = moveSnapshots.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
+        if let firstMove = source.visibleMoves.min(by: { $0.timelineStartDate < $1.timelineStartDate }),
            let startPlace = firstMove.startPlace,
-           !placeSnapshots.keys.contains(startPlace.id) {
+           !dayPlaceIDs.contains(startPlace.id) {
             let startEntry = TimelineEntry.start(
                 place: startPlace,
                 timestamp: firstMove.timelineStartDate.addingTimeInterval(-1)
@@ -4268,13 +4266,13 @@ private enum TimelineScreenshotPDFRenderer {
         if entries.isEmpty, let latestSample = source.visibleSamples.max(by: { $0.timestamp < $1.timestamp }) {
             entries.append(
                 .sample(
-                    location: TimelineSampleSnapshot(latestSample),
+                    location: latestSample,
                     sampleCount: source.totalSampleCount,
                     resolvedName: nil
                 )
             )
         } else if entries.isEmpty, let carriedOverPlace = source.carriedOverPlace {
-            entries.append(.start(place: TimelinePlaceSnapshot(carriedOverPlace), timestamp: dayTimeline.dayStart))
+            entries.append(.start(place: carriedOverPlace, timestamp: dayTimeline.dayStart))
         }
 
         let rows = entries.map { entry in
