@@ -1752,7 +1752,7 @@
     "Show import status in the menu bar" : {
 
     },
-    "Show individual OS location fixes on the map and in the timeline. Gaps are intentional; no connecting routes are drawn." : {
+    "Show individual OS location fixes alongside saved move routes. Raw fixes are not connected to each other." : {
 
     },
     "Show inspector" : {

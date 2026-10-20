@@ -364,6 +364,7 @@ struct MoveMapDetailView: View {
     @State private var camera: MapCameraPosition
     @State private var routeCoordinates: [CLLocationCoordinate2D]
     @State private var moveGPXShareFile: GPXShareFile?
+    @State private var rawLocationGPXShareFile: GPXShareFile?
     @State private var draftComment: String
     @State private var isShowingTransportPicker = false
     @State private var isEditingManualRoute = false
@@ -428,6 +429,12 @@ struct MoveMapDetailView: View {
         _routeCoordinates = State(initialValue: initialRoute)
         _moveGPXShareFile = State(
             initialValue: Self.makeGPXShareFile(for: segment, coordinates: initialRoute)
+        )
+        _rawLocationGPXShareFile = State(
+            initialValue: Self.makeRawLocationGPXShareFile(
+                for: segment,
+                samples: RawLocationFixPresentation.orderedOSFixes(from: segment.samples)
+            )
         )
         _draftComment = State(initialValue: segment.comment ?? "")
     }
@@ -494,13 +501,6 @@ struct MoveMapDetailView: View {
 
                     moveShareButton
 
-                    Button {
-                        isShowingFlightMerge = true
-                    } label: {
-                        Image(systemName: "arrow.triangle.merge")
-                    }
-                    .help("Merge into Flight")
-
 #if DEBUG
                     if segment.transportMode == .plane {
                         NavigationLink {
@@ -512,28 +512,7 @@ struct MoveMapDetailView: View {
                     }
 #endif
 
-                    Button {
-                        setManualRouteEditing(!isEditingManualRoute)
-                    } label: {
-                        Image(systemName: isEditingManualRoute ? "hand.draw.fill" : "hand.draw")
-                    }
-                    .disabled(routeCoordinates.count < 2 || isSavingManualRoute)
-                    .help(isEditingManualRoute ? "Stop editing route" : "Edit route")
-
-                    Button {
-                        setSplitPointSelection(!isSelectingSplitPoint)
-                    } label: {
-                        Image(systemName: isSelectingSplitPoint ? "scissors.circle.fill" : "scissors")
-                    }
-                    .disabled(routeCoordinates.count < 2 || isSavingManualRoute || isSplittingTrack)
-                    .help(isSelectingSplitPoint ? "Cancel track split" : "Split track")
-
-                    Button(role: .destructive) {
-                        isConfirmingDeletion = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .disabled(isDeleting)
+                    moveEditMenu
                 }
             }
         }
@@ -817,28 +796,87 @@ struct MoveMapDetailView: View {
 
     @ViewBuilder
     private var moveShareButton: some View {
-        if let exportFile = moveGPXShareFile {
-            ShareLink(
-                item: exportFile,
-                subject: Text(moveRouteTitle),
-                message: Text("GPX route exported from Moves."),
-                preview: SharePreview(exportFile.filename)
-            ) {
-                Label("Share GPX", systemImage: "square.and.arrow.up")
-                    .labelStyle(.iconOnly)
+        Menu {
+            if let exportFile = moveGPXShareFile {
+                ShareLink(
+                    item: exportFile,
+                    subject: Text(moveRouteTitle),
+                    message: Text("Mapped GPX track exported from Moves."),
+                    preview: SharePreview(exportFile.filename)
+                ) {
+                    Label("Mapped GPX track", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                }
+            } else {
+                Label("Mapped GPX track unavailable", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    .foregroundStyle(.secondary)
             }
-            .disabled(isSavingManualRoute || manualRouteDrag != nil)
-            .help("Share move as GPX")
-            .accessibilityLabel("Share move as GPX")
-        } else {
-            Button {} label: {
-                Label("Share GPX", systemImage: "square.and.arrow.up")
-                    .labelStyle(.iconOnly)
+
+            if let rawFile = rawLocationGPXShareFile {
+                ShareLink(
+                    item: rawFile,
+                    subject: Text(moveRouteTitle),
+                    message: Text("Raw location fixes exported from Moves."),
+                    preview: SharePreview(rawFile.filename)
+                ) {
+                    Label("Raw location fixes", systemImage: "location")
+                }
+            } else {
+                Label("Raw location fixes unavailable", systemImage: "location")
+                    .foregroundStyle(.secondary)
             }
-            .disabled(true)
-            .help("A route is needed to share this move as GPX")
-            .accessibilityLabel("Share move as GPX")
+        } label: {
+            Label("Share route", systemImage: "square.and.arrow.up")
+                .labelStyle(.iconOnly)
         }
+        .disabled(isSavingManualRoute || manualRouteDrag != nil)
+        .help("Share mapped route or raw location fixes")
+        .accessibilityLabel("Share route")
+    }
+
+    @ViewBuilder
+    private var moveEditMenu: some View {
+        Menu {
+            Button {
+                isShowingFlightMerge = true
+            } label: {
+                Label("Merge into Flight…", systemImage: "arrow.triangle.merge")
+            }
+
+            Button {
+                setManualRouteEditing(!isEditingManualRoute)
+            } label: {
+                Label(
+                    isEditingManualRoute ? "Stop Redrawing Route" : "Redraw Route",
+                    systemImage: isEditingManualRoute ? "hand.draw.fill" : "hand.draw"
+                )
+            }
+            .disabled(routeCoordinates.count < 2 || isSavingManualRoute)
+
+            Button {
+                setSplitPointSelection(!isSelectingSplitPoint)
+            } label: {
+                Label(
+                    isSelectingSplitPoint ? "Cancel Split" : "Split Move",
+                    systemImage: isSelectingSplitPoint ? "scissors.circle.fill" : "scissors"
+                )
+            }
+            .disabled(routeCoordinates.count < 2 || isSavingManualRoute || isSplittingTrack)
+
+            Divider()
+
+            Button(role: .destructive) {
+                isConfirmingDeletion = true
+            } label: {
+                Label("Delete Move", systemImage: "trash")
+            }
+            .disabled(isDeleting)
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
+        }
+        .help("Move actions")
+        .accessibilityLabel("Move actions")
     }
 
     private static func makeGPXShareFile(
@@ -857,8 +895,27 @@ struct MoveMapDetailView: View {
         return GPXShareFile(data: payload.data, filename: payload.filename)
     }
 
+    private static func makeRawLocationGPXShareFile(
+        for segment: MoveSegment,
+        samples: [LocationSample]
+    ) -> GPXShareFile? {
+        let timestamp = Self.exportFilenameDateFormatter.string(from: segment.timelineStartDate)
+        guard let payload = TimelineExporter.makeRawMoveGPXPayload(
+            move: segment,
+            samples: samples,
+            fileStem: "moves-\(timestamp)-\(segment.transportMode.rawValue)-raw-fixes"
+        ) else {
+            return nil
+        }
+        return GPXShareFile(data: payload.data, filename: payload.filename)
+    }
+
     private func refreshMoveGPXShareFile() {
         moveGPXShareFile = Self.makeGPXShareFile(for: segment, coordinates: routeCoordinates)
+        rawLocationGPXShareFile = Self.makeRawLocationGPXShareFile(
+            for: segment,
+            samples: osLocationFixes
+        )
     }
 
     private func openAppleHealth() {

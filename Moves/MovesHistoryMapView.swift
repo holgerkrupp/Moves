@@ -506,12 +506,7 @@ struct MovesHistoryMapView: View {
         if display == .fog {
             return Color(red: 0.96, green: 1.0, blue: 0.58)
         }
-        return switch mode {
-        case .stationary, .walking, .running, .cycling, .automotive, .motorcycle, .unknown:
-            MovesPalette.move
-        case .swimming, .train, .plane, .boat:
-            MovesPalette.transport(mode)
-        }
+        return MovesPalette.historyMapRoute(for: mode)
     }
 
     private func heatIntensity(for place: Place) -> CGFloat {

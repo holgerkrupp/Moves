@@ -90,6 +90,24 @@ enum MovesPalette {
             return "MovesMove"
         }
     }
+
+    static func moveDetailRoute(for mode: TransportMode) -> Color {
+        switch mode {
+        case .stationary, .unknown:
+            return move
+        case .walking, .running, .swimming, .cycling, .automotive, .motorcycle, .train, .plane, .boat:
+            return transport(mode)
+        }
+    }
+
+    static func historyMapRoute(for mode: TransportMode) -> Color {
+        switch mode {
+        case .swimming, .train, .plane, .boat:
+            return transport(mode)
+        case .stationary, .walking, .running, .cycling, .automotive, .motorcycle, .unknown:
+            return move
+        }
+    }
 }
 
 enum DurationFormatter {
@@ -263,13 +281,7 @@ struct RenderedRoute: Identifiable {
         if usesHighAccuracyRouteTracking {
             return MovesPalette.routeTracking
         }
-
-        switch transportMode {
-        case .stationary, .unknown:
-            return MovesPalette.move
-        case .walking, .running, .swimming, .cycling, .automotive, .motorcycle, .train, .plane, .boat:
-            return MovesPalette.transport(transportMode)
-        }
+        return MovesPalette.moveDetailRoute(for: transportMode)
     }
 
     var shadowTint: Color {
@@ -673,7 +685,7 @@ enum MapRegionFactory {
 }
 
 enum MoveRouteGeometry {
-    private static let routeMatchingVersion = "route-v10-sparse-automotive-detours"
+    private static let routeMatchingVersion = "route-v11-train-transit-only"
 
     static func rawCoordinates(for move: MoveSegment) -> [CLLocationCoordinate2D] {
         if let importedCoordinates = move.importedRouteCoordinates,
@@ -2082,6 +2094,9 @@ enum RoadRouteMatcher {
             do {
                 let response = try await MKDirections(request: request).calculate()
                 let candidates = response.routes.compactMap { route -> [CLLocationCoordinate2D]? in
+                    guard transportMode != .train || route.transportType == .transit else {
+                        return nil
+                    }
                     let coordinates = route.polyline.allCoordinates
                     return coordinates.count > 1 ? coordinates : nil
                 }
@@ -2132,8 +2147,10 @@ enum RoadRouteMatcher {
             // Cycling is not available in every region; walking still gives path snapping.
             return [.cycling, .walking]
         case .train:
-            // Prefer transit rails, then gracefully fall back to roads when unavailable.
-            return [.transit, .automobile]
+            // A driving route can look plausible between sparse train fixes while
+            // clearly being the wrong network. Keep the recorded fixes if transit
+            // geometry is unavailable rather than silently mapping a train to roads.
+            return [.transit]
         case .plane:
             return []
         case .swimming, .boat, .stationary, .unknown:

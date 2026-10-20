@@ -2100,6 +2100,58 @@ enum TimelineExporter {
         )
     }
 
+    static func makeRawMoveGPXPayload(
+        move: MoveSegment,
+        samples: [LocationSample],
+        fileStem: String
+    ) -> TimelineExportPayload? {
+        let fixes = samples
+            .filter { $0.source.isOSLocationFix && CLLocationCoordinate2DIsValid($0.coordinate) }
+            .sorted {
+                if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+                return $0.dedupeKey < $1.dedupeKey
+            }
+        guard fixes.count > 1 else { return nil }
+
+        let startTitle = move.startPlace?.displayTitle ?? "Unknown start"
+        let endTitle = move.endPlace?.displayTitle ?? "Unknown destination"
+        let trackName = "\(startTitle) to \(endTitle) — Raw location fixes"
+        var xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" creator="Moves iOS Rebuild" xmlns="http://www.topografix.com/GPX/1/1">
+          <metadata>
+            <name>\(xmlEscaped(trackName))</name>
+            <time>\(iso8601.string(from: fixes[0].timestamp))</time>
+          </metadata>
+          <trk>
+            <name>\(xmlEscaped(trackName))</name>
+            <type>\(xmlEscaped(move.transportMode.title))</type>
+            <trkseg>
+        """
+
+        for fix in fixes {
+            xml += "\n      <trkpt lat=\"\(coordinateString(fix.latitude))\" lon=\"\(coordinateString(fix.longitude))\">"
+            if fix.altitude.isFinite {
+                xml += "<ele>\(elevationString(fix.altitude))</ele>"
+            }
+            xml += "<time>\(iso8601.string(from: fix.timestamp))</time></trkpt>"
+        }
+
+        xml += """
+
+            </trkseg>
+          </trk>
+        </gpx>
+        """
+
+        guard let data = xml.data(using: .utf8) else { return nil }
+        return TimelineExportPayload(
+            data: data,
+            filename: "\(fileStem).gpx",
+            contentType: .xml
+        )
+    }
+
     /// Creates a portable file for one timeline activity. Keeping this separate
     /// from the day exporter means contextual actions never have to mutate a
     /// model relationship just to serialize a single record.

@@ -106,6 +106,17 @@ struct MovesSettingsView: View {
                     }
 
                     NavigationLink {
+                        SettingsMoveMappingGuideView()
+                    } label: {
+                        SettingsMenuRow(
+                            title: "Move Mapping",
+                            subtitle: "Route matching rules and map colors",
+                            systemImage: "point.topleft.down.curvedto.point.bottomright.up",
+                            tint: MovesPalette.transport(.train)
+                        )
+                    }
+
+                    NavigationLink {
                         RegularPlacesSettingsView()
                     } label: {
                         SettingsMenuRow(
@@ -774,6 +785,125 @@ private struct SettingsAppearanceDetailView: View {
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
+
+private struct SettingsMoveMappingGuideView: View {
+    private let entries = MoveMappingGuideEntry.all
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                SettingsCard(title: "Transport mapping") {
+                    Text("Moves uses the selected transport mode to choose whether and how a recorded route is matched to map directions.")
+                        .settingsHelpText()
+
+                    ForEach(entries) { entry in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(entry.mode.title, systemImage: entry.mode.symbolName)
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                Spacer(minLength: 8)
+                            }
+
+                            Text(entry.mappingRule)
+                                .settingsHelpText()
+
+                            HStack(spacing: 12) {
+                                MappingColorChip(title: "Move detail", color: entry.detailColor)
+                                MappingColorChip(title: "History map", color: entry.historyColor)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                        Divider()
+                    }
+                }
+
+                SettingsCard(title: "Recorded route overrides") {
+                    Text("Manual routes and imported route geometry are preserved. Real route-tracking and Health workout tracks keep their recorded GPS geometry instead of being snapped to a generic route.")
+                        .settingsHelpText()
+
+                    Text("On the move detail map, Health workout tracks use pink; real route-tracking and imported detailed tracks use the route-tracking color.")
+                        .settingsHelpText()
+
+                    HStack(spacing: 12) {
+                        MappingColorChip(title: "Health workout", color: MovesPalette.healthRoute)
+                        MappingColorChip(title: "Route tracking / import", color: MovesPalette.routeTracking)
+                    }
+
+                    Text("Flight connectors are inferred display geometry between endpoints; they are not saved as recorded GPS points.")
+                        .settingsHelpText()
+                }
+
+                SettingsCard(title: "Color differences by map") {
+                    Text("The move detail map uses each mode’s color shown above. The history map uses the general Moves color for stationary, walking, running, cycling, automotive, motorcycle, and unknown moves; it keeps mode colors for swimming, train, plane, and boat.")
+                        .settingsHelpText()
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+        }
+        .settingsDetailBackground()
+        .navigationTitle("Move Mapping")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct MappingColorChip: View {
+    let title: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 10, height: 10)
+                .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+            Text(title)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MoveMappingGuideEntry: Identifiable {
+    let mode: TransportMode
+
+    var id: String { mode.id }
+
+    var mappingRule: String {
+        return switch mode {
+        case .stationary:
+            "No network matching; recorded coordinates are shown when available."
+        case .walking, .running:
+            "Try MapKit walking directions. If no candidate fits the recorded samples, keep the recorded route."
+        case .swimming:
+            "No network matching; keep the recorded GPS route."
+        case .cycling:
+            "Try cycling directions, then walking directions where cycling routing is unavailable. Keep the recorded route if neither candidate fits."
+        case .automotive, .motorcycle:
+            "Try driving directions, with walking directions as a fallback near endpoints that roads cannot reach. Keep the recorded route if no candidate fits."
+        case .train:
+            "Try public-transit directions only; driving routes are rejected. If no suitable transit geometry is returned, keep the recorded fixes. Transit data does not guarantee a rail-only line."
+        case .plane:
+            "Use an inferred curved connector between endpoints when no detailed recorded route is available. The connector is display geometry, not recorded GPS."
+        case .boat:
+            "No road or transit matching; keep the recorded route."
+        case .unknown:
+            "No network matching; recorded coordinates are shown when available."
+        }
+    }
+
+    var detailColor: Color {
+        MovesPalette.moveDetailRoute(for: mode)
+    }
+
+    var historyColor: Color {
+        MovesPalette.historyMapRoute(for: mode)
+    }
+
+    static let all = TransportMode.allCases.map { MoveMappingGuideEntry(mode: $0) }
 }
 
 private struct SettingsTrackingDetailView: View {
