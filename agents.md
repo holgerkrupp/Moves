@@ -23,3 +23,22 @@
   persist connector points as `LocationSample` data or exported recorded GPS.
 - Antimeridian polylines must be split at the ±180° boundary with matching edge
   points; never draw the long way around the globe.
+
+## User documentation
+
+- Update `Moves/MovesHelp.swift` and `Documentation/UserGuide.md` whenever a
+  released feature, setting, permission, platform entry point, or workflow that
+  appears in user help changes. Keep the topic inventory and platform coverage
+  accurate.
+- Keep iOS Documentation and macOS Moves Help aligned through the shared help
+  topic library. Preserve Mac-specific help for the sidebar, inspector, import
+  queue, Quick Look, and keyboard shortcuts.
+- Describe only released behavior; do not advertise `#if DEBUG` Exploration or
+  Photos interfaces as user features. Keep platform-specific recording guidance
+  accurate and distinguish sync from export and backup.
+- Preserve Move Mapping coverage from `TransportMode` and `MovesPalette`; do not
+  introduce a second static mode/color table. Clearly distinguish recorded GPS,
+  imported geometry, matched display routes, and inferred flight connectors.
+- Keep help content offline and independent of timeline history. Do not query
+  user records or initialize tracking, import, map, network, or CloudKit work to
+  display help.

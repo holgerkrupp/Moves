@@ -25,6 +25,11 @@ allows Spotlight to request targeted or full reindexing.
 
 Moves is an iOS app that builds a private day-by-day timeline of where you were and how you moved between places.
 
+In-app user help is available from **Settings → Documentation** on iPhone and
+**Help → Moves Help** on Mac. It covers tracking, timeline workflows, routes,
+imports, privacy, and troubleshooting. The topic and feature coverage inventory
+is maintained in [Documentation/UserGuide.md](Documentation/UserGuide.md).
+
 It uses on-device location + motion signals and stores timeline data locally with SwiftData, with private iCloud sync through CloudKit enabled for backup and device transfer.
 
 ## Features
@@ -74,7 +79,7 @@ It uses on-device location + motion signals and stores timeline data locally wit
 ## Privacy
 
 - Timeline data is stored locally on the device and syncs to the user's private iCloud container when available.
-- CloudKit backs up the timeline and restores it on a new device signed into the same Apple ID.
+- Private CloudKit sync can make timeline data available on another device signed into the same Apple Account. Sync is asynchronous and is separate from an export or backup file.
 - Export is user-initiated from the in-app Settings screen.
 
 ## Project Structure

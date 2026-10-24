@@ -2160,6 +2160,1516 @@
     },
     "Your location history stays in your private app data and iCloud container unless you explicitly import, export, or configure an external service." : {
 
+    },
+    " " :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": " "
+          }
+        }
+      }
+    },
+    "A local export, backup file, or upload to an external location service is a separate action. Do not assume these copies are synchronized or automatically refreshed." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A local export, backup file, or upload to an external location service is a separate action. Do not assume these copies are synchronized or automatically refreshed."
+          }
+        }
+      }
+    },
+    "A manual export or scheduled iCloud Drive backup is a separate file copy. iCloud sync keeps app data available across devices and does not create an independently browsable backup file." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A manual export or scheduled iCloud Drive backup is a separate file copy. iCloud sync keeps app data available across devices and does not create an independently browsable backup file."
+          }
+        }
+      }
+    },
+    "A quick introduction to your location timeline." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A quick introduction to your location timeline."
+          }
+        }
+      }
+    },
+    "A route looks straight or the mode is wrong" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A route looks straight or the mode is wrong"
+          }
+        }
+      }
+    },
+    "A route on the map can come from recorded GPS, an imported track, or a route inferred from map directions. Map matching changes display geometry; it does not turn inferred connector points into recorded location samples." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A route on the map can come from recorded GPS, an imported track, or a route inferred from map directions. Map matching changes display geometry; it does not turn inferred connector points into recorded location samples."
+          }
+        }
+      }
+    },
+    "A route that cannot be matched keeps its recorded coordinates when available. Network or routing failures do not prove that no terrestrial route exists." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A route that cannot be matched keeps its recorded coordinates when available. Network or routing failures do not prove that no terrestrial route exists."
+          }
+        }
+      }
+    },
+    "A straight connector can be inferred display geometry, particularly for flights or when detailed route points are unavailable." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A straight connector can be inferred display geometry, particularly for flights or when detailed route points are unavailable."
+          }
+        }
+      }
+    },
+    "A visit can have a label for that occurrence. A Regular Place is a saved named area, such as Home or Work, that can match visits within its radius." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A visit can have a label for that occurrence. A Regular Place is a saved named area, such as Home or Work, that can match visits within its radius."
+          }
+        }
+      }
+    },
+    "A visit or move is missing" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A visit or move is missing"
+          }
+        }
+      }
+    },
+    "A visit represents time associated with a place. A move represents travel between places. Sparse system observations are not exact departure or arrival times, so inferred move timing can be approximate." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "A visit represents time associated with a place. A move represents travel between places. Sparse system observations are not exact departure or arrival times, so inferred move timing can be approximate."
+          }
+        }
+      }
+    },
+    "Allow the location permissions requested by iOS and keep Location Services enabled. iOS controls when background updates are delivered; Moves cannot guarantee a point at every moment." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Allow the location permissions requested by iOS and keep Location Services enabled. iOS controls when background updates are delivered; Moves cannot guarantee a point at every moment."
+          }
+        }
+      }
+    },
+    "An integration sends data outside Moves and your private iCloud container. Review the destination, server address, and credentials before enabling uploads. Existing history may require a separate upload action." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "An integration sends data outside Moves and your private iCloud container. Review the destination, server address, and credentials before enabling uploads. Existing history may require a separate upload action."
+          }
+        }
+      }
+    },
+    "Appearance settings can show raw operating-system location fixes or reconstructed routes. Raw fixes are observations and are not joined into a recorded route." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Appearance settings can show raw operating-system location fixes or reconstructed routes. Raw fixes are observations and are not joined into a recorded route."
+          }
+        }
+      }
+    },
+    "Apple Watch" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Apple Watch"
+          }
+        }
+      }
+    },
+    "Automatic mapping infers a mode from route metadata and geometry; a dedicated mode applies your selection; Raw keeps the original points without route matching." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Automatic mapping infers a mode from route metadata and geometry; a dedicated mode applies your selection; Raw keeps the original points without route matching."
+          }
+        }
+      }
+    },
+    "Available actions can include tracking controls, status, timeline summaries, and export. Check the Shortcuts action description before running an action that changes tracking or creates a file." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Available actions can include tracking controls, status, timeline summaries, and export. Check the Shortcuts action description before running an action that changes tracking or creates a file."
+          }
+        }
+      }
+    },
+    "Available fields vary by format. Exported files can contain precise location and time data; choose a private destination and share them deliberately." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Available fields vary by format. Exported files can contain precise location and time data; choose a private destination and share them deliberately."
+          }
+        }
+      }
+    },
+    "Background place recording" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Background place recording"
+          }
+        }
+      }
+    },
+    "Backup is separate from sync" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Backup is separate from sync"
+          }
+        }
+      }
+    },
+    "Before sharing" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Before sharing"
+          }
+        }
+      }
+    },
+    "Bring route files and supported workout routes into Moves." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Bring route files and supported workout routes into Moves."
+          }
+        }
+      }
+    },
+    "Browse a day" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Browse a day"
+          }
+        }
+      }
+    },
+    "Browse days, understand records, and make changes." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Browse days, understand records, and make changes."
+          }
+        }
+      }
+    },
+    "Check Location Services and the permissions granted to Moves. iOS may delay or omit background observations, especially after force-quitting or restricting background activity." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Check Location Services and the permissions granted to Moves. iOS may delay or omit background observations, especially after force-quitting or restricting background activity."
+          }
+        }
+      }
+    },
+    "Check sync status" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Check sync status"
+          }
+        }
+      }
+    },
+    "Check the move’s transport mode and recorded-route details. Manual and imported metadata can take priority over inferred matching." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Check the move’s transport mode and recorded-route details. Manual and imported metadata can take priority over inferred matching."
+          }
+        }
+      }
+    },
+    "Choose how Moves records places and detailed routes." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Choose how Moves records places and detailed routes."
+          }
+        }
+      }
+    },
+    "Choose import options" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Choose import options"
+          }
+        }
+      }
+    },
+    "Choose one device for location recording to avoid confusing gaps; other devices can browse the shared timeline." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Choose one device for location recording to avoid confusing gaps; other devices can browse the shared timeline."
+          }
+        }
+      }
+    },
+    "Common causes and safe recovery steps." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Common causes and safe recovery steps."
+          }
+        }
+      }
+    },
+    "Control external uploads and protect location data." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Control external uploads and protect location data."
+          }
+        }
+      }
+    },
+    "Correcting a timeline" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Correcting a timeline"
+          }
+        }
+      }
+    },
+    "Credentials and permissions" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Credentials and permissions"
+          }
+        }
+      }
+    },
+    "Deleted records can generally be restored immediately with Undo where that action is offered. Data Maintenance includes deduplication with an undo snapshot." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Deleted records can generally be restored immediately with Undo where that action is offered. Data Maintenance includes deduplication with an undo snapshot."
+          }
+        }
+      }
+    },
+    "Detailed GPS route tracking uses more battery than background place recording. Stop an active route session when it is no longer needed." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Detailed GPS route tracking uses more battery than background place recording. Stop an active route session when it is no longer needed."
+          }
+        }
+      }
+    },
+    "Documentation" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Documentation"
+          }
+        }
+      }
+    },
+    "Edit the affected record when you know its correct label or transport mode." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Edit the affected record when you know its correct label or transport mode."
+          }
+        }
+      }
+    },
+    "Export timeline data" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Export timeline data"
+          }
+        }
+      }
+    },
+    "Export, Backup & Sharing" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Export, Backup & Sharing"
+          }
+        }
+      }
+    },
+    "External location services" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "External location services"
+          }
+        }
+      }
+    },
+    "Fill missing moves from the timeline when the available visit data supports an estimate." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Fill missing moves from the timeline when the available visit data supports an estimate."
+          }
+        }
+      }
+    },
+    "Find visits and understand travel connections." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Find visits and understand travel connections."
+          }
+        }
+      }
+    },
+    "First steps" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "First steps"
+          }
+        }
+      }
+    },
+    "Flight connectors are inferred display geometry between endpoints. They are not saved as recorded GPS points. On the history map, stationary, walking, running, cycling, automotive, motorcycle, and unknown moves use the general Moves color; swimming, train, plane, and boat keep their mode colors." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Flight connectors are inferred display geometry between endpoints. They are not saved as recorded GPS points. On the history map, stationary, walking, running, cycling, automotive, motorcycle, and unknown moves use the general Moves color; swimming, train, plane, and boat keep their mode colors."
+          }
+        }
+      }
+    },
+    "For imports, open the queue and retry a failed item after checking the file and selected import options." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "For imports, open the queue and retry a failed item after checking the file and selected import options."
+          }
+        }
+      }
+    },
+    "For sync delays, check the Status card and allow iCloud time to process changes. Avoid deleting data to resolve a temporary delay." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "For sync delays, check the Status card and allow iCloud time to process changes. Avoid deleting data to resolve a temporary delay."
+          }
+        }
+      }
+    },
+    "From Export & Backup, export the selected day or all history in a supported format such as GPX, GeoJSON, or CSV." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "From Export & Backup, export the selected day or all history in a supported format such as GPX, GeoJSON, or CSV."
+          }
+        }
+      }
+    },
+    "Gaps and estimates" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Gaps and estimates"
+          }
+        }
+      }
+    },
+    "Health workout" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Health workout"
+          }
+        }
+      }
+    },
+    "Health workout route import and automatic watch-folder imports are available on supported devices and configurations. Follow the permission and folder controls shown in Settings → Import." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Health workout route import and automatic watch-folder imports are available on supported devices and configurations. Follow the permission and folder controls shown in Settings → Import."
+          }
+        }
+      }
+    },
+    "History map" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "History map"
+          }
+        }
+      }
+    },
+    "If two visits have no move between them, check whether automatic gap filling is enabled. Estimates may still be incomplete." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "If two visits have no move between them, check whether automatic gap filling is enabled. Estimates may still be incomplete."
+          }
+        }
+      }
+    },
+    "Import mapping choices apply to incoming route files: automatic mode inference, one selected transport mode, or raw GPS data. This is separate from matching an inferred move on a map." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Import mapping choices apply to incoming route files: automatic mode inference, one selected transport mode, or raw GPS data. This is separate from matching an inferred move on a map."
+          }
+        }
+      }
+    },
+    "Import, sync, or battery issue" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Import, sync, or battery issue"
+          }
+        }
+      }
+    },
+    "Imported files and exported files are handled by the file destination you select. Removing an integration does not delete data already sent to that service." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Imported files and exported files are handled by the file destination you select. Removing an integration does not delete data already sent to that service."
+          }
+        }
+      }
+    },
+    "Imported routes" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Imported routes"
+          }
+        }
+      }
+    },
+    "Importing Data" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Importing Data"
+          }
+        }
+      }
+    },
+    "Individual places and moves may also offer export or sharing actions in their detail or context menus." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Individual places and moves may also offer export or sharing actions in their detail or context menus."
+          }
+        }
+      }
+    },
+    "Integration credentials are stored for use by the app and are not part of a shared help page or export. Grant location, Health, or file access only for the features you choose to use." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Integration credentials are stored for use by the app and are not part of a shared help page or export. Grant location, Health, or file access only for the features you choose to use."
+          }
+        }
+      }
+    },
+    "Integrations & Privacy" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Integrations & Privacy"
+          }
+        }
+      }
+    },
+    "Keep the devices signed in to the expected Apple Account and connected to iCloud. Allow time for queued changes to upload and download." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Keep the devices signed in to the expected Apple Account and connected to iCloud. Allow time for queued changes to upload and download."
+          }
+        }
+      }
+    },
+    "Label visits and recognize places you return to." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Label visits and recognize places you return to."
+          }
+        }
+      }
+    },
+    "Location history can reveal home, work, routines, and travel. Check dates, map coverage, place names, and recipient permissions before sharing an export or image." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Location history can reveal home, work, routines, and travel. Check dates, map coverage, place names, and recipient permissions before sharing an export or image."
+          }
+        }
+      }
+    },
+    "Location tracking happens on iPhone. The Mac app is for browsing, managing, importing, and exporting timeline data; it does not record your location." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Location tracking happens on iPhone. The Mac app is for browsing, managing, importing, and exporting timeline data; it does not record your location."
+          }
+        }
+      }
+    },
+    "Manage Regular Places" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Manage Regular Places"
+          }
+        }
+      }
+    },
+    "Manual choices, imported declared modes, Health workout modes, and detailed recorded tracks are retained. A flight connector between endpoints is inferred display geometry, not recorded GPS." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Manual choices, imported declared modes, Health workout modes, and detailed recorded tracks are retained. A flight connector between endpoints is inferred display geometry, not recorded GPS."
+          }
+        }
+      }
+    },
+    "Manual routes and imported route geometry are preserved. Real route tracking and Health workout tracks keep their recorded GPS. Health routes use pink in move details; route tracking and imported detailed tracks use the route-tracking color." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Manual routes and imported route geometry are preserved. Real route tracking and Health workout tracks keep their recorded GPS. Health routes use pink in move details; route tracking and imported detailed tracks use the route-tracking color."
+          }
+        }
+      }
+    },
+    "Map directions depend on network availability and returned routing data. A temporary routing failure can leave recorded geometry in place." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Map directions depend on network availability and returned routing data. A temporary routing failure can leave recorded geometry in place."
+          }
+        }
+      }
+    },
+    "Missing observations, incomplete history, and estimated moves can affect totals and connection counts. Treat statistics as a summary of recorded data, not a complete account of every trip." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Missing observations, incomplete history, and estimated moves can affect totals and connection counts. Treat statistics as a summary of recorded data, not a complete account of every trip."
+          }
+        }
+      }
+    },
+    "Move Mapping" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Move Mapping"
+          }
+        }
+      }
+    },
+    "Move Mapping by transport mode" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Move Mapping by transport mode"
+          }
+        }
+      }
+    },
+    "Move detail" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Move detail"
+          }
+        }
+      }
+    },
+    "Moves builds a timeline from recorded visits and the movement between them. Your history appears by day, with a map and details for each place and move." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves builds a timeline from recorded visits and the movement between them. Your history appears by day, with a map and details for each place and move."
+          }
+        }
+      }
+    },
+    "Moves can estimate a move between consecutive visits when automatic gap filling is enabled. An estimated route or transport mode is not the same as a continuous GPS recording." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves can estimate a move between consecutive visits when automatic gap filling is enabled. An estimated route or transport mode is not the same as a continuous GPS recording."
+          }
+        }
+      }
+    },
+    "Moves can upload location data to configured services including Dawarich, Reitti, GeoPulse, OwnTracks Recorder, and Traccar. Availability and setup vary by service. Open Settings → Integrations to see current options and enable each destination." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves can upload location data to configured services including Dawarich, Reitti, GeoPulse, OwnTracks Recorder, and Traccar. Availability and setup vary by service. Open Settings → Integrations to see current options and enable each destination."
+          }
+        }
+      }
+    },
+    "Moves chooses whether and how a recorded route is matched to map directions based on the selected transport mode." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves chooses whether and how a recorded route is matched to map directions based on the selected transport mode."
+          }
+        }
+      }
+    },
+    "Moves listens for the location changes provided by iOS, including significant-location changes and visits. This is designed for lower energy use than continuous GPS, but observations can be sparse or delayed." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves listens for the location changes provided by iOS, including significant-location changes and visits. This is designed for lower energy use than continuous GPS, but observations can be sparse or delayed."
+          }
+        }
+      }
+    },
+    "Moves provides supported widgets and App Intents on compatible Apple platforms. Add a widget from the system widget gallery or find Moves actions in Shortcuts; the actions offered depend on the device and installed app version." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves provides supported widgets and App Intents on compatible Apple platforms. Add a widget from the system widget gallery or find Moves actions in Shortcuts; the actions offered depend on the device and installed app version."
+          }
+        }
+      }
+    },
+    "Moves stores timeline data locally and can synchronize it through your private iCloud container when iCloud is available and enabled. Sync is asynchronous; updates may take time to reach another device." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves stores timeline data locally and can synchronize it through your private iCloud container when iCloud is available and enabled. Sync is asynchronous; updates may take time to reach another device."
+          }
+        }
+      }
+    },
+    "Moves supports GPX, TCX, KML, GeoJSON, and JSON route data. The file picker and share sheet show which files the current platform can open." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves supports GPX, TCX, KML, GeoJSON, and JSON route data. The file picker and share sheet show which files the current platform can open."
+          }
+        }
+      }
+    },
+    "Moves uses system location services. iOS can delay or omit background observations, so a timeline may have gaps or estimated movement. Precise route tracking is available for a limited active session and uses more battery." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moves uses system location services. iOS can delay or omit background observations, so a timeline may have gaps or estimated movement. Precise route tracking is available for a limited active session and uses more battery."
+          }
+        }
+      }
+    },
+    "No network matching; keep the recorded GPS route." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "No network matching; keep the recorded GPS route."
+          }
+        }
+      }
+    },
+    "No network matching; recorded coordinates are shown when available." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "No network matching; recorded coordinates are shown when available."
+          }
+        }
+      }
+    },
+    "No road or transit matching; keep the recorded route." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "No road or transit matching; keep the recorded route."
+          }
+        }
+      }
+    },
+    "On iPhone, allow the location access requested by Moves if you want background visit recording. Keep Background App Refresh and Location Services available to iOS." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "On iPhone, allow the location access requested by Moves if you want background visit recording. Keep Background App Refresh and Location Services available to iOS."
+          }
+        }
+      }
+    },
+    "Open Settings to configure Regular Places, tracking, integrations, import, and export. iCloud sync is separate from location recording." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Open Settings to configure Regular Places, tracking, integrations, import, and export. iCloud sync is separate from location recording."
+          }
+        }
+      }
+    },
+    "Open Settings → Regular Places to review, add, edit, or remove saved places." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Open Settings → Regular Places to review, add, edit, or remove saved places."
+          }
+        }
+      }
+    },
+    "Open the Status card or Settings → Tracking to review sync and diagnostics information." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Open the Status card or Settings → Tracking to review sync and diagnostics information."
+          }
+        }
+      }
+    },
+    "Open the timeline and select a day to inspect its places and moves. New or sparse location observations may take time to appear." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Open the timeline and select a day to inspect its places and moves. New or sparse location observations may take time to appear."
+          }
+        }
+      }
+    },
+    "Other route sources" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Other route sources"
+          }
+        }
+      }
+    },
+    "Places & Regular Places" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Places & Regular Places"
+          }
+        }
+      }
+    },
+    "Platform availability" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Platform availability"
+          }
+        }
+      }
+    },
+    "Private iCloud data" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Private iCloud data"
+          }
+        }
+      }
+    },
+    "Review nearby days and the raw-fix display in Appearance to see whether observations exist without a reconstructed route." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Review nearby days and the raw-fix display in Appearance to see whether observations exist without a reconstructed route."
+          }
+        }
+      }
+    },
+    "Review the import queue to monitor progress and pause, resume, retry, or inspect failed work where available. Already committed files remain when a later file fails." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Review the import queue to monitor progress and pause, resume, retry, or inspect failed work where available. Already committed files remain when a later file fails."
+          }
+        }
+      }
+    },
+    "Route files" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Route files"
+          }
+        }
+      }
+    },
+    "Route sources" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Route sources"
+          }
+        }
+      }
+    },
+    "Route tracking / import" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Route tracking / import"
+          }
+        }
+      }
+    },
+    "Routes & Move Mapping" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Routes & Move Mapping"
+          }
+        }
+      }
+    },
+    "Safe maintenance" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Safe maintenance"
+          }
+        }
+      }
+    },
+    "Search documentation" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Search documentation"
+          }
+        }
+      }
+    },
+    "Search visits" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Search visits"
+          }
+        }
+      }
+    },
+    "Search visits by place name, note, or date using the Search screen. Open a result to see its day and surrounding timeline context." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Search visits by place name, note, or date using the Search screen. Open a result to see its day and surrounding timeline context."
+          }
+        }
+      }
+    },
+    "Search, Statistics & Connections" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Search, Statistics & Connections"
+          }
+        }
+      }
+    },
+    "Select a visit or move to inspect its details. Depending on the record, you can edit its label, transport mode, comments, or route details." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Select a visit or move to inspect its details. Depending on the record, you can edit its label, transport mode, comments, or route details."
+          }
+        }
+      }
+    },
+    "Settings → Export & Backup controls the daily backup option, format, and folder organization. Verify that a backup file was created before relying on it." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Settings → Export & Backup controls the daily backup option, format, and folder organization. Verify that a backup file was created before relying on it."
+          }
+        }
+      }
+    },
+    "Share a result" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Share a result"
+          }
+        }
+      }
+    },
+    "Share selected data or keep a separate backup." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Share selected data or keep a separate backup."
+          }
+        }
+      }
+    },
+    "Shared maps and statistics can include routes, dates, or place labels depending on the selected design. Check the preview and time span before sending or publishing." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Shared maps and statistics can include routes, dates, or place labels depending on the selected design. Check the preview and time span before sending or publishing."
+          }
+        }
+      }
+    },
+    "Sharing" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Sharing"
+          }
+        }
+      }
+    },
+    "Start Here" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Start Here"
+          }
+        }
+      }
+    },
+    "Start a route-tracking session from the Tracking controls when you need a detailed path for a trip." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Start a route-tracking session from the Tracking controls when you need a detailed path for a trip."
+          }
+        }
+      }
+    },
+    "Statistics and connections" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Statistics and connections"
+          }
+        }
+      }
+    },
+    "Statistics summarize the visits and moves currently in your timeline. Connections describe travel between places; direct connections and connections with intermediate stops are different results." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Statistics summarize the visits and moves currently in your timeline. Connections describe travel between places; direct connections and connections with intermediate stops are different results."
+          }
+        }
+      }
+    },
+    "Stop tracking when the trip ends. The saved route retains its recorded GPS geometry." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Stop tracking when the trip ends. The saved route retains its recorded GPS geometry."
+          }
+        }
+      }
+    },
+    "The Mac app is for browsing and managing synchronized data. Use the iPhone as the device that records location. Sync does not guarantee that iOS will deliver background location updates." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "The Mac app is for browsing and managing synchronized data. Use the iPhone as the device that records location. Sync does not guarantee that iOS will deliver background location updates."
+          }
+        }
+      }
+    },
+    "The Watch app and complications provide supported recording and status controls when installed and paired. iPhone and Watch behavior can differ; use the status shown on the device that is recording to confirm a session." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "The Watch app and complications provide supported recording and status controls when installed and paired. iPhone and Watch behavior can differ; use the status shown on the device that is recording to confirm a session."
+          }
+        }
+      }
+    },
+    "The place detail screen can show other visits associated with the same place, helping you compare dates and correct labels. Changing a saved place definition may affect how visits are recognized." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "The place detail screen can show other visits associated with the same place, helping you compare dates and correct labels. Changing a saved place definition may affect how visits are recognized."
+          }
+        }
+      }
+    },
+    "The radius controls how close a visit must be to match. Nearby or overlapping saved areas can make a match ambiguous; review the visit label after changing definitions." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "The radius controls how close a visit must be to match. Nearby or overlapping saved areas can make a match ambiguous; review the visit label after changing definitions."
+          }
+        }
+      }
+    },
+    "The session records more frequent GPS locations and uses more battery. It is time-limited; use the status shown in Moves, Live Activity, or Watch when available to check whether it is active." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "The session records more frequent GPS locations and uses more battery. It is time-limited; use the status shown in Moves, Live Activity, or Watch when available to check whether it is active."
+          }
+        }
+      }
+    },
+    "The transport mode controls whether Moves asks MapKit for matching directions and which route color appears. The mode rules and map colors below are generated from the app’s transport modes and palette." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "The transport mode controls whether Moves asks MapKit for matching directions and which route color appears. The mode rules and map colors below are generated from the app’s transport modes and palette."
+          }
+        }
+      }
+    },
+    "Tracking & Battery" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Tracking & Battery"
+          }
+        }
+      }
+    },
+    "Troubleshooting & FAQ" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Troubleshooting & FAQ"
+          }
+        }
+      }
+    },
+    "Try MapKit walking directions. If no candidate fits the recorded samples, keep the recorded route." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Try MapKit walking directions. If no candidate fits the recorded samples, keep the recorded route."
+          }
+        }
+      }
+    },
+    "Try cycling directions, then walking directions where cycling routing is unavailable. Keep the recorded route if neither candidate fits." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Try cycling directions, then walking directions where cycling routing is unavailable. Keep the recorded route if neither candidate fits."
+          }
+        }
+      }
+    },
+    "Try driving directions, with walking directions as a fallback near endpoints that roads cannot reach. Keep the recorded route if no candidate fits." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Try driving directions, with walking directions as a fallback near endpoints that roads cannot reach. Keep the recorded route if no candidate fits."
+          }
+        }
+      }
+    },
+    "Try public-transit directions only; driving routes are rejected. If no suitable transit geometry is returned, keep the recorded fixes. Transit data does not guarantee a rail-only line." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Try public-transit directions only; driving routes are rejected. If no suitable transit geometry is returned, keep the recorded fixes. Transit data does not guarantee a rail-only line."
+          }
+        }
+      }
+    },
+    "Understand private iCloud sync and device roles." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Understand private iCloud sync and device roles."
+          }
+        }
+      }
+    },
+    "Understand route display, matching, and transport colors." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Understand route display, matching, and transport colors."
+          }
+        }
+      }
+    },
+    "Use Appearance settings to choose raw operating-system fixes or reconstructed route display." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use Appearance settings to choose raw operating-system fixes or reconstructed route display."
+          }
+        }
+      }
+    },
+    "Use Create & Share to choose a supported map or statistics design and time span. Review the selected period before sharing because location and place names can be sensitive." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use Create & Share to choose a supported map or statistics design and time span. Review the selected period before sharing because location and place names can be sensitive."
+          }
+        }
+      }
+    },
+    "Use Data Maintenance only after reviewing its description. Historical deduplication creates an undo snapshot; keep that snapshot available until you have confirmed the timeline." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use Data Maintenance only after reviewing its description. Historical deduplication creates an undo snapshot; keep that snapshot available until you have confirmed the timeline."
+          }
+        }
+      }
+    },
+    "Use Search or Statistics to find a place or connection, then open the relevant day to inspect the records." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use Search or Statistics to find a place or connection, then open the relevant day to inspect the records."
+          }
+        }
+      }
+    },
+    "Use an inferred curved connector between endpoints when no detailed recorded route is available. The connector is display geometry, not recorded GPS." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use an inferred curved connector between endpoints when no detailed recorded route is available. The connector is display geometry, not recorded GPS."
+          }
+        }
+      }
+    },
+    "Use supported shortcuts, widgets, and Watch features." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use supported shortcuts, widgets, and Watch features."
+          }
+        }
+      }
+    },
+    "Use the date control to move to another day; the timeline shows visits and move segments in time order." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use the date control to move to another day; the timeline shows visits and move segments in time order."
+          }
+        }
+      }
+    },
+    "Visit labels" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Visit labels"
+          }
+        }
+      }
+    },
+    "Visits and moves" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Visits and moves"
+          }
+        }
+      }
+    },
+    "What Moves records" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "What Moves records"
+          }
+        }
+      }
+    },
+    "What sync does not do" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "What sync does not do"
+          }
+        }
+      }
+    },
+    "What to expect" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "What to expect"
+          }
+        }
+      }
+    },
+    "When times overlap existing data, choose whether to keep existing data, skip dates that already have data, expand around existing ranges, or overwrite overlapping ranges." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "When times overlap existing data, choose whether to keep existing data, skip dates that already have data, expand around existing ranges, or overwrite overlapping ranges."
+          }
+        }
+      }
+    },
+    "Widgets and Shortcuts" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Widgets and Shortcuts"
+          }
+        }
+      }
+    },
+    "Widgets, Shortcuts & Apple Watch" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Widgets, Shortcuts & Apple Watch"
+          }
+        }
+      }
+    },
+    "You can also create or edit a Regular Place from a visit’s place details where that action is available." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "You can also create or edit a Regular Place from a visit’s place details where that action is available."
+          }
+        }
+      }
+    },
+    "Your Timeline" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Your Timeline"
+          }
+        }
+      }
+    },
+    "iCloud Sync & Multiple Devices" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "iCloud Sync & Multiple Devices"
+          }
+        }
+      }
+    },
+    "iPhone handles location recording. Mac provides timeline browsing, route-file import, and data export. Widgets, Live Activity, and Watch controls appear only on supported devices and OS versions." :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "iPhone handles location recording. Mac provides timeline browsing, route-file import, and data export. Widgets, Live Activity, and Watch controls appear only on supported devices and OS versions."
+          }
+        }
+      }
+    },
+    "square.and.arrow.up" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "square.and.arrow.up"
+          }
+        }
+      }
+    },
+    "Guides, features, and troubleshooting" :     {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Guides, features, and troubleshooting"
+          }
+        }
+      }
     }
   },
   "version" : "1.2"

@@ -1074,7 +1074,7 @@ private struct MovesMacAboutView: View {
     }
 }
 
-private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
+private enum MovesMacHelpTopic: CaseIterable, Identifiable, Hashable {
     case overview
     case timeline
     case importRoutes
@@ -1082,11 +1082,46 @@ private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
     case export
     case settings
     case shortcuts
+    case startHere
+    case tracking
+    case places
+    case routes
+    case searchAndStatistics
+    case importing
+    case exportAndBackup
+    case sync
+    case integrationsAndPrivacy
+    case widgetsAndWatch
+    case troubleshooting
 
-    var id: Self { self }
+    fileprivate var commonTopic: MovesHelpTopic? {
+        switch self {
+        case .startHere: .startHere
+        case .tracking: .tracking
+        case .places: .places
+        case .routes: .routes
+        case .searchAndStatistics: .searchAndStatistics
+        case .importing: .importing
+        case .exportAndBackup: .exportAndBackup
+        case .sync: .sync
+        case .integrationsAndPrivacy: .integrationsAndPrivacy
+        case .widgetsAndWatch: .widgetsAndWatch
+        case .troubleshooting: .troubleshooting
+        default: nil
+        }
+    }
+
+    var id: String { String(describing: self) }
+
+    static var allCases: [MovesMacHelpTopic] {
+        [.overview, .startHere, .timeline, .tracking, .places, .routes,
+         .searchAndStatistics, .importing, .importRoutes, .importQueue, .export, .exportAndBackup,
+         .sync, .integrationsAndPrivacy, .widgetsAndWatch, .settings, .shortcuts, .troubleshooting]
+    }
 
     var title: String {
-        switch self {
+        if let commonTopic { return commonTopic.title }
+        return switch self {
         case .overview: "Overview"
         case .timeline: "Browse your timeline"
         case .importRoutes: "Import route files"
@@ -1094,11 +1129,13 @@ private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
         case .export: "Export timeline data"
         case .settings: "Settings and privacy"
         case .shortcuts: "Keyboard shortcuts"
+        default: ""
         }
     }
 
     var subtitle: String {
-        switch self {
+        if let commonTopic { return commonTopic.subtitle }
+        return switch self {
         case .overview: "What Moves does and how the Mac app fits in."
         case .timeline: "Find days, inspect activities, and edit records."
         case .importRoutes: "Bring route history in from other apps and services."
@@ -1106,11 +1143,13 @@ private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
         case .export: "Save selected days or your complete history."
         case .settings: "Configure the workspace, data handling, and storage."
         case .shortcuts: "Navigate and work quickly from the keyboard."
+        default: ""
         }
     }
 
     var systemImage: String {
-        switch self {
+        if let commonTopic { return commonTopic.systemImage }
+        return switch self {
         case .overview: "mappin.and.ellipse"
         case .timeline: "calendar.day.timeline.left"
         case .importRoutes: "square.and.arrow.down"
@@ -1118,15 +1157,21 @@ private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
         case .export: "square.and.arrow.up"
         case .settings: "gearshape"
         case .shortcuts: "command"
+        default: "questionmark.circle"
         }
     }
 
     var searchTerms: String {
-        "\(title) \(subtitle)"
+        commonTopic?.searchTerms ?? "\(title) \(subtitle) \(sections.flatMap { [$0.title] + $0.paragraphs + $0.bullets }.joined(separator: " "))"
     }
 
     var sections: [MovesMacHelpSection] {
-        switch self {
+        if let commonTopic {
+            return commonTopic.sections.map {
+                MovesMacHelpSection(title: $0.title, paragraphs: $0.paragraphs, bullets: $0.bullets)
+            }
+        }
+        return switch self {
         case .overview:
             [
                 MovesMacHelpSection(
@@ -1301,6 +1346,8 @@ private enum MovesMacHelpTopic: String, CaseIterable, Identifiable, Hashable {
                     ]
                 )
             ]
+        default:
+            []
         }
     }
 }
@@ -1385,6 +1432,9 @@ private struct MovesMacHelpView: View {
 
                     ForEach(selectedTopic.sections) { section in
                         MovesMacHelpSectionView(section: section)
+                    }
+                    if selectedTopic.commonTopic?.includesMoveMapping == true {
+                        MovesHelpMappingGuideView()
                     }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
