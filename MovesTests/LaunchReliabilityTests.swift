@@ -222,7 +222,7 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertNil(diagnostics.latestSnapshot)
     }
 
-    func testRuntimePublishesReadyBeforeDiagnosticsObservationCompletes() async throws {
+    func testRuntimePreparesDiagnosticsBeforeReadyAndDefersObservation() async throws {
         let container = try makeInMemoryContainer()
         let tracker = CancellationTracker()
         let diagnosticsFactoryCalls = LockedCounter()
@@ -250,15 +250,59 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertEqual(runtime.preparationState, .ready)
         XCTAssertTrue(runtime.isReady)
         XCTAssertIdentical(runtime.container, container)
-        XCTAssertEqual(diagnosticsFactoryCalls.value, 0, "Diagnostics construction must not gate the first usable screen")
+        let diagnostics = try XCTUnwrap(runtime.syncDiagnostics)
+        XCTAssertEqual(diagnosticsFactoryCalls.value, 1)
         let startedBeforeDeferredPhase = await tracker.started
         XCTAssertFalse(startedBeforeDeferredPhase)
         runtime.startDeferredRuntimeServices()
         XCTAssertEqual(diagnosticsFactoryCalls.value, 1)
+        XCTAssertIdentical(runtime.syncDiagnostics, diagnostics)
+        runtime.startDeferredRuntimeServices()
+        XCTAssertIdentical(runtime.syncDiagnostics, diagnostics)
         runtime.startDeferredDiagnostics()
         let didStart = await waitUntil { await tracker.started }
         XCTAssertTrue(didStart)
         XCTAssertNil(runtime.syncDiagnostics?.latestSnapshot)
+    }
+
+    func testRetryRebindsDiagnosticsToReplacementContainer() async throws {
+        let originalContainer = try makeInMemoryContainer()
+        let replacementContainer = try makeInMemoryContainer()
+        let containerFactoryCalls = LockedCounter()
+        let diagnosticsFactoryCalls = LockedCounter()
+        var diagnosticsContainers: [ModelContainer] = []
+        let runtime = MovesAppRuntime(
+            applicationContainerFactory: {
+                let call = containerFactoryCalls.value
+                containerFactoryCalls.increment()
+                return call == 0 ? originalContainer : replacementContainer
+            },
+            localFallbackContainerFactory: { replacementContainer },
+            initializesServices: false,
+            diagnosticsFactory: { container in
+                diagnosticsFactoryCalls.increment()
+                diagnosticsContainers.append(container)
+                return MovesSyncDiagnostics(
+                    modelContainer: container,
+                    userDefaults: self.makeIsolatedDefaults(),
+                    notificationCenter: NotificationCenter(),
+                    snapshotLoader: { Self.emptySnapshot() }
+                )
+            }
+        )
+
+        await runtime.prepare()
+        let initialDiagnostics = try XCTUnwrap(runtime.syncDiagnostics)
+        _ = MovesStoreRecovery.record(TestStoreError.cloudKitUnavailable, attemptedMode: .cloudKit)
+
+        await runtime.retryPreparation()
+
+        XCTAssertEqual(runtime.preparationState, .ready)
+        XCTAssertIdentical(runtime.container, replacementContainer)
+        XCTAssertEqual(diagnosticsFactoryCalls.value, 2)
+        XCTAssertIdentical(diagnosticsContainers.last, replacementContainer)
+        let replacementDiagnostics = try XCTUnwrap(runtime.syncDiagnostics)
+        XCTAssertFalse(replacementDiagnostics === initialDiagnostics)
     }
 
     func testInitialTodaySelectionUsesOneBoundedWindowLoadWithTenThousandDays() async throws {
@@ -316,6 +360,7 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertEqual(runtime.preparationState, .ready)
         XCTAssertTrue(runtime.isReady)
         XCTAssertIdentical(runtime.container, container)
+        XCTAssertNotNil(runtime.syncDiagnostics)
         XCTAssertEqual(runtime.storeOpenFailure?.attemptedMode, .cloudKit)
     }
 

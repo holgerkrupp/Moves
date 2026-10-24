@@ -235,7 +235,7 @@ struct MovesApp: App {
                     if let container = runtime.container {
                         readyContent(container: container)
                     } else {
-                        MovesLaunchPlaceholder()
+                        runtimeDependencyFailureView
                     }
                 case .failed(let failure):
                     MovesStoreOpenFailureView(
@@ -272,39 +272,61 @@ struct MovesApp: App {
         }
     }
 
+    @ViewBuilder
     private func readyContent(container: ModelContainer) -> some View {
-        Group {
-            #if targetEnvironment(macCatalyst)
-            ContentView()
-                .frame(
-                    minWidth: 720,
-                    maxWidth: .infinity,
-                    minHeight: 520,
-                    maxHeight: .infinity
-                )
-            #else
-            ContentView()
-            #endif
+        if let captureManager = runtime.captureManager,
+           let healthWorkoutRouteAutoImporter = runtime.healthWorkoutRouteAutoImporter,
+           let cloudDataPresencePublisher = runtime.cloudDataPresencePublisher,
+           let locationServiceSyncManager = runtime.locationServiceSyncManager,
+           let multiDevicePresenceManager = runtime.multiDevicePresenceManager,
+           let importCoordinator = runtime.importCoordinator,
+           let routeFileImporter = runtime.routeFileImporter,
+           let routeWatchFolderManager = runtime.routeWatchFolderManager,
+           let importedRouteDataSummary = runtime.importedRouteDataSummary,
+           let diagnostics = runtime.syncDiagnostics {
+            Group {
+                #if targetEnvironment(macCatalyst)
+                ContentView()
+                    .frame(
+                        minWidth: 720,
+                        maxWidth: .infinity,
+                        minHeight: 520,
+                        maxHeight: .infinity
+                    )
+                #else
+                ContentView()
+                #endif
+            }
+            .modelContainer(container)
+            .environmentObject(captureManager)
+            .environmentObject(runtime.undoController)
+            .environmentObject(healthWorkoutRouteAutoImporter)
+            .environmentObject(cloudDataPresencePublisher)
+            .environmentObject(locationServiceSyncManager)
+            .environmentObject(multiDevicePresenceManager)
+            .environmentObject(importCoordinator)
+            .environmentObject(routeFileImporter)
+            .environmentObject(routeWatchFolderManager)
+            .environmentObject(importedRouteDataSummary)
+            .environmentObject(diagnostics)
+            .task {
+                startActiveServices()
+            }
+            .task {
+                await MovesStartupMilestone.waitForFirstTimelineInteractive()
+                guard !Task.isCancelled else { return }
+                startDeferredServices()
+            }
+        } else {
+            runtimeDependencyFailureView
         }
-        .modelContainer(container)
-        .environmentObject(runtime.captureManager!)
-        .environmentObject(runtime.undoController)
-        .environmentObject(runtime.healthWorkoutRouteAutoImporter!)
-        .environmentObject(runtime.cloudDataPresencePublisher!)
-        .environmentObject(runtime.locationServiceSyncManager!)
-        .environmentObject(runtime.multiDevicePresenceManager!)
-        .environmentObject(runtime.importCoordinator!)
-        .environmentObject(runtime.routeFileImporter!)
-        .environmentObject(runtime.routeWatchFolderManager!)
-        .environmentObject(runtime.importedRouteDataSummary!)
-        .task {
-            startActiveServices()
-        }
-        .task {
-            await MovesStartupMilestone.waitForFirstTimelineInteractive()
-            guard !Task.isCancelled else { return }
-            startDeferredServices()
-        }
+    }
+
+    private var runtimeDependencyFailureView: some View {
+        runtime.logMissingRequiredDependency()
+        return MovesRuntimeDependencyFailureView(retry: {
+            await runtime.retryPreparation(force: true)
+        })
     }
 
     private func startActiveServices() {
@@ -479,6 +501,29 @@ private struct MovesStoreOpenFailureView: View {
     }
 }
 
+private struct MovesRuntimeDependencyFailureView: View {
+    let retry: () async -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.orange)
+            Text("Moves couldn't prepare its services")
+                .font(.title2.bold())
+            Text("A required app service is unavailable. Retry preparation to continue.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Retry") {
+                Task { await retry() }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 enum MovesAppPreparationState: Equatable {
     case loading
     case ready
@@ -514,6 +559,7 @@ final class MovesAppRuntime: ObservableObject {
     private(set) var didStartDeferredServices = false
     var deferredMaintenanceTask: Task<Void, Never>?
     private var retryObserver: NSObjectProtocol?
+    private var didLogMissingRequiredDependency = false
     private let applicationContainerFactory: ContainerFactory
     private let localFallbackContainerFactory: ContainerFactory
     private let diagnosticsFactory: DiagnosticsFactory
@@ -555,26 +601,27 @@ final class MovesAppRuntime: ObservableObject {
         }
     }
 
-    func retryPreparation() async {
+    func retryPreparation(force: Bool = false) async {
         SyncMonitor.default.startMonitoring()
         if let prepareTask {
             await prepareTask.value
         }
 
-        if isReady, storeOpenFailure == nil { return }
+        if isReady, storeOpenFailure == nil, !force { return }
         resetPreparedState()
         preparationState = .loading
         await prepare()
     }
 
+    func logMissingRequiredDependency() {
+        guard !didLogMissingRequiredDependency else { return }
+        didLogMissingRequiredDependency = true
+        MovesStartupInstrumentation.event("runtimeRequiredDependencyMissing")
+    }
+
     func startDeferredRuntimeServices() {
         guard !didStartDeferredServices else { return }
         didStartDeferredServices = true
-        if syncDiagnostics == nil, let container {
-            let interval = MovesStartupInstrumentation.signposter.beginInterval("syncDiagnosticsConstruction")
-            syncDiagnostics = diagnosticsFactory(container)
-            MovesStartupInstrumentation.signposter.endInterval("syncDiagnosticsConstruction", interval)
-        }
         if container != nil {
             MovesAppShortcuts.updateAppShortcutParameters()
         }
@@ -709,6 +756,10 @@ final class MovesAppRuntime: ObservableObject {
                     }
 
                 }
+
+                let diagnosticsInterval = MovesStartupInstrumentation.signposter.beginInterval("syncDiagnosticsConstruction")
+                self.syncDiagnostics = self.diagnosticsFactory(container)
+                MovesStartupInstrumentation.signposter.endInterval("syncDiagnosticsConstruction", diagnosticsInterval)
 
                 self.container = container
                 isReady = true
