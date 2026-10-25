@@ -115,7 +115,18 @@ struct ExplorationPreparationStatistics: Sendable, Equatable {
 }
 
 struct ExplorationPreparationBudget: Sendable {
-    var maximumDays = 1
+    var maximumDays: Int
+    var deadline: ContinuousClock.Instant?
+
+    init(maximumDays: Int = 1, deadline: ContinuousClock.Instant? = nil) {
+        self.maximumDays = maximumDays
+        self.deadline = deadline
+    }
+
+    func check() throws {
+        try Task.checkCancellation()
+        if let deadline, ContinuousClock.now >= deadline { throw CancellationError() }
+    }
 }
 
 struct ExplorationPreparationResult: Sendable {
@@ -252,6 +263,20 @@ enum ExplorationPreparation {
     private static let coordinator = ExplorationPreparationSingleFlight()
     private static let diagnostics = ExplorationPreparationDiagnostics()
 
+    /// Migration shares the same single-writer gate as shard preparation so
+    /// atomic replacements cannot race a worker reading or replacing a file.
+    static func runProtectionMigrationBatch() async throws -> Bool {
+        await coordinator.acquire()
+        do {
+            let complete = try ExplorationFileProtectionMigration.run()
+            await coordinator.release()
+            return complete
+        } catch {
+            await coordinator.release()
+            throw error
+        }
+    }
+
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
 #if DEBUG
         userDefaults.bool(forKey: isEnabledKey)
@@ -272,16 +297,25 @@ enum ExplorationPreparation {
         budget: ExplorationPreparationBudget = ExplorationPreparationBudget()
     ) async throws -> ExplorationPreparationResult {
         await coordinator.acquire()
+        UserDefaults.standard.set(UUID().uuidString, forKey: "Moves.exploration.bg.activeSliceID")
         await diagnostics.start(stage: "slice-start")
         do {
             let result = try await runSliceExclusively(in: modelContainer, rootURL: rootURL, budget: budget)
+            let lane = await diagnostics.failureContext().lane
+            ExplorationPreparationBackgroundTask.recordCompletedSlice(days: result.daysProcessed, lane: lane)
             await coordinator.release()
             return result
         } catch {
             let failureContext = await diagnostics.failureContext()
             await diagnostics.fail(error.localizedDescription)
             if let itemID = failureContext.itemID {
-                try? await ExplorationWorkQueue.shared.retry(itemID, error: error.localizedDescription)
+                if error is CancellationError {
+                    try? await ExplorationWorkQueue.shared.deferAfterCancellation(itemID)
+                } else if error is ProtectedDataUnavailableError {
+                    try? await ExplorationWorkQueue.shared.deferForProtectedData(itemID, error: "Protected Exploration file unavailable")
+                } else {
+                    try? await ExplorationWorkQueue.shared.retry(itemID, error: error.localizedDescription)
+                }
             }
             if failureContext.itemID == nil,
                let dayKey = failureContext.dayKey,
@@ -356,7 +390,8 @@ enum ExplorationPreparation {
 
         let workQueue = ExplorationWorkQueue.shared
         await diagnostics.start(stage: "route-input")
-        let claimedWork = try await workQueue.claim(maximum: 1)
+        let shouldAdvanceHistorical = try await workQueue.shouldAdvanceHistoricalCursor()
+        let claimedWork = shouldAdvanceHistorical ? [] : try await workQueue.claim(maximum: 1)
         var claimedWorkID = claimedWork.first?.id
         if let claimed = claimedWork.first {
             await diagnostics.setWork(itemID: claimed.id, dayKey: claimed.dayKey, lane: claimed.lane.title)
@@ -376,6 +411,7 @@ enum ExplorationPreparation {
             }
             guard let historicalInput = try await sourceWorker.nextDay(after: checkpoint.nextDayKey) else {
                 let outstanding = try await workQueue.snapshot()
+                try await workQueue.recordHistoricalCursorProgress()
                 let hasOutstandingWork = outstanding.queuedCount + outstanding.delayedCount + outstanding.processingCount > 0
                 checkpoint.readiness = hasOutstandingWork
                     ? .partiallyReady
@@ -403,7 +439,10 @@ enum ExplorationPreparation {
             checkpoint.processedThroughDayKey = input.dayKey
             if checkpoint.processedHistoricalDayKeys.insert(input.dayKey).inserted {
                 checkpoint.processedDayCount += 1
+                UserDefaults.standard.set(Date.now, forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceAt")
+                UserDefaults.standard.set(input.dayKey, forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceDay")
             }
+            try await workQueue.recordHistoricalCursorProgress()
             checkpoint.successfulRuntime += max(0, Date.now.timeIntervalSince(startedWorkAt))
             checkpoint.readiness = .partiallyReady
             checkpoint.isProcessing = false
@@ -412,27 +451,37 @@ enum ExplorationPreparation {
             try await checkpointStore.save(checkpoint)
             return ExplorationPreparationResult(daysProcessed: 1, routesProcessed: 0, blocksWritten: 0, checkpoint: checkpoint)
         }
-        try Task.checkCancellation()
+        try budget.check()
         try await ExplorationPreparationResourceGate.check()
         let sources = ExplorationShardFileStore(rootURL: rootURL)
         let sourceID = "day:\(input.dayKey)"
-        let previousRevision = try await sources.read(sourceID: sourceID)?.revision ?? 0
-        await diagnostics.start(stage: "raster", dayKey: input.dayKey, routeCount: input.routes.count)
-        let shard = try await Task.detached(priority: .utility) {
-            try ExplorationPerformance.measure("shard generation") {
-                try makeShard(from: input, revision: previousRevision + 1, budget: budget)
-            }
-        }.value
-        await diagnostics.finish(stage: "raster", dayKey: input.dayKey, routeCount: input.routes.count)
         let cache = ExplorationMergedCache(rootURL: rootURL, shardStore: sources)
+        let pendingShard = try await cache.pendingPreparationShard(sourceID: sourceID)
+        await diagnostics.start(stage: "raster", dayKey: input.dayKey, routeCount: input.routes.count)
+        let shard: ExplorationShard
+        if let pendingShard {
+            shard = pendingShard
+        } else {
+            let previousRevision = try await sources.read(sourceID: sourceID)?.revision ?? 0
+            shard = try await Task.detached(priority: .utility) {
+                try ExplorationPerformance.measure("shard generation") {
+                    try makeShard(from: input, revision: previousRevision + 1, budget: budget)
+                }
+            }.value
+        }
+        await diagnostics.finish(stage: "raster", dayKey: input.dayKey, routeCount: input.routes.count)
         await diagnostics.start(stage: "merged-cache", dayKey: input.dayKey, routeCount: input.routes.count)
-        try await cache.replaceShard(shard, updateCountryPresence: false)
+        try await cache.replaceShard(shard, updateCountryPresence: false, deadline: budget.deadline)
         await diagnostics.finish(stage: "merged-cache", dayKey: input.dayKey, routeCount: input.routes.count)
         // Keep the compact country-day index moving with the same bounded
         // source unit. This is deliberately one-shard work and does not scan
         // the rest of the history from the preparation slice.
         await diagnostics.start(stage: "country-day-index", dayKey: input.dayKey, routeCount: input.routes.count)
-        try await ExplorationCountryPresenceIndexStore(rootURL: rootURL).update(with: shard)
+        try await ExplorationCountryPresenceIndexStore(rootURL: rootURL).update(with: shard, deadline: budget.deadline)
+        if budget.deadline != nil {
+            try await cache.markCountryPresenceComplete(sourceID: sourceID, revision: shard.revision)
+            try await cache.finalizePreparationMerge(sourceID: sourceID, revision: shard.revision)
+        }
         await diagnostics.finish(stage: "country-day-index", dayKey: input.dayKey, routeCount: input.routes.count)
         if !isQueuedWork {
             checkpoint.nextDayKey = input.dayKey
@@ -440,11 +489,15 @@ enum ExplorationPreparation {
             if checkpoint.processedHistoricalDayKeys.insert(input.dayKey).inserted {
                 checkpoint.preparedShardCount += 1
                 checkpoint.processedDayCount += 1
+                UserDefaults.standard.set(Date.now, forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceAt")
+                UserDefaults.standard.set(input.dayKey, forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceDay")
             }
         } else if claimedWork.first?.lane == .historical {
             if checkpoint.processedHistoricalDayKeys.insert(input.dayKey).inserted {
                 checkpoint.preparedShardCount += 1
                 checkpoint.processedDayCount += 1
+                UserDefaults.standard.set(Date.now, forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceAt")
+                UserDefaults.standard.set(input.dayKey, forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceDay")
             }
             checkpoint.processedThroughDayKey = max(checkpoint.processedThroughDayKey ?? input.dayKey, input.dayKey)
         }
@@ -460,6 +513,8 @@ enum ExplorationPreparation {
         await diagnostics.finish(stage: "checkpoint-commit", dayKey: input.dayKey, routeCount: input.routes.count)
         if let claimedWorkID {
             try await workQueue.complete(claimedWorkID)
+        } else if !isQueuedWork {
+            try await workQueue.recordHistoricalCursorProgress()
         }
         return ExplorationPreparationResult(
             daysProcessed: 1,
@@ -478,7 +533,7 @@ enum ExplorationPreparation {
         rootURL: URL = ExplorationStorageLocations.rootURL,
         sliceBudget: ExplorationPreparationBudget = ExplorationPreparationBudget(),
         maximumDays: Int = 64,
-        maximumDuration: TimeInterval = 120
+        maximumDuration: TimeInterval = 240
     ) async throws -> [ExplorationPreparationResult] {
         guard maximumDays > 0, maximumDuration > 0 else { return [] }
         let checkpoint = try await ExplorationPreparationCheckpointStore(rootURL: rootURL).load()
@@ -489,16 +544,17 @@ enum ExplorationPreparation {
         } else {
             adaptiveDayLimit = min(maximumDays, 16)
         }
-        let deadline = Date().addingTimeInterval(maximumDuration)
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(maximumDuration))
         var results: [ExplorationPreparationResult] = []
         results.reserveCapacity(adaptiveDayLimit)
 
-        while results.count < adaptiveDayLimit, Date() < deadline {
+        while results.count < adaptiveDayLimit, clock.now < deadline {
             try Task.checkCancellation()
             try await ExplorationPreparationResourceGate.check()
 
             var boundedBudget = sliceBudget
-            boundedBudget.maximumDays = 1
+            boundedBudget = ExplorationPreparationBudget(maximumDays: 1, deadline: deadline)
             let result = try await runSlice(
                 in: modelContainer,
                 rootURL: rootURL,
@@ -537,17 +593,17 @@ enum ExplorationPreparation {
         }
 
         for route in input.routes {
-            try Task.checkCancellation()
+            try budget.check()
             guard let first = route.coordinates.first,
                   let firstAddress = try? FogRasterV1.address(for: first.clCoordinate) else { continue }
             var previous = firstAddress.cell
             for coordinate in route.coordinates.dropFirst() {
-                try Task.checkCancellation()
+                try budget.check()
                 guard let currentAddress = try? FogRasterV1.address(for: coordinate.clCoordinate) else { continue }
                 var traversed = 0
                 try FogRasterV1.forEachCellAlongLine(from: previous, to: currentAddress.cell) { cell in
                     traversed += 1
-                    if traversed.isMultiple(of: 4_096) { try Task.checkCancellation() }
+                    if traversed.isMultiple(of: 4_096) { try budget.check() }
                     try set(cell, layer: route.layer)
                 }
                 previous = currentAddress.cell
@@ -556,7 +612,7 @@ enum ExplorationPreparation {
         }
 
         for visit in input.visits {
-            try Task.checkCancellation()
+            try budget.check()
             guard let address = try? FogRasterV1.address(for: visit.clCoordinate) else { continue }
             // A visit contributes a small, deterministic disk in the same raster.
             // The radius is intentionally conservative until the Phase B product
@@ -565,6 +621,7 @@ enum ExplorationPreparation {
             let latitudeScale = max(cos(visit.latitude * .pi / 180), 0.05)
             let cells = max(1, Int(ceil(radius / (9.5546 * latitudeScale))))
             for y in -cells...cells {
+                try budget.check()
                 for x in -cells...cells where Double(x * x + y * y).squareRoot() * 9.5546 * latitudeScale <= radius {
                     let globalX = Int(address.cell.coordinate.x) + x
                     let globalY = Int(address.cell.coordinate.y) + y
@@ -590,6 +647,10 @@ enum ExplorationPreparation {
 actor ExplorationPreparationDiagnostics {
     private struct Event: Codable {
         var stage: String
+        var runID: String?
+        var sliceID: String?
+        var sequence: Int
+        var context: String
         var dayKey: String?
         var routeCount: Int?
         var lane: String?
@@ -601,6 +662,7 @@ actor ExplorationPreparationDiagnostics {
     }
 
     private var current: Event?
+    private var sequence = 0
     private let key: String
 
     init(key: String = "Moves.exploration.preparation.lastStage") {
@@ -608,9 +670,14 @@ actor ExplorationPreparationDiagnostics {
     }
 
     func start(stage: String, dayKey: String? = nil, routeCount: Int? = nil, lane: String? = nil) {
+        sequence += 1
         let previous = stage == "slice-start" ? nil : current
         current = Event(
             stage: stage,
+            runID: UserDefaults.standard.string(forKey: "Moves.exploration.bg.activeRunID"),
+            sliceID: UserDefaults.standard.string(forKey: "Moves.exploration.bg.activeSliceID"),
+            sequence: sequence,
+            context: UserDefaults.standard.string(forKey: "Moves.exploration.bg.activeContext") ?? "foreground",
             dayKey: dayKey ?? previous?.dayKey,
             routeCount: routeCount ?? previous?.routeCount,
             lane: lane ?? previous?.lane,
@@ -646,6 +713,7 @@ actor ExplorationPreparationDiagnostics {
     func fail(_ message: String) {
         guard var event = current else { return }
         event.error = message
+        event.endedAt = .now
         current = event
         persist()
     }
@@ -674,6 +742,57 @@ actor ExplorationPreparationDiagnostics {
     private func persist() {
         guard let current, let data = try? JSONEncoder().encode(current) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+struct ExplorationBGRunDiagnostic: Codable, Equatable, Sendable, Identifiable {
+    enum Outcome: String, Codable, Sendable { case running, completed, failed, expired, cancelled, deferred, interrupted }
+    let id: String
+    let startedAt: Date
+    var endedAt: Date?
+    var outcome: Outcome
+    var lastError: String?
+    var completedHistoricalDays = 0
+    var completedLiveItems = 0
+    var runtime: TimeInterval { max(0, (endedAt ?? .now).timeIntervalSince(startedAt)) }
+}
+
+enum ExplorationBGRunOutcomePolicy {
+    static func canTransition(from current: ExplorationBGRunDiagnostic.Outcome, to proposed: ExplorationBGRunDiagnostic.Outcome) -> Bool {
+        current == .running && proposed != .running
+    }
+}
+
+enum ExplorationDiagnosticReport {
+    static func make(defaults: UserDefaults = .standard, checkpoint: ExplorationPreparationCheckpoint?, queue: ExplorationWorkQueueSnapshot?, migration: ExplorationFileProtectionMigration.Status) -> String {
+        let runs = (try? JSONDecoder().decode([ExplorationBGRunDiagnostic].self, from: defaults.data(forKey: "Moves.exploration.bg.runs") ?? Data())) ?? []
+        let latest = runs.suffix(10).map { "\($0.id.prefix(8)) \($0.startedAt.formatted(date: .numeric, time: .shortened)) \($0.outcome.rawValue) runtime=\(Int($0.runtime))s historical=\($0.completedHistoricalDays) live=\($0.completedLiveItems)" }.joined(separator: "\n")
+        let failure = defaults.dictionary(forKey: "Moves.exploration.protectedReadFailure")
+        let protectionFailure = failure.map { values in
+            "Protected-file event: \(values["timestamp"] as? Date ?? .distantPast), \(values["domain"] as? String ?? "unknown") \(values["code"] as? Int ?? 0), protection \(values["protectionClass"] as? String ?? "unknown"), resolved \(values["resolved"] as? Bool ?? false)"
+        } ?? "Protected-file event: none"
+        let stageLine: String
+        if let data = defaults.data(forKey: "Moves.exploration.preparation.lastStage"),
+           let stage = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let name = stage["stage"] as? String ?? "unknown"
+            let timestamp = (stage["startedAt"] as? TimeInterval).map(Date.init(timeIntervalSinceReferenceDate:)) ?? .distantPast
+            let state = stage["endedAt"] == nil ? "unfinished" : "finished"
+            stageLine = "Last stage: \(name), \(state), started \(timestamp.formatted(date: .numeric, time: .shortened))"
+        } else {
+            stageLine = "Last stage: none"
+        }
+        let recentQueueFailures = queue?.recentFailures.map { "\($0.lane.title) attempt \($0.attempts), retry \($0.nextEligibleAt?.formatted(date: .numeric, time: .shortened) ?? "ready")" }.joined(separator: "; ") ?? "none"
+        return [
+            "Exploration preparation diagnostics",
+            "Historical: \(checkpoint?.processedDayCount ?? 0)/\(checkpoint?.totalDayCount ?? 0), through \(checkpoint?.processedThroughDayKey ?? "unknown")",
+            "Last successful historical advance: \(defaults.string(forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceDay") ?? "none") at \((defaults.object(forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceAt") as? Date)?.formatted(date: .numeric, time: .shortened) ?? "unknown")",
+            "Queue: \(queue?.queuedCount ?? 0) queued, \(queue?.delayedCount ?? 0) delayed, \(queue?.processingCount ?? 0) processing",
+            "Queue failures/backoff: \(recentQueueFailures)",
+            stageLine,
+            "Migration v\(migration.version): \(migration.migratedFiles) files changed of \(migration.candidateEntries) entries, \(migration.remainingEntries.map(String.init) ?? "unknown") entries remaining, complete \(migration.isComplete)",
+            protectionFailure,
+            "Recent BG runs:\n\(latest.isEmpty ? "none" : latest)"
+        ].joined(separator: "\n")
     }
 }
 
@@ -748,13 +867,13 @@ enum ExplorationPreparationBackgroundTask {
     static let taskIdentifier = "de.holgerkrupp.Moves.explorationPreparation"
     private static let defaults = UserDefaults.standard
     private static let pendingKey = "Moves.exploration.bg.pendingDate"
-    private static let resultKey = "Moves.exploration.bg.lastResult"
-    private static let eventKey = "Moves.exploration.bg.lastEvent"
+    private static let scheduleDecisionKey = "Moves.exploration.bg.lastScheduleDecision"
+    private static let submitErrorKey = "Moves.exploration.bg.lastSubmitError"
 
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
             guard let task = task as? BGProcessingTask else {
-                defaults.set("Unexpected background task type", forKey: resultKey)
+                defaults.set("Unexpected background task type", forKey: scheduleDecisionKey)
                 task.setTaskCompleted(success: false)
                 return
             }
@@ -764,6 +883,11 @@ enum ExplorationPreparationBackgroundTask {
 
     static func schedule(now: Date = .now, urgent: Bool = false) {
         guard ExplorationPreparation.isEnabled() else { return }
+        guard ExplorationFileProtectionMigration.status().isComplete else {
+            defaults.set("Deferred: file-protection migration incomplete", forKey: scheduleDecisionKey)
+            defaults.set(now, forKey: "Moves.exploration.bg.lastScheduleAt")
+            return
+        }
         let request = BGProcessingTaskRequest(identifier: taskIdentifier)
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower = backlogIsSubstantial && !urgent
@@ -779,7 +903,7 @@ enum ExplorationPreparationBackgroundTask {
                    desiredRequiresExternalPower: request.requiresExternalPower
                ) {
                 defaults.set(existing.earliestBeginDate, forKey: pendingKey)
-                defaults.set("Existing request retained", forKey: resultKey)
+                defaults.set("Existing request retained", forKey: scheduleDecisionKey)
                 return
             }
             if existing != nil {
@@ -788,13 +912,36 @@ enum ExplorationPreparationBackgroundTask {
             do {
                 try BGTaskScheduler.shared.submit(request)
                 defaults.set(request.earliestBeginDate, forKey: pendingKey)
-                defaults.set("Submitted", forKey: resultKey)
-                defaults.set(now, forKey: eventKey)
+                defaults.set("Submitted", forKey: scheduleDecisionKey)
+                defaults.removeObject(forKey: submitErrorKey)
+                defaults.set(now, forKey: "Moves.exploration.bg.lastScheduleAt")
             } catch {
-                defaults.set("Submission failed: \(error.localizedDescription)", forKey: resultKey)
-                defaults.set(now, forKey: eventKey)
+                defaults.set("Submission failed", forKey: scheduleDecisionKey)
+                defaults.set(error.localizedDescription, forKey: submitErrorKey)
+                defaults.set(now, forKey: "Moves.exploration.bg.lastScheduleAt")
             }
         }
+    }
+
+    static func reconcileInterruptedRun(now: Date = .now) {
+        guard defaults.bool(forKey: "Moves.exploration.bg.isProcessing"),
+              let startedAt = defaults.object(forKey: "Moves.exploration.bg.lastStart") as? Date,
+              startedAt.addingTimeInterval(15 * 60) <= now,
+              let runID = defaults.string(forKey: "Moves.exploration.bg.activeRunID") else { return }
+        updateRun(id: runID, outcome: .interrupted, error: nil)
+        defaults.set(false, forKey: "Moves.exploration.bg.isProcessing")
+        defaults.removeObject(forKey: "Moves.exploration.bg.activeRunID")
+        defaults.removeObject(forKey: "Moves.exploration.bg.activeSliceID")
+        defaults.removeObject(forKey: "Moves.exploration.bg.activeContext")
+    }
+
+    static func recordCompletedSlice(days: Int, lane: String?) {
+        guard let runID = defaults.string(forKey: "Moves.exploration.bg.activeRunID") else { return }
+        var runs = (try? JSONDecoder().decode([ExplorationBGRunDiagnostic].self, from: defaults.data(forKey: "Moves.exploration.bg.runs") ?? Data())) ?? []
+        guard let index = runs.firstIndex(where: { $0.id == runID && $0.outcome == .running }) else { return }
+        if lane == ExplorationWorkLane.live.title { runs[index].completedLiveItems += max(0, days) }
+        if lane == ExplorationWorkLane.historical.title { runs[index].completedHistoricalDays += max(0, days) }
+        if let data = try? JSONEncoder().encode(runs) { defaults.set(data, forKey: "Moves.exploration.bg.runs") }
     }
 
     private static var backlogIsSubstantial: Bool {
@@ -814,10 +961,14 @@ enum ExplorationPreparationBackgroundTask {
     }
 
     private static func handle(_ task: BGProcessingTask) {
+        reconcileInterruptedRun()
+        let runID = UUID().uuidString
+        defaults.set(runID, forKey: "Moves.exploration.bg.activeRunID")
+        defaults.set("background", forKey: "Moves.exploration.bg.activeContext")
         defaults.set(Date.now, forKey: "Moves.exploration.bg.lastStart")
         defaults.set(true, forKey: "Moves.exploration.bg.isProcessing")
         defaults.removeObject(forKey: pendingKey)
-        defaults.set("Granted", forKey: resultKey)
+        recordRun(ExplorationBGRunDiagnostic(id: runID, startedAt: .now, endedAt: nil, outcome: .running))
         var didComplete = false
         let completionLock = NSLock()
         func finish(_ success: Bool, result: String) {
@@ -826,8 +977,11 @@ enum ExplorationPreparationBackgroundTask {
             didComplete = true
             completionLock.unlock()
             defaults.set(false, forKey: "Moves.exploration.bg.isProcessing")
-            defaults.set(result, forKey: resultKey)
-            defaults.set(Date.now, forKey: eventKey)
+            let outcome: ExplorationBGRunDiagnostic.Outcome = result == "Completed" ? .completed : (result == "Expired" ? .expired : (result == "Cancelled" ? .cancelled : .failed))
+            updateRun(id: runID, outcome: outcome, error: outcome == .failed ? result : nil)
+            defaults.removeObject(forKey: "Moves.exploration.bg.activeRunID")
+            defaults.removeObject(forKey: "Moves.exploration.bg.activeSliceID")
+            defaults.removeObject(forKey: "Moves.exploration.bg.activeContext")
             task.setTaskCompleted(success: success)
             schedule()
         }
@@ -837,20 +991,38 @@ enum ExplorationPreparationBackgroundTask {
                 _ = try await ExplorationPreparation.runBackgroundWindow(in: container)
                 finish(!Task.isCancelled, result: Task.isCancelled ? "Cancelled" : "Completed")
             } catch {
-                finish(false, result: "Failed: \(error.localizedDescription)")
+                finish(false, result: Task.isCancelled ? "Cancelled" : "Failed: \(error.localizedDescription)")
             }
         }
         task.expirationHandler = {
             defaults.set(Date.now, forKey: "Moves.exploration.bg.lastExpiration")
-            defaults.set("Expired", forKey: resultKey)
             work.cancel()
             finish(false, result: "Expired")
         }
+    }
+
+    private static func recordRun(_ run: ExplorationBGRunDiagnostic) {
+        var runs = (try? JSONDecoder().decode([ExplorationBGRunDiagnostic].self, from: defaults.data(forKey: "Moves.exploration.bg.runs") ?? Data())) ?? []
+        runs.append(run)
+        if runs.count > 10 { runs.removeFirst(runs.count - 10) }
+        if let data = try? JSONEncoder().encode(runs) { defaults.set(data, forKey: "Moves.exploration.bg.runs") }
+    }
+
+    private static func updateRun(id: String, outcome: ExplorationBGRunDiagnostic.Outcome, error: String?) {
+        var runs = (try? JSONDecoder().decode([ExplorationBGRunDiagnostic].self, from: defaults.data(forKey: "Moves.exploration.bg.runs") ?? Data())) ?? []
+        guard let index = runs.firstIndex(where: { $0.id == id }),
+              ExplorationBGRunOutcomePolicy.canTransition(from: runs[index].outcome, to: outcome) else { return }
+        runs[index].outcome = outcome
+        runs[index].endedAt = .now
+        runs[index].lastError = error
+        if let data = try? JSONEncoder().encode(runs) { defaults.set(data, forKey: "Moves.exploration.bg.runs") }
     }
 }
 #else
 enum ExplorationPreparationBackgroundTask {
     static func register() {}
     static func schedule() {}
+    static func reconcileInterruptedRun(now: Date = .now) {}
+    static func recordCompletedSlice(days: Int, lane: String?) {}
 }
 #endif
