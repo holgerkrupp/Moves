@@ -188,6 +188,7 @@ struct MovesApp: App {
         #else
         MovesStartupInstrumentation.event("appInit")
         #endif
+        MovesSyncDiagnostics.installEarlyCloudKitEventObservation()
         SyncMonitor.default.startMonitoring()
     }
 

@@ -20,7 +20,7 @@ and source locations rather than duplicating the guide text.
 | `searchAndStatistics` | Search, Statistics & Connections | iOS; overview on macOS | `Moves/MovesStatisticsSearchView.swift` |
 | `importing` | Importing Data | iOS, macOS | `Moves/RouteFileImport.swift`, `Moves/RouteFileImportConfiguration.swift`, `Moves/ImportQueueViews.swift`, `Moves/HealthWorkoutRouteImporter.swift` |
 | `exportAndBackup` | Export, Backup & Sharing | iOS, macOS | `Moves/MovesSettingsView.swift`, `Moves/DailyTimelineBackup.swift`, `Moves/MovesShareViews.swift`, `Mac/MovesMacApp.swift` |
-| `sync` | iCloud Sync & Multiple Devices | iOS, macOS | `Moves/SyncDiagnostics.swift`, `Moves/CloudDataPresencePublisher.swift`, `Moves/CrossDeviceWorkCoordinator.swift` |
+| `sync` | iCloud Sync & Multiple Devices | iOS, macOS; includes per-device import/export times, deferred status, and privacy-safe diagnostics | `Moves/SyncDiagnostics.swift`, `Moves/CloudDataPresencePublisher.swift`, `Moves/CrossDeviceWorkCoordinator.swift` |
 | `integrationsAndPrivacy` | Integrations & Privacy | iOS, macOS overview | `Moves/DawarichSync.swift`, `Moves/MovesSettingsView.swift` |
 | `widgetsAndWatch` | Widgets, Shortcuts & Apple Watch | iOS, watchOS; supported widgets/actions only | `Moves/MovesAppIntents.swift`, `Moves Widgets/`, `Moves Watch App/` |
 | `troubleshooting` | Troubleshooting & FAQ | iOS, macOS | `Moves/MovesHelp.swift`, `Moves/MovesSettingsView.swift` |

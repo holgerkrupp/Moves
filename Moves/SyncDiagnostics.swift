@@ -96,6 +96,14 @@ enum CloudKitFailureAnalysis {
 
     private static func finding(for error: NSError) -> Finding {
         let retryAfter = (error.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue
+        if error.domain == NSCocoaErrorDomain, error.code == 134419 {
+            return Finding(
+                error: error,
+                disposition: .retryable,
+                summary: "Synchronization was postponed by the system. Pending changes may not have uploaded yet.",
+                retryAfterSeconds: retryAfter
+            )
+        }
         guard error.domain == CKErrorDomain,
               let code = CKError.Code(rawValue: error.code) else {
             if error.domain == NSURLErrorDomain {
@@ -238,6 +246,24 @@ struct MovesSyncTimelineSnapshot: Equatable, Sendable {
     let placeCount: Int
     let moveCount: Int
     let newestCreatedAt: Date?
+    let newestPlaceID: UUID?
+    let newestMoveID: UUID?
+
+    init(
+        observedAt: Date,
+        placeCount: Int,
+        moveCount: Int,
+        newestCreatedAt: Date?,
+        newestPlaceID: UUID? = nil,
+        newestMoveID: UUID? = nil
+    ) {
+        self.observedAt = observedAt
+        self.placeCount = placeCount
+        self.moveCount = moveCount
+        self.newestCreatedAt = newestCreatedAt
+        self.newestPlaceID = newestPlaceID
+        self.newestMoveID = newestMoveID
+    }
 }
 
 actor MovesSyncDiagnosticsSnapshotLoader {
@@ -262,21 +288,23 @@ actor MovesSyncDiagnosticsSnapshotLoader {
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         newestPlace.fetchLimit = Self.newestFetchLimit
-        let newestPlaceCreatedAt = try context.fetch(newestPlace).first?.createdAt
+        let newestPlaceRecord = try context.fetch(newestPlace).first
         try Task.checkCancellation()
 
         var newestMove = FetchDescriptor<MoveSegment>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         newestMove.fetchLimit = Self.newestFetchLimit
-        let newestMoveCreatedAt = try context.fetch(newestMove).first?.createdAt
+        let newestMoveRecord = try context.fetch(newestMove).first
         try Task.checkCancellation()
 
         return MovesSyncTimelineSnapshot(
             observedAt: Date(),
             placeCount: placeCount,
             moveCount: moveCount,
-            newestCreatedAt: [newestPlaceCreatedAt, newestMoveCreatedAt].compactMap { $0 }.max()
+            newestCreatedAt: [newestPlaceRecord?.createdAt, newestMoveRecord?.createdAt].compactMap { $0 }.max(),
+            newestPlaceID: newestPlaceRecord?.id,
+            newestMoveID: newestMoveRecord?.id
         )
     }
 }
@@ -358,6 +386,8 @@ final class MovesSyncDiagnostics: ObservableObject {
         let placeCount: Int?
         let moveCount: Int?
         let newestCreatedAt: Date?
+        let newestPlaceID: UUID?
+        let newestMoveID: UUID?
 
         var duration: TimeInterval? {
             guard let endedAt else { return nil }
@@ -374,6 +404,8 @@ final class MovesSyncDiagnostics: ObservableObject {
             placeCount: Int?,
             moveCount: Int?,
             newestCreatedAt: Date?,
+            newestPlaceID: UUID? = nil,
+            newestMoveID: UUID? = nil,
             errorDetails: ErrorDetails? = nil
         ) {
             self.id = id
@@ -386,11 +418,13 @@ final class MovesSyncDiagnostics: ObservableObject {
             self.placeCount = placeCount
             self.moveCount = moveCount
             self.newestCreatedAt = newestCreatedAt
+            self.newestPlaceID = newestPlaceID
+            self.newestMoveID = newestMoveID
         }
 
         private enum CodingKeys: String, CodingKey {
             case id, stage, startedAt, endedAt, succeeded, errorSummary, errorDetails
-            case placeCount, moveCount, newestCreatedAt
+            case placeCount, moveCount, newestCreatedAt, newestPlaceID, newestMoveID
         }
 
         init(from decoder: Decoder) throws {
@@ -405,6 +439,8 @@ final class MovesSyncDiagnostics: ObservableObject {
             placeCount = try container.decodeIfPresent(Int.self, forKey: .placeCount)
             moveCount = try container.decodeIfPresent(Int.self, forKey: .moveCount)
             newestCreatedAt = try container.decodeIfPresent(Date.self, forKey: .newestCreatedAt)
+            newestPlaceID = try container.decodeIfPresent(UUID.self, forKey: .newestPlaceID)
+            newestMoveID = try container.decodeIfPresent(UUID.self, forKey: .newestMoveID)
         }
     }
 
@@ -413,6 +449,8 @@ final class MovesSyncDiagnostics: ObservableObject {
 
     private static let persistedEventsKey = "Moves.syncDiagnostics.events.v1"
     private static let maxEvents = 120
+    private static var earlyCloudKitObserver: NSObjectProtocol?
+    private static var earlyCloudKitEvents: [NSPersistentCloudKitContainer.Event] = []
     private let logger = Logger(subsystem: "de.holgerkrupp.Moves", category: "SyncDiagnostics")
     private let snapshotLoader: SnapshotLoader
     private let observationDebounce: Duration
@@ -437,6 +475,17 @@ final class MovesSyncDiagnostics: ObservableObject {
         self.observationDebounce = observationDebounce
         self.userDefaults = userDefaults
         self.notificationCenter = notificationCenter
+        if let data = userDefaults.data(forKey: Self.persistedEventsKey),
+           let stored = try? JSONDecoder().decode([Event].self, from: data) {
+            events = Array(stored.suffix(Self.maxEvents))
+        }
+        for event in Self.drainEarlyCloudKitEvents() {
+            recordCloudKitEvent(event)
+        }
+        // Install transport observation before the UI appears. In particular, the Mac
+        // must not wait for the browser's first onAppear to observe initial CloudKit work.
+        observeNotifications()
+        hasInstalledObservers = true
     }
 
     deinit {
@@ -449,14 +498,43 @@ final class MovesSyncDiagnostics: ObservableObject {
     func startObservingTimeline() {
         if !hasInstalledObservers {
             hasInstalledObservers = true
-            if let data = userDefaults.data(forKey: Self.persistedEventsKey),
-               let stored = try? JSONDecoder().decode([Event].self, from: data) {
-                events = Array(stored.suffix(Self.maxEvents))
-            }
             observeNotifications()
         }
         observationsEnabled = true
         scheduleTimelineObservation(reason: "startup", debounce: false)
+    }
+
+    /// Call before opening the SwiftData container so initial CloudKit events can be buffered.
+    static func installEarlyCloudKitEventObservation() {
+        guard earlyCloudKitObserver == nil else { return }
+        earlyCloudKitObserver = NotificationCenter.default.addObserver(
+            forName: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
+                as? NSPersistentCloudKitContainer.Event else { return }
+            MainActor.assumeIsolated {
+                Self.earlyCloudKitEvents.append(event)
+                if Self.earlyCloudKitEvents.count > 20 {
+                    Self.earlyCloudKitEvents.removeFirst(Self.earlyCloudKitEvents.count - 20)
+                }
+            }
+        }
+    }
+
+    private static func drainEarlyCloudKitEvents() -> [NSPersistentCloudKitContainer.Event] {
+        if let earlyCloudKitObserver {
+            NotificationCenter.default.removeObserver(earlyCloudKitObserver)
+            self.earlyCloudKitObserver = nil
+        }
+        defer { earlyCloudKitEvents.removeAll(keepingCapacity: true) }
+        return earlyCloudKitEvents
+    }
+
+    /// Refreshes local diagnostics only. CloudKit export scheduling remains system controlled.
+    func refreshDiagnostics() {
+        startObservingTimeline()
     }
 
     func suspendTimelineObservation() {
@@ -466,19 +544,50 @@ final class MovesSyncDiagnostics: ObservableObject {
     }
 
     var lastSuccessfulImport: Event? {
-        events.last { $0.stage == .cloudKitImport && $0.succeeded == true }
+        events.filter { $0.stage == .cloudKitImport && $0.succeeded == true }
+            .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
     }
 
     var lastSuccessfulExport: Event? {
-        events.last { $0.stage == .cloudKitExport && $0.succeeded == true }
+        events.filter { $0.stage == .cloudKitExport && $0.succeeded == true }
+            .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
     }
 
     var lastError: Event? {
-        events.reversed().first { $0.errorSummary != nil }
+        Self.activeError(in: events)
     }
 
     var lastErrorDetails: ErrorDetails? {
-        events.reversed().compactMap(\.errorDetails).first
+        lastError?.errorDetails
+    }
+
+    static func activeError(in events: [Event]) -> Event? {
+        events
+            .filter { event in
+                guard event.errorSummary != nil else { return false }
+                return !events.contains { later in
+                    later.stage == event.stage
+                        && later.succeeded == true
+                        && (later.endedAt ?? later.startedAt) >= (event.endedAt ?? event.startedAt)
+                }
+            }
+            .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
+    }
+
+    func consecutiveFailureCount(for stage: Stage) -> Int {
+        Self.consecutiveFailureCount(in: events, for: stage)
+    }
+
+    static func consecutiveFailureCount(in events: [Event], for stage: Stage) -> Int {
+        let stageEvents = events.filter { $0.stage == stage }
+        guard let lastSuccess = stageEvents
+            .filter({ $0.succeeded == true })
+            .max(by: { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }) else {
+            return stageEvents.filter { $0.succeeded == false }.count
+        }
+        return stageEvents.filter {
+            $0.succeeded == false && ($0.endedAt ?? $0.startedAt) > (lastSuccess.endedAt ?? lastSuccess.startedAt)
+        }.count
     }
 
     var storeOpenFailure: MovesStoreOpenFailure? {
@@ -553,6 +662,8 @@ final class MovesSyncDiagnostics: ObservableObject {
         lines.append("Recorded events: \(events.count)")
         if let snapshot = latestSnapshot {
             lines.append("Local snapshot: \(snapshot.placeCount) places, \(snapshot.moveCount) moves, observed \(snapshot.observedAt.ISO8601Format())")
+            lines.append("Newest local Place ID: \(snapshot.newestPlaceID?.uuidString ?? "not recorded")")
+            lines.append("Newest local Move ID: \(snapshot.newestMoveID?.uuidString ?? "not recorded")")
         }
         lines.append("No coordinates, route points, account identifiers, or location names are included.")
         return lines.joined(separator: "\n")
@@ -579,6 +690,8 @@ final class MovesSyncDiagnostics: ObservableObject {
         ) { [weak self] _ in
             self?.objectWillChange.send()
         })
+        // Production installs a process-wide buffer before opening the store. Once this
+        // object exists, its observer receives subsequent events and the buffer is removed.
         observers.append(center.addObserver(
             forName: NSPersistentCloudKitContainer.eventChangedNotification,
             object: nil,
@@ -729,7 +842,9 @@ final class MovesSyncDiagnostics: ObservableObject {
                 errorSummary: nil,
                 placeCount: snapshot.placeCount,
                 moveCount: snapshot.moveCount,
-                newestCreatedAt: snapshot.newestCreatedAt
+                newestCreatedAt: snapshot.newestCreatedAt,
+                newestPlaceID: snapshot.newestPlaceID,
+                newestMoveID: snapshot.newestMoveID
             )
         )
     }
