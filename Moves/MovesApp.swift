@@ -85,17 +85,27 @@ final class MovesAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
     }
 
     private func resumeExplorationProtectionMigration(_ application: UIApplication) {
+        ExplorationPreparationBackgroundTask.reconcileInterruptedRun()
         guard application.isProtectedDataAvailable else { return }
-        do {
-            var complete = false
-            // Keep each foreground opportunity bounded while completing most
-            // existing installations in a few activations.
-            for _ in 0..<8 where !complete {
-                complete = try ExplorationFileProtectionMigration.run()
+        Task.detached(priority: .utility) {
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(2))
+            do {
+                var complete = false
+                while !complete, clock.now < deadline, !Task.isCancelled {
+                    complete = try await ExplorationPreparation.runProtectionMigrationBatch()
+                    await Task.yield()
+                }
+                if complete {
+                    await MainActor.run { ExplorationPreparationBackgroundTask.schedule() }
+                } else if !Task.isCancelled {
+                    // A later utility pass continues from the durable inventory cursor.
+                    try await Task.sleep(for: .seconds(2))
+                    await MainActor.run { self.resumeExplorationProtectionMigration(application) }
+                }
+            } catch {
+                UserDefaults.standard.set(error.localizedDescription, forKey: "Moves.exploration.protectionMigration.lastError")
             }
-            if complete { ExplorationPreparationBackgroundTask.schedule() }
-        } catch {
-            UserDefaults.standard.set(error.localizedDescription, forKey: "Moves.exploration.protectionMigration.lastError")
         }
     }
 

@@ -151,6 +151,18 @@ per-tile shards are also treated as idempotently complete.
 
 The executable reference tests live in `MovesTests/ExplorationTests.swift`.
 
+The device-local, versioned render hierarchy may resample these canonical
+bitmaps into grayscale coverage masks for map presentation. Those masks are
+disposable and are never imported, exported, synced, or used to assign Fog
+cell identities. Sparse routes may receive a minimum-visibility cue in parent
+masks at world scale; canonical counts are unchanged. Standard coverage remains
+the per-cell union of non-flight layers; flight pixels are held in a separate
+presentation channel.
+
+The DEBUG tile renderer applies a configurable fog opacity (default 160/255)
+and a narrow antialiased transition around coverage edges. These are
+presentation settings; they do not blur or expand canonical Fog cells.
+
 ## Known unknowns and limitations
 
 - Fog Machine's native FWSS metadata, hash records, region semantics, and all

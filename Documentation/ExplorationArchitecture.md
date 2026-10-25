@@ -32,8 +32,25 @@ excluded from standard coverage by default.
 
 The merged block cache is disposable and rebuilt from source shards. It also
 invalidates the compact statistics snapshot and affected render-hierarchy
-tiles when a source shard changes. Render tiles are coarse summaries only; the
-canonical leaf blocks remain the source for exact Fog import/export.
+tiles when a source shard changes. Render artifacts use schema version 2 and
+store a 64x64 grayscale coverage mask plus exact canonical cell counts for
+standard and flight coverage. Leaf masks are the exact union of non-flight
+layers and the independent flight layer. Parent masks are regenerated bottom
+up from the four persisted children with area-averaged coverage and a faint
+minimum visible cue for sparse routes at world scale; their exact cell counts
+are summed from disjoint child extents. Incremental edits therefore
+replace only the affected leaf and ancestor branch while preserving unchanged
+siblings. A durable dirty-block journal survives cancellation and retries
+derived writes from the canonical merged blocks. Old, malformed, or missing
+render files are treated as unavailable derived data.
+
+The DEBUG map uses one persistent MapKit tile overlay. Its XYZ requests share
+MapKit's Web Mercator camera and world wrapping, so the overlay remains
+georeferenced through continuous pan and zoom. Missing tiles render as fogged
+unknown coverage, and available parent masks provide fallback detail while a
+more specific tile is absent. Mask tiles are encoded on demand and retained in
+a bounded actor-owned LRU cache. The canonical leaf blocks remain the source
+for exact Fog import/export.
 
 Statistics use latitude-aware spherical cell area over the Web Mercator cell
 footprints. Country and first-level region attribution is derived from bundled

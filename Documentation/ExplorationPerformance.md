@@ -17,6 +17,13 @@ Current bounds:
   shards that contribute to affected blocks;
 - render updates consume affected canonical blocks, and country presence is
   stored as per-day files so normal day processing does not rewrite all history;
+- render hierarchy updates rebuild only changed leaf tiles and their 16
+  affected ancestor levels from persisted four-child inputs; MapKit mask tiles
+  are generated on demand and decoded files are held in a bounded 96-entry
+  actor cache;
+- interrupted render updates remain in a durable dirty-block journal and retry
+  from the merged canonical cache rather than scanning source history on map
+  open;
 - the manifest has a pending-mutation journal and a one-time full rebuild path
   for legacy stores or crash recovery;
 - country attribution prefilters each multipolygon component by its own bounds
@@ -40,7 +47,7 @@ The worker is default-disabled until a device-history baseline is measured. The
 DEBUG build contains `OSSignposter` instrumentation for shard generation and
 the file-backed stages are separable in Instruments.
 
-The current local verification evidence is:
+The existing local verification evidence is:
 
 - 25 Exploration XCTest cases pass when run from the built test bundle;
 - the synthetic shard benchmark takes about 2.1 seconds for 100k/1m/10m
@@ -48,6 +55,23 @@ The current local verification evidence is:
   10-million-cell sample;
 - macOS build-for-testing passes;
 - iOS simulator build-for-testing passes.
+
+The MapKit tile rendering change still needs device measurements for frame
+time, cold time-to-first-fog-frame, CPU, peak memory, and cache hit rate. The
+current environment has no physical-device gesture run, so the
+Europe-to-Atlantic-to-South-America pan and zoom sequence remains a manual
+verification step.
+
+Manual device procedure: build the DEBUG app, open Exploration Debug → Open
+prepared map, and begin at the global view. Record a screen capture while
+zooming to Europe, Northern Germany, Hamburg/Bremen, and street scale. Pan
+continuously west across the Atlantic to South America, then back east to
+Europe. Repeat in Standard and Satellite styles and with Include flights both
+off and on. At each stop, compare known coastline/road positions with fog
+edges and check for transient bright rectangles or camera jumps. Use Instruments
+Core Animation and Allocations during the gesture, and record first useful
+frame time, frame-time spikes, CPU, peak memory, and cache hit rate with a
+10-year prepared dataset while background preparation is active.
 
 Still required before enabling automatic preparation or normal Exploration UI:
 

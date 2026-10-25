@@ -202,7 +202,7 @@ actor ExplorationCountryPresenceIndexStore {
     /// calls this after an atomic shard/cache replacement, so a revised day
     /// cannot leave stale country presence behind and no complete index scan is
     /// needed for normal incremental work.
-    func update(with shard: ExplorationShard, includeFlight: Bool = false) throws {
+    func update(with shard: ExplorationShard, includeFlight: Bool = false, deadline: ContinuousClock.Instant? = nil) throws {
         guard let date = shard.logicalStart ?? shard.logicalEnd else { return }
         guard let resolver = try? ExplorationCountryResolver.bundled() else { return }
         try migrateLegacyIndexIfNeeded()
@@ -213,6 +213,7 @@ actor ExplorationCountryPresenceIndexStore {
         var visibleByBlock = [FogBlockID: FogBitmapBlock]()
         var importedByBlock = [FogBlockID: FogBitmapBlock]()
         for block in shard.blocks {
+            try check(deadline)
             var visible = try FogBitmapBlock()
             for layer in block.layers where includeFlight || layer.layer != .flight {
                 visible = visible.union(layer.bitmap)
@@ -226,8 +227,10 @@ actor ExplorationCountryPresenceIndexStore {
         var counts = [String: Int]()
         var provenance = [String: Set<ExplorationTravelProvenance>]()
         for (blockID, bitmap) in visibleByBlock {
+            try check(deadline)
             let imported = importedByBlock[blockID]
             for row in 0..<FogBitmapBlock.width {
+                try check(deadline)
                 for column in 0..<FogBitmapBlock.width where bitmap.isSet(x: column, y: row) {
                     let cell = FogCell(coordinate: FogRasterCoordinate(
                         x: blockID.x * FogRasterV1.cellsPerBlock + UInt32(column),
@@ -365,6 +368,11 @@ actor ExplorationCountryPresenceIndexStore {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(entry)
         try ExplorationFileStorage.writeAtomically(data, to: directory.appendingPathComponent("\(entry.dayKey).json"))
+    }
+
+    private func check(_ deadline: ContinuousClock.Instant?) throws {
+        try Task.checkCancellation()
+        if let deadline, ContinuousClock.now >= deadline { throw CancellationError() }
     }
 
     private func migrateLegacyIndexIfNeeded() throws {

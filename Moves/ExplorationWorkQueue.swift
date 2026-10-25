@@ -55,11 +55,14 @@ actor ExplorationWorkQueue {
     static let shared = ExplorationWorkQueue()
 
     private let url: URL
+    private let fairnessURL: URL
     private var loaded = false
     private var items: [String: ExplorationWorkItem] = [:]
+    private var consecutivePriorityCompletions = 0
 
     init(rootURL: URL = ExplorationStorageLocations.rootURL) {
         self.url = rootURL.appendingPathComponent("v1/work-queue.json")
+        self.fairnessURL = rootURL.appendingPathComponent("v1/work-queue-fairness.json")
     }
 
     func enqueue(dayKeys: some Sequence<String>, lane: ExplorationWorkLane) throws {
@@ -106,14 +109,18 @@ actor ExplorationWorkQueue {
     ) throws -> [ExplorationWorkItem] {
         try loadIfNeeded()
         _ = try recoverExpired(now: now)
-        let candidates = items.values
+        let sortedCandidates = items.values
             .filter { $0.state == .queued && ($0.nextEligibleAt.map { $0 <= now } ?? true) }
             .sorted {
                 if $0.lane != $1.lane { return $0.lane < $1.lane }
                 if $0.enqueuedAt != $1.enqueuedAt { return $0.enqueuedAt < $1.enqueuedAt }
                 return $0.id < $1.id
             }
-            .prefix(max(0, maximum))
+        var candidates = Array(sortedCandidates.prefix(max(0, maximum)))
+        if maximum == 1, consecutivePriorityCompletions >= 4,
+           let historical = sortedCandidates.first(where: { $0.lane == .historical }) {
+            candidates = [historical]
+        }
 
         var claimed: [ExplorationWorkItem] = []
         for candidate in candidates {
@@ -131,8 +138,24 @@ actor ExplorationWorkQueue {
 
     func complete(_ itemID: String) throws {
         try loadIfNeeded()
-        items.removeValue(forKey: itemID)
+        if let completed = items.removeValue(forKey: itemID) {
+            if completed.lane == .historical { consecutivePriorityCompletions = 0 }
+            else { consecutivePriorityCompletions = min(4, consecutivePriorityCompletions + 1) }
+            try saveFairness()
+        }
         try save()
+    }
+
+    func shouldAdvanceHistoricalCursor() throws -> Bool {
+        try loadIfNeeded()
+        return consecutivePriorityCompletions >= 4
+    }
+
+    func recordHistoricalCursorProgress() throws {
+        try loadIfNeeded()
+        guard consecutivePriorityCompletions != 0 else { return }
+        consecutivePriorityCompletions = 0
+        try saveFairness()
     }
 
     func retry(_ itemID: String, error: String? = nil, now: Date = .now) throws {
@@ -160,6 +183,16 @@ actor ExplorationWorkQueue {
         try save()
     }
 
+    func deferAfterCancellation(_ itemID: String, now: Date = .now) throws {
+        try loadIfNeeded()
+        guard var item = items[itemID] else { return }
+        item.state = .queued
+        item.leaseUntil = nil
+        item.nextEligibleAt = now.addingTimeInterval(5)
+        items[itemID] = item
+        try save()
+    }
+
     func snapshot(now: Date = .now) throws -> ExplorationWorkQueueSnapshot {
         try loadIfNeeded()
         // A process termination can leave a leased item behind. Reading the
@@ -182,9 +215,13 @@ actor ExplorationWorkQueue {
 
     func removeAll() throws {
         items.removeAll()
+        consecutivePriorityCompletions = 0
         loaded = true
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
+        }
+        if FileManager.default.fileExists(atPath: fairnessURL.path) {
+            try FileManager.default.removeItem(at: fairnessURL)
         }
     }
 
@@ -194,6 +231,10 @@ actor ExplorationWorkQueue {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         let data = try ExplorationFileStorage.readData(from: url)
         items = try JSONDecoder().decode([String: ExplorationWorkItem].self, from: data)
+        if let fairnessData = try? ExplorationFileStorage.readData(from: fairnessURL),
+           let value = try? JSONDecoder().decode(Int.self, from: fairnessData) {
+            consecutivePriorityCompletions = min(4, max(0, value))
+        }
     }
 
     private func save() throws {
@@ -201,6 +242,11 @@ actor ExplorationWorkQueue {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(items)
         try ExplorationFileStorage.writeAtomically(data, to: url)
+    }
+
+    private func saveFairness() throws {
+        try FileManager.default.createDirectory(at: fairnessURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ExplorationFileStorage.writeAtomically(try JSONEncoder().encode(consecutivePriorityCompletions), to: fairnessURL)
     }
 }
 

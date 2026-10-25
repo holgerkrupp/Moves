@@ -5,6 +5,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
 struct ExplorationPreparationDebugView: View {
@@ -12,6 +14,8 @@ struct ExplorationPreparationDebugView: View {
     @AppStorage(ExplorationPreparation.isEnabledKey) private var preparationIsEnabled = false
     @State private var statistics: ExplorationPreparationStatistics?
     @State private var queueSnapshot: ExplorationWorkQueueSnapshot?
+    @State private var migrationStatus = ExplorationFileProtectionMigration.status()
+    @State private var diagnosticCopied = false
     @State private var errorMessage: String?
     @State private var sliceMessage: String?
     @State private var isConfirmingReset = false
@@ -127,9 +131,15 @@ struct ExplorationPreparationDebugView: View {
 
             Section("Background scheduler") {
                 let defaults = UserDefaults.standard
+                Button {
+                    copyDiagnosticReport()
+                } label: {
+                    Label(diagnosticCopied ? "Diagnostic report copied" : "Copy sanitized diagnostic report", systemImage: "doc.on.doc")
+                }
                 if let data = defaults.data(forKey: "Moves.exploration.preparation.lastStage"),
                    let event = try? JSONDecoder().decode(ExplorationStageDebugRecord.self, from: data) {
                     debugRow("Last preparation stage", [event.stage, event.dayKey, event.lane, event.routeCount.map { "\($0) routes" }].compactMap { $0 }.joined(separator: " · "))
+                    debugRow("Stage correlation", "\(event.context) · run \(event.runID ?? "foreground") · slice \(event.sliceID ?? "unknown") · #\(event.sequence)")
                     if let ended = event.endedAt {
                         let duration = event.durationMilliseconds.map { formatDuration($0 / 1_000) }
                             ?? formatDuration(ended.timeIntervalSince(event.startedAt))
@@ -146,9 +156,21 @@ struct ExplorationPreparationDebugView: View {
                     let protection = failure["protectionClass"] as? String ?? "unknown class"
                     let available = failure["protectedDataAvailable"] as? Bool ?? false
                     let background = failure["attemptedInBackground"] as? Bool ?? false
-                    debugRow("Protected file access", "\(component) · \(domain) \(code) · \(protection) · data available: \(available) · background: \(background)")
+                    let timestamp = (failure["timestamp"] as? Date)?.formatted(date: .abbreviated, time: .shortened) ?? "time unknown"
+                    let runID = failure["runID"] as? String ?? ""
+                    let resolved = failure["resolved"] as? Bool ?? false
+                    debugRow("Protected file access", "\(component) · \(domain) \(code) · \(protection) · at \(timestamp) · run \(runID.isEmpty ? "unknown" : runID) · resolved \(resolved) · data available: \(available) · background: \(background)")
                 }
-                debugRow("Last BG result", defaults.string(forKey: "Moves.exploration.bg.lastResult") ?? "No grant recorded")
+                let runs = (try? JSONDecoder().decode([ExplorationBGRunDiagnostic].self, from: defaults.data(forKey: "Moves.exploration.bg.runs") ?? Data())) ?? []
+                debugRow("Last BG execution", runs.last.map { "\($0.outcome.rawValue) · \($0.startedAt.formatted(date: .abbreviated, time: .shortened))" } ?? "No grant recorded")
+                debugRow("Last scheduling decision", defaults.string(forKey: "Moves.exploration.bg.lastScheduleDecision") ?? "None recorded")
+                if let submitError = defaults.string(forKey: "Moves.exploration.bg.lastSubmitError") { debugRow("Submission error", submitError) }
+                if let advanceAt = defaults.object(forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceAt") as? Date {
+                    debugRow("Last historical advance", "\(defaults.string(forKey: "Moves.exploration.lastSuccessfulHistoricalAdvanceDay") ?? "unknown") · \(advanceAt.formatted(date: .abbreviated, time: .shortened))")
+                } else {
+                    debugRow("Last historical advance", "None recorded")
+                }
+                debugRow("Active worker runtime", runs.last(where: { $0.outcome == .running }).map { formatDuration($0.runtime) } ?? "Not active")
                 if let date = defaults.object(forKey: "Moves.exploration.bg.lastStart") as? Date {
                     debugRow("Last BG start", date.formatted(date: .abbreviated, time: .shortened))
                 }
@@ -167,6 +189,9 @@ struct ExplorationPreparationDebugView: View {
                 } else if defaults.bool(forKey: "Moves.routeImport.isActive") {
                     debugRow("Resource gate", "Route import active")
                 }
+                debugRow("Migration", "v\(migrationStatus.version) · \(migrationStatus.migratedFiles) files changed / \(migrationStatus.candidateEntries) entries · \(migrationStatus.remainingEntries.map(String.init) ?? "unknown") entries remaining · complete \(migrationStatus.isComplete)")
+                debugRow("Migration protection", migrationStatus.effectiveProtectionClass ?? "Not measured")
+                if let migrationError = migrationStatus.lastError { debugRow("Migration error", migrationError) }
 #if canImport(UIKit)
                 debugRow("Background App Refresh", UIApplication.shared.backgroundRefreshStatus == .available ? "Available" : "Unavailable")
 #endif
@@ -363,10 +388,26 @@ struct ExplorationPreparationDebugView: View {
             let checkpoint = try await checkpointStore.load()
             statistics = ExplorationPreparationStatistics(checkpoint: checkpoint)
             queueSnapshot = try await ExplorationWorkQueue.shared.snapshot()
+            migrationStatus = ExplorationFileProtectionMigration.status()
             errorMessage = nil
         } catch {
             errorMessage = "Could not read preparation checkpoint: \(error.localizedDescription)"
         }
+    }
+
+    private func copyDiagnosticReport() {
+        let report = ExplorationDiagnosticReport.make(
+            checkpoint: statistics?.checkpoint,
+            queue: queueSnapshot,
+            migration: migrationStatus
+        )
+#if canImport(UIKit)
+        UIPasteboard.general.string = report
+#elseif canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+#endif
+        diagnosticCopied = true
     }
 
     private func runOnePreparationSlice() async {
@@ -541,6 +582,10 @@ struct ExplorationPreparationDebugView: View {
 
 private struct ExplorationStageDebugRecord: Decodable {
     let stage: String
+    let runID: String?
+    let sliceID: String?
+    let sequence: Int
+    let context: String
     let dayKey: String?
     let routeCount: Int?
     let lane: String?
