@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let explorationRenderTilesDidUpdate = Notification.Name("Moves.ExplorationRenderTilesDidUpdate")
+}
+
 struct ExplorationRenderTileID: Codable, Equatable, Hashable, Sendable, Comparable {
     let level: UInt8
     let x: UInt32
@@ -27,7 +31,7 @@ struct ExplorationRenderTile: Codable, Equatable, Sendable {
     let flightMask: Data
 }
 
-/// Device-local, disposable hierarchy used by future map screens. Level zero
+/// Device-local, disposable hierarchy used by the DEBUG map overlay. Level zero
 /// is one canonical 64x64 block; higher levels aggregate powers of two blocks.
 /// It never changes cell identity and is rebuilt from source shards.
 actor ExplorationRenderHierarchy {
@@ -45,19 +49,29 @@ actor ExplorationRenderHierarchy {
     func read(_ id: ExplorationRenderTileID) throws -> ExplorationRenderTile? {
         let url = url(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try ExplorationFileStorage.readData(from: url)
         do {
-            let tile = try JSONDecoder().decode(ExplorationRenderTile.self, from: ExplorationFileStorage.readData(from: url))
+            let tile = try JSONDecoder().decode(ExplorationRenderTile.self, from: data)
             guard tile.schemaVersion == Self.schemaVersion,
                   tile.rasterVersion == .fogRasterV1,
                   tile.id == id,
                   tile.standardMask.count == Self.maskByteCount,
-                  tile.flightMask.count == Self.maskByteCount else { return nil }
+                  tile.flightMask.count == Self.maskByteCount else {
+                try markLeafDirtyIfNeeded(id)
+                return nil
+            }
             return tile
         } catch {
             // Derived artifacts are disposable. A malformed or old artifact is
             // unavailable and can be rebuilt from the canonical cache.
+            try markLeafDirtyIfNeeded(id)
             return nil
         }
+    }
+
+    private func markLeafDirtyIfNeeded(_ id: ExplorationRenderTileID) throws {
+        guard id.level == 0 else { return }
+        try markDirty([FogBlockID(x: id.x, y: id.y)])
     }
 
     func tileIDs(level: UInt8) throws -> [ExplorationRenderTileID] {
@@ -75,6 +89,8 @@ actor ExplorationRenderHierarchy {
     func rebuildAll() async throws {
         let shards = try await shardStore.allShards()
         let merged = merge(shards)
+        let changedIDs = shards.flatMap { $0.blocks.map(\.id) }
+        try markDirty(changedIDs)
         try removeAll()
         let leaves = try makeLeaves(merged)
         try write(leaves)
@@ -83,11 +99,13 @@ actor ExplorationRenderHierarchy {
             let parents = Set(levelTiles.keys.map { ExplorationRenderTileID(level: UInt8(level), x: $0.x / 2, y: $0.y / 2) })
             var next = [ExplorationRenderTileID: ExplorationRenderTile]()
             for id in parents.sorted() {
-                if let tile = try makeParent(id, children: levelTiles) { next[id] = tile }
+                if let tile = makeParent(id, children: levelTiles) { next[id] = tile }
             }
             try write(next)
             levelTiles = next
         }
+        try clearDirty(try loadDirty())
+        NotificationCenter.default.post(name: .explorationRenderTilesDidUpdate, object: nil)
     }
 
     func rebuild(affectedBlocks: some Sequence<FogBlockID>, cache: ExplorationMergedCache, deadline: ContinuousClock.Instant? = nil) async throws {
@@ -134,6 +152,7 @@ actor ExplorationRenderHierarchy {
             childIDs = parentIDs
         }
         try clearDirty(ids)
+        NotificationCenter.default.post(name: .explorationRenderTilesDidUpdate, object: nil)
     }
 
     /// Durable retry inventory. Canonical shards remain authoritative if a
@@ -148,6 +167,8 @@ actor ExplorationRenderHierarchy {
     func dirtyBlocks() throws -> [FogBlockID] {
         try loadDirty().sorted()
     }
+
+    func clearDirtyBlocks(_ ids: [FogBlockID]) throws { try clearDirty(ids) }
 
     private var dirtyURL: URL { rootURL.appendingPathComponent("v1/render/dirty-blocks.json") }
 
@@ -172,7 +193,11 @@ actor ExplorationRenderHierarchy {
 
     func removeAll() throws {
         let directory = rootURL.appendingPathComponent("v1/render", isDirectory: true)
-        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        for child in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        where child.lastPathComponent != "dirty-blocks.json" {
+            try FileManager.default.removeItem(at: child)
+        }
     }
 
     private func merge(_ shards: [ExplorationShard]) -> [FogBlockID: [ExplorationLayer: FogBitmapBlock]] {
@@ -221,7 +246,6 @@ actor ExplorationRenderHierarchy {
         var standard = [UInt8](repeating: 0, count: Self.maskByteCount)
         var flight = [UInt8](repeating: 0, count: Self.maskByteCount)
         var standardCount = 0, flightCount = 0, groundCount = 0, visitCount = 0, importedCount = 0
-        var generations = [UInt64]()
         for (childID, child) in children {
             let quadrantX = Int(childID.x & 1) * 32
             let quadrantY = Int(childID.y & 1) * 32
@@ -232,12 +256,16 @@ actor ExplorationRenderHierarchy {
             groundCount += child.groundCellCount
             visitCount += child.visitCellCount
             importedCount += child.importedFogCellCount
-            generations.append(child.generation)
+        }
+        let generation = children.keys.sorted().reduce(UInt64(1469598103934665603)) { partial, childID in
+            guard let child = children[childID] else { return partial }
+            let components = [UInt64(childID.x), UInt64(childID.y), child.generation]
+            return components.reduce(partial) { ($0 ^ $1) &* 1099511628211 }
         }
         return tile(id, standardMask: Data(standard), flightMask: Data(flight),
                     standardCount: standardCount, flightCount: flightCount,
                     groundCount: groundCount, visitCount: visitCount, importedCount: importedCount,
-                    generation: generations.sorted().reduce(UInt64(1469598103934665603)) { ($0 ^ $1) &* 1099511628211 })
+                    generation: generation)
     }
 
     private func tile(_ id: ExplorationRenderTileID, standardMask: Data, flightMask: Data,
@@ -256,7 +284,11 @@ actor ExplorationRenderHierarchy {
             for x in 0..<32 {
                 let sum = Int(bytes[(y * 2) * 64 + x * 2]) + Int(bytes[(y * 2) * 64 + x * 2 + 1])
                     + Int(bytes[(y * 2 + 1) * 64 + x * 2]) + Int(bytes[(y * 2 + 1) * 64 + x * 2 + 1])
-                target[(offsetY + y) * 64 + offsetX + x] = UInt8(sum / 4)
+                let averageCoverage = (sum + 2) / 4
+                // Preserve a faint minimum visibility cue for a sparse route
+                // at world scale. Counts remain exact and this is presentation
+                // coverage only, never canonical or statistical evidence.
+                target[(offsetY + y) * 64 + offsetX + x] = UInt8(max(averageCoverage, sum == 0 ? 0 : 64))
             }
         }
     }
@@ -325,13 +357,17 @@ actor ExplorationRenderTileCache {
     private let capacity: Int
     private var entries: [ExplorationRenderTileID: Entry] = [:]
     private var accessCounter: UInt64 = 0
+    private var updateObserver: NSObjectProtocol?
 
     init(hierarchy: ExplorationRenderHierarchy = ExplorationRenderHierarchy(), capacity: Int = 128) {
         self.hierarchy = hierarchy
         self.capacity = max(1, capacity)
     }
 
+    deinit { if let updateObserver { NotificationCenter.default.removeObserver(updateObserver) } }
+
     func read(_ id: ExplorationRenderTileID) async throws -> ExplorationRenderTile? {
+        observeUpdatesIfNeeded()
         accessCounter &+= 1
         if var entry = entries[id] {
             entry.lastAccess = accessCounter
@@ -358,5 +394,12 @@ actor ExplorationRenderTileCache {
             .prefix(numberToRemove)
             .map(\.key)
         for victim in victims { entries.removeValue(forKey: victim) }
+    }
+
+    private func observeUpdatesIfNeeded() {
+        guard updateObserver == nil else { return }
+        updateObserver = NotificationCenter.default.addObserver(forName: .explorationRenderTilesDidUpdate, object: nil, queue: nil) { [weak self] _ in
+            Task { await self?.removeAll() }
+        }
     }
 }

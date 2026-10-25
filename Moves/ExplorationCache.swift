@@ -207,7 +207,10 @@ actor ExplorationMergedCache {
                 rebuildAffected.formUnion(shard.blocks.map(\.id))
             }
         }
-        guard !affected.isEmpty else { return }
+        guard !affected.isEmpty else {
+            try await retryDirtyRenderTiles(deadline: deadline)
+            return
+        }
         if !rebuildAffected.isEmpty { try await rebuildBlocks(rebuildAffected, deadline: deadline) }
         if !appendOnly.isEmpty { try await appendShardsToBlocks(appendOnly, deadline: deadline) }
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
@@ -222,6 +225,7 @@ actor ExplorationMergedCache {
     }
 
     func removeShard(sourceID: String) async throws {
+        try await retryDirtyRenderTiles()
         guard let old = try await shardStore.read(sourceID: sourceID) else { return }
         let hierarchy = ExplorationRenderHierarchy(rootURL: rootURL)
         try await hierarchy.markDirty(old.blocks.map(\.id))
@@ -308,10 +312,12 @@ actor ExplorationMergedCache {
 
     func rebuildAll() async throws {
         let ids = try await shardStore.allShards().flatMap { $0.blocks.map(\.id) }
+        let hierarchy = ExplorationRenderHierarchy(rootURL: rootURL)
+        try await hierarchy.markDirty(ids)
         try await rebuildBlocks(Set(ids))
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
         try? await ExplorationCountryPresenceIndexStore(rootURL: rootURL).remove()
-        try await ExplorationRenderHierarchy(rootURL: rootURL).rebuildAll()
+        try await hierarchy.rebuildAll()
     }
 
     /// Replays durable render dirtiness after cancellation or process exit.

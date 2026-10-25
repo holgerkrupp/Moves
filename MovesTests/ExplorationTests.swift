@@ -1,4 +1,5 @@
 import CoreLocation
+import ImageIO
 import Foundation
 import XCTest
 import FogOfWorldKit
@@ -421,9 +422,9 @@ final class ExplorationTests: XCTestCase {
     func testIncrementalRenderHierarchyMatchesFullRebuildAcrossNeighborEdits() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let sourceStore = ExplorationShardFileStore(rootURL: root.appendingPathComponent("sources"))
-        let cache = ExplorationMergedCache(rootURL: root.appendingPathComponent("cache"), shardStore: sourceStore)
-        let hierarchy = ExplorationRenderHierarchy(rootURL: root.appendingPathComponent("cache"))
+        let sourceStore = ExplorationShardFileStore(rootURL: root)
+        let cache = ExplorationMergedCache(rootURL: root, shardStore: sourceStore)
+        let hierarchy = ExplorationRenderHierarchy(rootURL: root)
         let aID = FogBlockID(x: 256, y: 512)
         let bID = FogBlockID(x: 257, y: 512)
         var a = try FogBitmapBlock(); a.set(x: 1, y: 1); a.set(x: 63, y: 63)
@@ -473,6 +474,78 @@ final class ExplorationTests: XCTestCase {
             let actual = try await hierarchy.read(id)
             XCTAssertEqual(actual, expected, "incremental tile diverged at \(id)")
         }
+    }
+
+    func testFogMapTileKeepsSingleCanonicalCellSpatiallySmall() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let blockID = FogBlockID(x: 1_000, y: 2_000)
+        var bitmap = try FogBitmapBlock()
+        bitmap.set(x: 10, y: 12)
+        try await ExplorationShardFileStore(rootURL: root).write(ExplorationShard(sourceID: "fixture", revision: 1, blocks: [
+            ExplorationShardBlock(id: blockID, layers: [ExplorationLayerBitmap(layer: .importedFog, bitmap: bitmap)])
+        ]))
+        try await ExplorationRenderHierarchy(rootURL: root).rebuildAll()
+
+        let provider = ExplorationFogTileProvider(rootURL: root)
+        let generation = await provider.currentRequestGeneration()
+        let png = try await provider.tileData(x: Int(blockID.x), y: Int(blockID.y), z: 16, generation: generation)
+        let worldTile = try await ExplorationRenderHierarchy(rootURL: root).read(ExplorationRenderTileID(level: 16, x: 0, y: 0))
+        let worldMaskPixels = try XCTUnwrap(worldTile).standardMask.filter { $0 > 0 }.count
+        XCTAssertGreaterThan(worldMaskPixels, 0)
+        XCTAssertLessThan(worldMaskPixels, 4)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let pixels = try XCTUnwrap(image.dataProvider?.data as Data?)
+        func alpha(_ x: Int, _ y: Int) -> UInt8 { pixels[y * image.bytesPerRow + x * 4 + 3] }
+
+        // One 10m cell occupies its own 4x4 source-pixel footprint in the
+        // 256px z16 tile. It must not reveal the full 256px square.
+        XCTAssertLessThan(alpha(42, 50), 8)
+        XCTAssertGreaterThan(alpha(160, 160), 100)
+        let transparentPixels = (0..<256).reduce(0) { total, y in
+            total + (0..<256).filter { alpha($0, y) < 8 }.count
+        }
+        XCTAssertGreaterThan(transparentPixels, 0)
+        XCTAssertLessThan(transparentPixels, 64)
+    }
+
+    func testInterruptedRenderUpdateRemainsDirtyAndRetriesFromCanonicalSource() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ExplorationShardFileStore(rootURL: root)
+        let cache = ExplorationMergedCache(rootURL: root, shardStore: store)
+        let hierarchy = ExplorationRenderHierarchy(rootURL: root)
+        let blockID = FogBlockID(x: 81, y: 91)
+        var bitmap = try FogBitmapBlock(); bitmap.set(x: 9, y: 11)
+        try await cache.replaceShard(ExplorationShard(sourceID: "durable", revision: 1, blocks: [
+            ExplorationShardBlock(id: blockID, layers: [ExplorationLayerBitmap(layer: .ground, bitmap: bitmap)])
+        ]), updateCountryPresence: false)
+
+        try await hierarchy.markDirty([blockID])
+        let interrupted = try await hierarchy.dirtyBlocks()
+        XCTAssertEqual(interrupted, [blockID])
+        try await cache.retryDirtyRenderTiles()
+        let retried = try await hierarchy.dirtyBlocks()
+        XCTAssertTrue(retried.isEmpty)
+        let tile = try await hierarchy.read(ExplorationRenderTileID(level: 0, x: blockID.x, y: blockID.y))
+        XCTAssertEqual(tile?.standardCellCount, 1)
+    }
+
+    func testFogTileLongitudeWrapKeepsAntimeridianTileStable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let blockID = FogBlockID(x: 65_535, y: 20_000)
+        var bitmap = try FogBitmapBlock(); bitmap.set(x: 63, y: 31)
+        try await ExplorationShardFileStore(rootURL: root).write(ExplorationShard(sourceID: "dateline", revision: 1, blocks: [
+            ExplorationShardBlock(id: blockID, layers: [ExplorationLayerBitmap(layer: .ground, bitmap: bitmap)])
+        ]))
+        try await ExplorationRenderHierarchy(rootURL: root).rebuildAll()
+        let provider = ExplorationFogTileProvider(rootURL: root)
+        let generation = await provider.currentRequestGeneration()
+        let wrapped = try await provider.tileData(x: -1, y: Int(blockID.y), z: 16, generation: generation)
+        let canonical = try await provider.tileData(x: 65_535, y: Int(blockID.y), z: 16, generation: generation)
+        XCTAssertEqual(wrapped, canonical)
     }
 
     func testRenderTileCacheIsBounded() async throws {
@@ -795,6 +868,10 @@ final class ExplorationTests: XCTestCase {
         var b = try FogBitmapBlock(); b.set(x: 3, y: 3); b.set(x: 5, y: 5)
         try await cache.mergeShard(ExplorationShard(sourceID: "a", revision: 1, blocks: [ExplorationShardBlock(id: id, layers: [ExplorationLayerBitmap(layer: .ground, bitmap: a)])]))
         try await cache.mergeShard(ExplorationShard(sourceID: "b", revision: 1, blocks: [ExplorationShardBlock(id: id, layers: [ExplorationLayerBitmap(layer: .ground, bitmap: b)])]))
+        let renderHierarchy = ExplorationRenderHierarchy(rootURL: root)
+        let renderTileID = ExplorationRenderTileID(level: 0, x: id.x, y: id.y)
+        let renderTileAfterOverlap = try await renderHierarchy.read(renderTileID)
+        XCTAssertEqual(renderTileAfterOverlap?.standardCellCount, 3)
         let firstMerged = try await cache.readBlock(id)
         var merged = try XCTUnwrap(firstMerged)
         XCTAssertTrue(merged.bitmap(for: .ground)!.isSet(x: 1, y: 1))
@@ -802,6 +879,8 @@ final class ExplorationTests: XCTestCase {
 
         var a2 = try FogBitmapBlock(); a2.set(x: 1, y: 1)
         try await cache.replaceShard(ExplorationShard(sourceID: "a", revision: 2, blocks: [ExplorationShardBlock(id: id, layers: [ExplorationLayerBitmap(layer: .ground, bitmap: a2)])]))
+        let renderTileAfterReplace = try await renderHierarchy.read(renderTileID)
+        XCTAssertEqual(renderTileAfterReplace?.standardCellCount, 3)
         let secondMerged = try await cache.readBlock(id)
         merged = try XCTUnwrap(secondMerged)
         XCTAssertTrue(merged.bitmap(for: .ground)!.isSet(x: 1, y: 1))
@@ -809,6 +888,8 @@ final class ExplorationTests: XCTestCase {
         XCTAssertTrue(merged.bitmap(for: .ground)!.isSet(x: 5, y: 5))
 
         try await cache.removeShard(sourceID: "b")
+        let renderTileAfterRemove = try await renderHierarchy.read(renderTileID)
+        XCTAssertEqual(renderTileAfterRemove?.standardCellCount, 1)
         let thirdMerged = try await cache.readBlock(id)
         merged = try XCTUnwrap(thirdMerged)
         XCTAssertTrue(merged.bitmap(for: .ground)!.isSet(x: 1, y: 1))
