@@ -52,6 +52,11 @@ more specific tile is absent. Mask tiles are encoded on demand and retained in
 a bounded actor-owned LRU cache. The canonical leaf blocks remain the source
 for exact Fog import/export.
 
+When an older installation has merged canonical blocks but no versioned render
+tiles, neighborhood and street-scale tile requests backfill only the requested
+block region from those existing merged blocks. This upgrades visible coverage
+without enumerating source history when the map opens.
+
 Statistics use latitude-aware spherical cell area over the Web Mercator cell
 footprints. Country and first-level region attribution is derived from bundled
 offline boundaries and never changes canonical cells. Manual travel evidence

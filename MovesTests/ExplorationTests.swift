@@ -513,6 +513,45 @@ final class ExplorationTests: XCTestCase {
         XCTAssertLessThan(transparentPixels, 64)
     }
 
+    func testFogMapBackfillsMissingRenderHierarchyFromExistingMergedBlock() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let hometown = try FogRasterV1.address(for: CLLocationCoordinate2D(latitude: 53.47, longitude: 9.70))
+        let blockID = hometown.block
+        var bitmap = try FogBitmapBlock()
+        bitmap.set(x: Int(hometown.localCellX), y: Int(hometown.localCellY))
+        let shardStore = ExplorationShardFileStore(rootURL: root)
+        try await shardStore.write(ExplorationShard(sourceID: "existing-coverage", revision: 1, blocks: [
+            ExplorationShardBlock(id: blockID, layers: [ExplorationLayerBitmap(layer: .importedFog, bitmap: bitmap)])
+        ]))
+
+        // Simulate an installation that already has merged canonical data but
+        // predates versioned render tiles. The map should backfill just this
+        // requested neighborhood tile instead of showing permanent full fog.
+        let mergedCache = ExplorationMergedCache(rootURL: root, shardStore: shardStore)
+        try await mergedCache.rebuildBlocks([blockID])
+        let hierarchy = ExplorationRenderHierarchy(rootURL: root)
+        let missingTile = try await hierarchy.read(ExplorationRenderTileID(level: 0, x: blockID.x, y: blockID.y))
+        XCTAssertNil(missingTile)
+
+        let provider = ExplorationFogTileProvider(rootURL: root)
+        let generation = await provider.currentRequestGeneration()
+        let png = try await provider.tileData(x: Int(blockID.x), y: Int(blockID.y), z: 16, generation: generation)
+        let generatedValue = try await hierarchy.read(ExplorationRenderTileID(level: 0, x: blockID.x, y: blockID.y))
+        let tile = try XCTUnwrap(generatedValue)
+        XCTAssertEqual(tile.standardCellCount, 1)
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let pixels = try XCTUnwrap(image.dataProvider?.data as Data?)
+        func alpha(_ x: Int, _ y: Int) -> UInt8 { pixels[y * image.bytesPerRow + x * 4 + 3] }
+        let hometownPixelX = Int(hometown.localCellX) * 4 + 2
+        let hometownPixelY = Int(hometown.localCellY) * 4 + 2
+        XCTAssertLessThan(alpha(hometownPixelX, hometownPixelY), 8, "existing hometown coverage should be visible on first tile request")
+        XCTAssertGreaterThan(alpha((hometownPixelX + 80) % 256, (hometownPixelY + 80) % 256), 100,
+                             "uncovered nearby streets remain under fog")
+    }
+
     func testInterruptedRenderUpdateRemainsDirtyAndRetriesFromCanonicalSource() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
