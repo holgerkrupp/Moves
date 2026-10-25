@@ -487,7 +487,10 @@ final class ExplorationTests: XCTestCase {
         ]))
         try await ExplorationRenderHierarchy(rootURL: root).rebuildAll()
 
-        let provider = ExplorationFogTileProvider(rootURL: root)
+        let provider = ExplorationFogTileProvider(
+            rootURL: root,
+            style: ExplorationFogPresentationStyle(fogOpacity: 120, edgeTransition: 0.2)
+        )
         let generation = await provider.currentRequestGeneration()
         let png = try await provider.tileData(x: Int(blockID.x), y: Int(blockID.y), z: 16, generation: generation)
         let worldTile = try await ExplorationRenderHierarchy(rootURL: root).read(ExplorationRenderTileID(level: 16, x: 0, y: 0))
@@ -502,7 +505,7 @@ final class ExplorationTests: XCTestCase {
         // One 10m cell occupies its own 4x4 source-pixel footprint in the
         // 256px z16 tile. It must not reveal the full 256px square.
         XCTAssertLessThan(alpha(42, 50), 8)
-        XCTAssertGreaterThan(alpha(160, 160), 100)
+        XCTAssertEqual(alpha(160, 160), 120, "presentation style controls unexplored fog opacity")
         let transparentPixels = (0..<256).reduce(0) { total, y in
             total + (0..<256).filter { alpha($0, y) < 8 }.count
         }

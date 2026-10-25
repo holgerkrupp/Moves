@@ -9,6 +9,15 @@ import UniformTypeIdentifiers
 /// Actor-owned, bounded provider shared by one persistent MapKit overlay.
 /// MapKit requests georeferenced XYZ tiles directly from the same Web Mercator
 /// world used by FogRasterV1; camera movement never changes the overlay frame.
+struct ExplorationFogPresentationStyle: Sendable, Equatable {
+    var fogOpacity: UInt8
+    /// Width of the antialiased transition around a mask edge, as a fraction
+    /// of coverage. This affects only presentation alpha, not canonical cells.
+    var edgeTransition: Double
+
+    static let `default` = ExplorationFogPresentationStyle(fogOpacity: 160, edgeTransition: 0.2)
+}
+
 actor ExplorationFogTileProvider {
     private struct Key: Hashable { let z: Int; let x: Int; let y: Int; let flight: Bool }
     private struct Entry { let data: Data; var access: UInt64 }
@@ -20,13 +29,17 @@ actor ExplorationFogTileProvider {
     private var checkedRecovery = false
     private var includeFlights = false
     private var requestGeneration: UInt64 = 0
-    private let opacity: UInt8
+    private let style: ExplorationFogPresentationStyle
 
-    init(rootURL: URL = ExplorationStorageLocations.rootURL, capacity: Int = 96, fogOpacity: UInt8 = 160) {
+    init(
+        rootURL: URL = ExplorationStorageLocations.rootURL,
+        capacity: Int = 96,
+        style: ExplorationFogPresentationStyle = .default
+    ) {
         cache = ExplorationRenderTileCache(hierarchy: ExplorationRenderHierarchy(rootURL: rootURL), capacity: capacity)
         mergedCache = ExplorationMergedCache(rootURL: rootURL, shardStore: ExplorationShardFileStore(rootURL: rootURL))
         self.capacity = max(1, capacity)
-        opacity = fogOpacity
+        self.style = style
     }
 
     func setIncludeFlights(_ value: Bool) {
@@ -66,7 +79,7 @@ actor ExplorationFogTileProvider {
 
         let selection = try await coverageFor(x: x, y: y, z: zoom, includeFlights: includeFlights, generation: generation)
         try check(generation)
-        let data = Self.png(mask: selection.mask, crop: selection.crop, opacity: opacity)
+        let data = Self.png(mask: selection.mask, crop: selection.crop, style: style)
         images[key] = Entry(data: data, access: access)
         if images.count > capacity {
             let removeCount = images.count - capacity
@@ -128,7 +141,7 @@ actor ExplorationFogTileProvider {
         return Data(zip(standard, flight).map { max($0.0, $0.1) })
     }
 
-    private static func png(mask: Data?, crop: CGRect, opacity: UInt8) -> Data {
+    private static func png(mask: Data?, crop: CGRect, style: ExplorationFogPresentationStyle) -> Data {
         let side = 256
         let coverage = mask.map(Array.init) ?? [UInt8](repeating: 0, count: 4096)
         var rgba = [UInt8](repeating: 0, count: side * side * 4)
@@ -146,7 +159,12 @@ actor ExplorationFogTileProvider {
             for x in 0..<side {
                 let covered = sample((Double(x) + 0.5) / Double(side), (Double(y) + 0.5) / Double(side))
                 let index = (y * side + x) * 4
-                rgba[index + 3] = UInt8((Double(opacity) * (1 - covered / 255)).rounded())
+                let normalized = covered / 255
+                let transition = min(max(style.edgeTransition, 0.001), 1)
+                let lower = 0.5 - transition / 2
+                let t = min(max((normalized - lower) / transition, 0), 1)
+                let smoothCoverage = t * t * (3 - 2 * t)
+                rgba[index + 3] = UInt8((Double(style.fogOpacity) * (1 - smoothCoverage)).rounded())
             }
         }
         guard let provider = CGDataProvider(data: Data(rgba) as CFData),
@@ -190,7 +208,9 @@ private final class ExplorationFogMKTileOverlay: MKTileOverlay, @unchecked Senda
 }
 
 private extension ExplorationFogTileProvider {
-    static var fogFallbackData: Data { png(mask: nil, crop: CGRect(x: 0, y: 0, width: 1, height: 1), opacity: 160) }
+    static var fogFallbackData: Data {
+        png(mask: nil, crop: CGRect(x: 0, y: 0, width: 1, height: 1), style: .default)
+    }
 }
 
 #if os(iOS)
