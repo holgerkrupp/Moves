@@ -304,7 +304,8 @@ actor ExplorationShardFileStore {
         return manifest[Self.blockKey(blockID), default: []].sorted()
     }
 
-    func write(_ shard: ExplorationShard, failBeforeReplacement: Bool = false) throws {
+    func write(_ shard: ExplorationShard, failBeforeReplacement: Bool = false, deadline: ContinuousClock.Instant? = nil) throws {
+        try check(deadline)
         let data = try ExplorationShardCodec.encode(shard)
         _ = try ExplorationShardCodec.decode(data)
         let old = try read(sourceID: shard.sourceID)
@@ -324,7 +325,7 @@ actor ExplorationShardFileStore {
             try fileManager.moveItem(at: temporary, to: destination)
         }
         try ExplorationFileStorage.applyProtection(to: destination)
-        try updateManifest(old: old, new: shard)
+        try updateManifest(old: old, new: shard, deadline: deadline)
         try clearManifestMutation()
     }
 
@@ -333,7 +334,8 @@ actor ExplorationShardFileStore {
     /// bytes as a deterministic tie-break so two devices converge even when a
     /// transport delivers conflicting content for the same generation.
     @discardableResult
-    func writeIfPreferred(_ shard: ExplorationShard) throws -> Bool {
+    func writeIfPreferred(_ shard: ExplorationShard, deadline: ContinuousClock.Instant? = nil) throws -> Bool {
+        try check(deadline)
         let incoming = try ExplorationShardCodec.encode(shard)
         _ = try ExplorationShardCodec.decode(incoming)
         if let existing = try read(sourceID: shard.sourceID) {
@@ -343,7 +345,7 @@ actor ExplorationShardFileStore {
                 if !lexicographicallyPrecedes(incoming, current) { return false }
             }
         }
-        try write(shard)
+        try write(shard, deadline: deadline)
         return true
     }
 
@@ -361,7 +363,8 @@ actor ExplorationShardFileStore {
 
     private static func blockKey(_ id: FogBlockID) -> String { "\(id.x)-\(id.y)" }
 
-    private func updateManifest(old: ExplorationShard?, new: ExplorationShard?) throws {
+    private func updateManifest(old: ExplorationShard?, new: ExplorationShard?, deadline: ContinuousClock.Instant? = nil) throws {
+        try check(deadline)
         let url = rootURL.appendingPathComponent("v1/source-index.json")
         var manifest: [String: Set<String>] = [:]
         if fileManager.fileExists(atPath: url.path),
@@ -374,19 +377,25 @@ actor ExplorationShardFileStore {
         }
         if let old {
             for block in old.blocks {
+                try check(deadline)
                 manifest[Self.blockKey(block.id)]?.remove(old.sourceID)
             }
         }
         if let new {
-            for block in new.blocks { manifest[Self.blockKey(block.id), default: []].insert(new.sourceID) }
+            for block in new.blocks {
+                try check(deadline)
+                manifest[Self.blockKey(block.id), default: []].insert(new.sourceID)
+            }
         }
         manifest = manifest.filter { !$0.value.isEmpty }
-        try saveManifest(manifest)
+        try saveManifest(manifest, deadline: deadline)
     }
 
-    private func saveManifest(_ manifest: [String: Set<String>]) throws {
+    private func saveManifest(_ manifest: [String: Set<String>], deadline: ContinuousClock.Instant? = nil) throws {
+        try check(deadline)
         let normalized = manifest.mapValues { $0.sorted() }
         let data = try JSONEncoder().encode(normalized)
+        try check(deadline)
         try ExplorationFileStorage.writeAtomically(data, to: rootURL.appendingPathComponent("v1/source-index.json"))
     }
 
@@ -420,5 +429,10 @@ actor ExplorationShardFileStore {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "=", with: "")
         return rootURL.appendingPathComponent("v1/sources", isDirectory: true).appendingPathComponent(encoded).appendingPathExtension("exploration")
+    }
+
+    private func check(_ deadline: ContinuousClock.Instant?) throws {
+        try Task.checkCancellation()
+        if let deadline, ContinuousClock.now >= deadline { throw CancellationError() }
     }
 }

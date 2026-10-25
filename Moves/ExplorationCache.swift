@@ -36,6 +36,22 @@ actor ExplorationMergedCache {
     private let shardStore: ExplorationShardFileStore
     private let fileManager: FileManager
 
+    private struct PendingBlockID: Codable, Equatable {
+        let x: UInt32
+        let y: UInt32
+        var value: FogBlockID { FogBlockID(x: x, y: y) }
+        init(_ value: FogBlockID) { x = value.x; y = value.y }
+    }
+
+    private struct PendingPreparationMerge: Codable {
+        let sourceID: String
+        let revision: UInt64
+        let blockIDs: [PendingBlockID]
+        var mergeCursor = 0
+        var renderCursor = 0
+        var countryIndexComplete = false
+    }
+
     init(rootURL: URL, shardStore: ExplorationShardFileStore, fileManager: FileManager = .default) {
         self.rootURL = rootURL
         self.shardStore = shardStore
@@ -66,21 +82,121 @@ actor ExplorationMergedCache {
         try await replaceShard(shard)
     }
 
-    func replaceShard(_ shard: ExplorationShard, updateCountryPresence: Bool = true) async throws {
-        try await replaceShards([shard], updateCountryPresence: updateCountryPresence)
+    func replaceShard(_ shard: ExplorationShard, updateCountryPresence: Bool = true, deadline: ContinuousClock.Instant? = nil) async throws {
+        if deadline != nil {
+            try await replacePreparationShard(shard, updateCountryPresence: updateCountryPresence, deadline: deadline)
+            return
+        }
+        try await replaceShards([shard], updateCountryPresence: updateCountryPresence, deadline: deadline)
+    }
+
+    func pendingPreparationShard(sourceID: String) throws -> ExplorationShard? {
+        guard try loadPending(sourceID: sourceID) != nil else { return nil }
+        return try ExplorationShardCodec.decode(ExplorationFileStorage.readData(from: pendingShardURL(for: sourceID)))
+    }
+
+    func markCountryPresenceComplete(sourceID: String, revision: UInt64) throws {
+        guard var pending = try loadPending(sourceID: sourceID), pending.revision == revision else { return }
+        pending.countryIndexComplete = true
+        try savePending(pending, to: pendingURL(for: sourceID))
+    }
+
+    func finalizePreparationMerge(sourceID: String, revision: UInt64) throws {
+        guard let pending = try loadPending(sourceID: sourceID),
+              pending.revision == revision,
+              pending.countryIndexComplete else { return }
+        let url = pendingURL(for: sourceID)
+        if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
+        let shardURL = pendingShardURL(for: sourceID)
+        if fileManager.fileExists(atPath: shardURL.path) { try fileManager.removeItem(at: shardURL) }
+    }
+
+    private func replacePreparationShard(_ shard: ExplorationShard, updateCountryPresence: Bool, deadline: ContinuousClock.Instant?) async throws {
+        try check(deadline)
+        let pendingURL = pendingURL(for: shard.sourceID)
+        var pending: PendingPreparationMerge
+        if let existing = try loadPending(sourceID: shard.sourceID), existing.revision == shard.revision {
+            pending = existing
+        } else {
+            let old = try await shardStore.read(sourceID: shard.sourceID)
+            let blockIDs = Set((old?.blocks ?? []).map(\.id) + shard.blocks.map(\.id)).sorted().map(PendingBlockID.init)
+            try ExplorationFileStorage.writeAtomically(try ExplorationShardCodec.encode(shard), to: pendingShardURL(for: shard.sourceID))
+            pending = PendingPreparationMerge(
+                sourceID: shard.sourceID,
+                revision: shard.revision,
+                blockIDs: blockIDs
+            )
+            try savePending(pending, to: pendingURL)
+        }
+
+        try await ExplorationRenderHierarchy(rootURL: rootURL).markDirty(pending.blockIDs.map(\.value))
+        _ = try await shardStore.writeIfPreferred(shard, deadline: deadline)
+        while pending.mergeCursor < pending.blockIDs.count {
+            try check(deadline)
+            try await rebuildBlocks([pending.blockIDs[pending.mergeCursor].value], deadline: deadline)
+            pending.mergeCursor += 1
+            try savePending(pending, to: pendingURL)
+        }
+        let hierarchy = ExplorationRenderHierarchy(rootURL: rootURL)
+        while pending.renderCursor < pending.blockIDs.count {
+            try check(deadline)
+            try await hierarchy.rebuild(affectedBlocks: [pending.blockIDs[pending.renderCursor].value], cache: self, deadline: deadline)
+            pending.renderCursor += 1
+            try savePending(pending, to: pendingURL)
+        }
+        if updateCountryPresence, !pending.countryIndexComplete {
+            try check(deadline)
+            try await ExplorationCountryPresenceIndexStore(rootURL: rootURL).update(with: shard, deadline: deadline)
+            pending.countryIndexComplete = true
+            try savePending(pending, to: pendingURL)
+        }
+        try await ExplorationStatisticsStore(rootURL: rootURL).remove()
+        if updateCountryPresence, fileManager.fileExists(atPath: pendingURL.path) { try fileManager.removeItem(at: pendingURL) }
+        if updateCountryPresence {
+            let shardURL = pendingShardURL(for: shard.sourceID)
+            if fileManager.fileExists(atPath: shardURL.path) { try fileManager.removeItem(at: shardURL) }
+        }
+    }
+
+    private func loadPending(sourceID: String) throws -> PendingPreparationMerge? {
+        let url = pendingURL(for: sourceID)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        return try JSONDecoder().decode(PendingPreparationMerge.self, from: ExplorationFileStorage.readData(from: url))
+    }
+
+    private func savePending(_ pending: PendingPreparationMerge, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try ExplorationFileStorage.writeAtomically(try JSONEncoder().encode(pending), to: url)
+    }
+
+    private func pendingURL(for sourceID: String) -> URL {
+        let encoded = Data(sourceID.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        return rootURL.appendingPathComponent("v1/derived/pending-\(encoded).json")
+    }
+
+    private func pendingShardURL(for sourceID: String) -> URL {
+        pendingURL(for: sourceID).deletingPathExtension().appendingPathExtension("shard")
     }
 
     /// Replaces a bounded batch of source shards and rebuilds their affected
     /// canonical blocks once. Importers use this to avoid rebuilding the whole
     /// cache for every Fog tile.
-    func replaceShards(_ shards: [ExplorationShard], updateCountryPresence: Bool = true) async throws {
+    func replaceShards(_ shards: [ExplorationShard], updateCountryPresence: Bool = true, deadline: ContinuousClock.Instant? = nil) async throws {
         guard !shards.isEmpty else { return }
+        try await retryDirtyRenderTiles(deadline: deadline)
         var affected = Set<FogBlockID>()
         var rebuildAffected = Set<FogBlockID>()
         var appendOnly = [ExplorationShard]()
         var accepted = [ExplorationShard]()
         for shard in shards {
+            try check(deadline)
             let old = try await shardStore.read(sourceID: shard.sourceID)
+            let candidateBlocks = Set((old?.blocks ?? []).map(\.id) + shard.blocks.map(\.id))
+            try await ExplorationRenderHierarchy(rootURL: rootURL).markDirty(candidateBlocks)
             guard try await shardStore.writeIfPreferred(shard) else { continue }
             accepted.append(shard)
             if old == nil { appendOnly.append(shard) }
@@ -92,8 +208,8 @@ actor ExplorationMergedCache {
             }
         }
         guard !affected.isEmpty else { return }
-        if !rebuildAffected.isEmpty { try await rebuildBlocks(rebuildAffected) }
-        if !appendOnly.isEmpty { try await appendShardsToBlocks(appendOnly) }
+        if !rebuildAffected.isEmpty { try await rebuildBlocks(rebuildAffected, deadline: deadline) }
+        if !appendOnly.isEmpty { try await appendShardsToBlocks(appendOnly, deadline: deadline) }
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
         if updateCountryPresence {
             let countryIndex = ExplorationCountryPresenceIndexStore(rootURL: rootURL)
@@ -101,15 +217,19 @@ actor ExplorationMergedCache {
                 try await countryIndex.update(with: shard)
             }
         }
-        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: affected, cache: self)
+        try check(deadline)
+        try await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: affected, cache: self, deadline: deadline)
     }
 
     func removeShard(sourceID: String) async throws {
-        guard let old = try await shardStore.remove(sourceID: sourceID) else { return }
+        guard let old = try await shardStore.read(sourceID: sourceID) else { return }
+        let hierarchy = ExplorationRenderHierarchy(rootURL: rootURL)
+        try await hierarchy.markDirty(old.blocks.map(\.id))
+        guard try await shardStore.remove(sourceID: sourceID) != nil else { return }
         try await rebuildBlocks(Set(old.blocks.map(\.id)))
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
         try? await ExplorationCountryPresenceIndexStore(rootURL: rootURL).removeDay(for: old)
-        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuild(affectedBlocks: old.blocks.map(\.id), cache: self)
+        try await hierarchy.rebuild(affectedBlocks: old.blocks.map(\.id), cache: self)
     }
 
     func invalidateBlocks(_ ids: some Sequence<FogBlockID>) throws {
@@ -119,13 +239,15 @@ actor ExplorationMergedCache {
         }
     }
 
-    func rebuildBlocks(_ ids: some Sequence<FogBlockID>) async throws {
+    func rebuildBlocks(_ ids: some Sequence<FogBlockID>, deadline: ContinuousClock.Instant? = nil) async throws {
         let ids = Array(Set(ids)).sorted()
         guard !ids.isEmpty else { return }
         var merged = [FogBlockID: [ExplorationLayer: FogBitmapBlock]]()
         for id in ids {
+            try check(deadline)
             let sourceIDs = try await shardStore.sourceIDs(containing: id)
             for sourceID in sourceIDs {
+                try check(deadline)
                 guard let shard = try await shardStore.read(sourceID: sourceID),
                       let block = shard.blocks.first(where: { $0.id == id }) else { continue }
                 for layer in block.layers {
@@ -140,6 +262,7 @@ actor ExplorationMergedCache {
 
         try fileManager.createDirectory(at: rootURL.appendingPathComponent("v1/blocks", isDirectory: true), withIntermediateDirectories: true)
         for id in ids {
+            try check(deadline)
             if let layers = merged[id], !layers.isEmpty {
                 let block = ExplorationMergedBlock(id: id, layers: layers.map { ExplorationLayerBitmap(layer: $0.key, bitmap: $0.value) })
                 try writeBlock(block)
@@ -150,10 +273,12 @@ actor ExplorationMergedCache {
         }
     }
 
-    private func appendShardsToBlocks(_ shards: [ExplorationShard]) async throws {
+    private func appendShardsToBlocks(_ shards: [ExplorationShard], deadline: ContinuousClock.Instant? = nil) async throws {
         var blocksByID = [FogBlockID: [ExplorationLayer: FogBitmapBlock]]()
         for shard in shards {
+            try check(deadline)
             for block in shard.blocks {
+                try check(deadline)
                 if blocksByID[block.id] == nil, let existing = try readBlock(block.id) {
                     blocksByID[block.id] = Dictionary(uniqueKeysWithValues: existing.layers.map { ($0.layer, $0.bitmap) })
                 }
@@ -167,6 +292,7 @@ actor ExplorationMergedCache {
             }
         }
         for (id, layers) in blocksByID {
+            try check(deadline)
             try writeBlock(ExplorationMergedBlock(id: id, layers: layers.map { ExplorationLayerBitmap(layer: $0.key, bitmap: $0.value) }))
         }
     }
@@ -185,7 +311,18 @@ actor ExplorationMergedCache {
         try await rebuildBlocks(Set(ids))
         try? await ExplorationStatisticsStore(rootURL: rootURL).remove()
         try? await ExplorationCountryPresenceIndexStore(rootURL: rootURL).remove()
-        try? await ExplorationRenderHierarchy(rootURL: rootURL).rebuildAll()
+        try await ExplorationRenderHierarchy(rootURL: rootURL).rebuildAll()
+    }
+
+    /// Replays durable render dirtiness after cancellation or process exit.
+    /// This touches only affected canonical blocks and their hierarchy branches.
+    func retryDirtyRenderTiles(deadline: ContinuousClock.Instant? = nil) async throws {
+        let hierarchy = ExplorationRenderHierarchy(rootURL: rootURL)
+        let dirty = try await hierarchy.dirtyBlocks()
+        guard !dirty.isEmpty else { return }
+        try check(deadline)
+        try await rebuildBlocks(dirty, deadline: deadline)
+        try await hierarchy.rebuild(affectedBlocks: dirty, cache: self, deadline: deadline)
     }
 
     private func writeBlock(_ block: ExplorationMergedBlock) throws {
@@ -223,6 +360,11 @@ actor ExplorationMergedCache {
 
     private func blockURL(_ id: FogBlockID) -> URL {
         rootURL.appendingPathComponent("v1/blocks", isDirectory: true).appendingPathComponent("\(id.x)-\(id.y).block")
+    }
+
+    private func check(_ deadline: ContinuousClock.Instant?) throws {
+        try Task.checkCancellation()
+        if let deadline, ContinuousClock.now >= deadline { throw CancellationError() }
     }
 
     private func appendUInt32(_ value: UInt32, to data: inout Data) {

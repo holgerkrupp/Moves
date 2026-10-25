@@ -214,6 +214,60 @@ final class ExplorationTests: XCTestCase {
         ))
     }
 
+    func testProtectionMigrationInventoryPrioritizesLegacySourcesBeforeLargeCaches() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let blocks = root.appendingPathComponent("v1/blocks", isDirectory: true)
+        let sources = root.appendingPathComponent("v1/sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: blocks, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        for index in 0..<10_050 {
+            let url = blocks.appendingPathComponent(String(format: "%05d.block", index))
+            try Data([UInt8(index & 0xff)]).write(to: url)
+        }
+        let legacySource = sources.appendingPathComponent("legacy.exploration")
+        try Data([1]).write(to: legacySource)
+
+        let inventory = try ExplorationFileProtectionMigration.prioritizedInventory(root: root)
+        XCTAssertEqual(inventory.first, "v1/sources/legacy.exploration")
+        XCTAssertEqual(inventory.filter { $0.hasPrefix("v1/blocks/") }.count, 10_050)
+
+        // A durable cursor can resume after an interrupted batch without
+        // revisiting or skipping any inventory entry.
+        let firstBatch = Array(inventory.prefix(96))
+        let resumedBatch = Array(inventory.dropFirst(96).prefix(96))
+        XCTAssertEqual(firstBatch.first, "v1/sources/legacy.exploration")
+        XCTAssertTrue(Set(firstBatch).isDisjoint(with: Set(resumedBatch)))
+        XCTAssertEqual(firstBatch.count + resumedBatch.count, 192)
+    }
+
+#if os(iOS)
+    func testProtectionMigrationBatchUpgradesLegacyFilesAndPreservesNewProtection() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = ["v1/sources/legacy.exploration", "v1/blocks/old.block", "v1/render/new.json"]
+        for path in paths {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([1]).write(to: url)
+        }
+        for path in paths.prefix(2) {
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: root.appendingPathComponent(path).path)
+        }
+        try ExplorationFileStorage.applyProtection(to: root.appendingPathComponent(paths[2]))
+
+        let first = try ExplorationFileProtectionMigration.migrateBatch(inventory: paths, cursor: 0, root: root, limit: 2)
+        XCTAssertEqual(first.cursor, 2)
+        XCTAssertEqual(first.changedPaths, Array(paths.prefix(2)))
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent(paths[0]).path)[.protectionKey] as? FileProtectionType, .completeUntilFirstUserAuthentication)
+
+        let resumed = try ExplorationFileProtectionMigration.migrateBatch(inventory: paths, cursor: first.cursor, root: root, limit: 2)
+        XCTAssertEqual(resumed.cursor, paths.count)
+        XCTAssertTrue(resumed.changedPaths.isEmpty)
+        XCTAssertEqual(resumed.effectiveProtectionClass, String(describing: FileProtectionType.completeUntilFirstUserAuthentication))
+    }
+#endif
+
     func testWorkQueuePrioritizesImportsAndRecoversExpiredLease() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -263,6 +317,42 @@ final class ExplorationTests: XCTestCase {
         XCTAssertEqual(snapshot.delayedCount, 1)
         let next = try await queue.claim(maximum: 1, now: now.addingTimeInterval(1))
         XCTAssertEqual(next.first?.dayKey, "2022-08-15")
+    }
+
+    func testRepeatedLiveWorkCannotStarveHistoricalCursor() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = ExplorationWorkQueue(rootURL: root)
+        let now = Date(timeIntervalSince1970: 40_000)
+        try await queue.enqueue(dayKeys: (0..<8).map { "2026-10-\(String(format: "%02d", $0 + 1))" }, lane: .live)
+        try await queue.enqueue(dayKeys: (0..<4_752).map { "history-\($0)" }, lane: .historical)
+
+        for _ in 0..<4 {
+            let claimed = try await queue.claim(maximum: 1, now: now)
+            let work = try XCTUnwrap(claimed.first)
+            XCTAssertEqual(work.lane, .live)
+            try await queue.complete(work.id)
+        }
+        let restartedQueue = ExplorationWorkQueue(rootURL: root)
+        let fairClaim = try await restartedQueue.claim(maximum: 1, now: now)
+        let fairTurn = try XCTUnwrap(fairClaim.first)
+        XCTAssertEqual(fairTurn.lane, .historical)
+        let shouldAdvanceCursor = try await restartedQueue.shouldAdvanceHistoricalCursor()
+        XCTAssertTrue(shouldAdvanceCursor)
+    }
+
+    func testDiagnosticReportOmitsSensitivePathAndScheduleDoesNotOwnRunOutcome() throws {
+        let suite = "ExplorationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("Existing request retained", forKey: "Moves.exploration.bg.lastScheduleDecision")
+        defaults.set(["pathComponent": "day:Munich-home.exploration", "domain": "NSCocoaErrorDomain", "code": 257, "protectionClass": "NSFileProtectionComplete", "timestamp": Date(timeIntervalSince1970: 1), "resolved": false], forKey: "Moves.exploration.protectedReadFailure")
+        let report = ExplorationDiagnosticReport.make(defaults: defaults, checkpoint: nil, queue: nil, migration: .init())
+        XCTAssertTrue(report.contains("NSCocoaErrorDomain 257"))
+        XCTAssertFalse(report.contains("Munich-home"))
+        XCTAssertFalse(report.contains("Existing request retained"))
+        XCTAssertTrue(ExplorationBGRunOutcomePolicy.canTransition(from: .running, to: .expired))
+        XCTAssertFalse(ExplorationBGRunOutcomePolicy.canTransition(from: .expired, to: .completed))
     }
 
     func testDerivedStatisticsAreLatitudeAwareAndRebuildable() async throws {
@@ -326,6 +416,63 @@ final class ExplorationTests: XCTestCase {
         let tile = try await hierarchy.read(ExplorationRenderTileID(level: 0, x: 3, y: 4))
         XCTAssertEqual(tile?.standardCellCount, 1)
         XCTAssertEqual(tile?.flightCellCount, 1)
+    }
+
+    func testIncrementalRenderHierarchyMatchesFullRebuildAcrossNeighborEdits() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceStore = ExplorationShardFileStore(rootURL: root.appendingPathComponent("sources"))
+        let cache = ExplorationMergedCache(rootURL: root.appendingPathComponent("cache"), shardStore: sourceStore)
+        let hierarchy = ExplorationRenderHierarchy(rootURL: root.appendingPathComponent("cache"))
+        let aID = FogBlockID(x: 256, y: 512)
+        let bID = FogBlockID(x: 257, y: 512)
+        var a = try FogBitmapBlock(); a.set(x: 1, y: 1); a.set(x: 63, y: 63)
+        var b = try FogBitmapBlock(); b.set(x: 2, y: 2); b.set(x: 3, y: 3)
+        var flight = try FogBitmapBlock(); flight.set(x: 10, y: 10)
+        try await cache.replaceShard(ExplorationShard(sourceID: "a", revision: 1, blocks: [
+            ExplorationShardBlock(id: aID, layers: [ExplorationLayerBitmap(layer: .ground, bitmap: a)])
+        ]), updateCountryPresence: false)
+        try await cache.replaceShard(ExplorationShard(sourceID: "b", revision: 1, blocks: [
+            ExplorationShardBlock(id: bID, layers: [
+                ExplorationLayerBitmap(layer: .visits, bitmap: b),
+                ExplorationLayerBitmap(layer: .flight, bitmap: flight)
+            ])
+        ]), updateCountryPresence: false)
+
+        let ancestorID = ExplorationRenderTileID(level: 1, x: 128, y: 256)
+        let beforeReplaceValue = try await hierarchy.read(ancestorID)
+        let beforeReplace = try XCTUnwrap(beforeReplaceValue)
+        XCTAssertEqual(beforeReplace.standardCellCount, 4)
+        XCTAssertEqual(beforeReplace.flightCellCount, 1)
+        XCTAssertEqual(beforeReplace.standardMask.count, 4096)
+        XCTAssertGreaterThan(beforeReplace.standardMask.reduce(0) { $0 + $1.nonzeroBitCount }, 0)
+
+        var replacement = try FogBitmapBlock(); replacement.set(x: 2, y: 2)
+        try await cache.replaceShard(ExplorationShard(sourceID: "b", revision: 2, blocks: [
+            ExplorationShardBlock(id: bID, layers: [ExplorationLayerBitmap(layer: .visits, bitmap: replacement)])
+        ]), updateCountryPresence: false)
+        let replacedValue = try await hierarchy.read(ancestorID)
+        let replaced = try XCTUnwrap(replacedValue)
+        XCTAssertEqual(replaced.standardCellCount, 3)
+        XCTAssertEqual(replaced.flightCellCount, 0)
+
+        try await cache.removeShard(sourceID: "b")
+        let removedValue = try await hierarchy.read(ancestorID)
+        let removed = try XCTUnwrap(removedValue)
+        XCTAssertEqual(removed.standardCellCount, 2)
+        XCTAssertTrue(removed.flightMask.allSatisfy { $0 == 0 })
+
+        var incrementalTiles = [ExplorationRenderTileID: ExplorationRenderTile]()
+        for level in 0...10 {
+            for id in try await hierarchy.tileIDs(level: UInt8(level)) {
+                if let tile = try await hierarchy.read(id) { incrementalTiles[id] = tile }
+            }
+        }
+        try await hierarchy.rebuildAll()
+        for (id, expected) in incrementalTiles {
+            let actual = try await hierarchy.read(id)
+            XCTAssertEqual(actual, expected, "incremental tile diverged at \(id)")
+        }
     }
 
     func testRenderTileCacheIsBounded() async throws {
