@@ -209,6 +209,10 @@ enum MovesHelpTopic: String, CaseIterable, Identifiable, Hashable {
                     "Moves stores timeline data locally and can synchronize it through your private iCloud container when iCloud is available and enabled. Sync is asynchronous; updates may take time to reach another device.",
                     "The Mac app is for browsing and managing synchronized data. Use the iPhone as the device that records location. Sync does not guarantee that iOS will deliver background location updates."
                 ]),
+                .init("Sync status and diagnostics", paragraphs: [
+                    "Settings → Status shows recent successful imports and exports for this device. A system deferral means pending changes may still be waiting to upload; a later successful export clears the active warning while the event remains in the local diagnostic history.",
+                    "Refresh Diagnostics updates the local snapshot and event view. CloudKit schedules synchronization automatically, so this action does not force an upload. Copy Diagnostics provides local counts, timestamps, stable record IDs, and privacy-safe error details for troubleshooting."
+                ]),
                 .init("Check sync status", bullets: [
                     "Open the Status card or Settings → Tracking to review sync and diagnostics information.",
                     "Keep the devices signed in to the expected Apple Account and connected to iCloud. Allow time for queued changes to upload and download.",
@@ -259,7 +263,7 @@ enum MovesHelpTopic: String, CaseIterable, Identifiable, Hashable {
                 ]),
                 .init("Import, sync, or battery issue", bullets: [
                     "For imports, open the queue and retry a failed item after checking the file and selected import options.",
-                    "For sync delays, check the Status card and allow iCloud time to process changes. Avoid deleting data to resolve a temporary delay.",
+                    "For sync delays, check Settings → Status for recent import/export times and refresh diagnostics after allowing iCloud time to process changes. Avoid deleting data to resolve a temporary delay.",
                     "Detailed GPS route tracking uses more battery than background place recording. Stop an active route session when it is no longer needed."
                 ]),
                 .init("Safe maintenance", paragraphs: [

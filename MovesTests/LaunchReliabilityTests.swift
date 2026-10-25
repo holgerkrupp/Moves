@@ -113,6 +113,8 @@ final class LaunchReliabilityTests: XCTestCase {
         let newestDate = Date(timeIntervalSince1970: 1_900_000_000)
         let historyStart = newestDate.addingTimeInterval(-4_100 * 24 * 60 * 60)
         let rowCount = 1_250
+        let newestPlaceID = UUID()
+        let newestMoveID = UUID()
 
         for index in 0..<rowCount {
             let date = historyStart.addingTimeInterval(Double(index) * 24 * 60 * 60)
@@ -124,6 +126,7 @@ final class LaunchReliabilityTests: XCTestCase {
                 horizontalAccuracy: 10
             )
             place.createdAt = date
+            if index == rowCount - 1 { place.id = newestPlaceID }
             context.insert(place)
 
             let move = MoveSegment(
@@ -135,6 +138,7 @@ final class LaunchReliabilityTests: XCTestCase {
                 stepCount: nil
             )
             move.createdAt = index == rowCount - 1 ? newestDate : date
+            if index == rowCount - 1 { move.id = newestMoveID }
             context.insert(move)
         }
         try context.save()
@@ -154,6 +158,8 @@ final class LaunchReliabilityTests: XCTestCase {
         XCTAssertEqual(snapshot.placeCount, rowCount)
         XCTAssertEqual(snapshot.moveCount, rowCount)
         XCTAssertEqual(snapshot.newestCreatedAt, newestDate)
+        XCTAssertEqual(snapshot.newestPlaceID, newestPlaceID)
+        XCTAssertEqual(snapshot.newestMoveID, newestMoveID)
         XCTAssertEqual(MovesSyncDiagnosticsSnapshotLoader.newestFetchLimit, 1)
     }
 
@@ -176,6 +182,7 @@ final class LaunchReliabilityTests: XCTestCase {
                 )
             }
         )
+        diagnostics.startObservingTimeline()
         diagnostics.startObservingTimeline()
         let observedInitialSnapshot = await waitUntil { await tracker.callCount == 1 }
         XCTAssertTrue(observedInitialSnapshot)

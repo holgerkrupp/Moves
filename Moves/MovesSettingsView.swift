@@ -1126,6 +1126,23 @@ private struct CloudKitSyncStatusCard: View {
         if isExportInProgress {
             return "Uploading to iCloud"
         }
+        if let details = diagnostics.lastErrorDetails {
+            if details.code == 134419, details.domain == NSCocoaErrorDomain {
+                let failures = diagnostics.consecutiveFailureCount(for: details.stage)
+                if failures > 2 {
+                    return "Repeated sync deferrals — review diagnostics"
+                }
+                return failures > 1
+                    ? "Repeatedly waiting for system scheduling"
+                    : "Temporarily deferred by the system"
+            }
+            if details.disposition == .persistent {
+                return "Persistent iCloud sync issue"
+            }
+            if details.disposition == .retryable {
+                return "iCloud sync temporarily deferred"
+            }
+        }
         switch syncMonitor.syncStateSummary {
         case .error:
             return "iCloud sync needs attention"
@@ -1147,9 +1164,7 @@ private struct CloudKitSyncStatusCard: View {
             ("Export", syncMonitor.exportError.map {
                 MovesSyncDiagnostics.errorDetails(for: $0, stage: .cloudKitExport)
             })
-        ].compactMap { name, details in
-            details.map { (name, $0) }
-        }
+        ].compactMap { name, details in details.map { (name, $0) } }
     }
 
     private var storeFailure: MovesSyncDiagnostics.ErrorDetails? {
@@ -1197,8 +1212,12 @@ private struct CloudKitSyncStatusCard: View {
 
             if !errors.isEmpty || diagnostics.lastErrorDetails != nil || storeFailure != nil {
                 HStack(spacing: 10) {
-                    Button("Retry") {
-                        NotificationCenter.default.post(name: .movesCloudKitRetryRequested, object: nil)
+                    Button(storeFailure == nil ? "Refresh Diagnostics" : "Retry Store Setup") {
+                        if storeFailure == nil {
+                            diagnostics.refreshDiagnostics()
+                        } else {
+                            NotificationCenter.default.post(name: .movesCloudKitRetryRequested, object: nil)
+                        }
                     }
                     .buttonStyle(.bordered)
 

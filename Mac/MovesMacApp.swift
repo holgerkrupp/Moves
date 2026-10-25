@@ -80,6 +80,7 @@ struct MovesMacApp: App {
     private var showsImportStatusInMenuBar = true
 
     init() {
+        MovesSyncDiagnostics.installEarlyCloudKitEventObservation()
         SyncMonitor.default.startMonitoring()
         do {
             let container = try Self.makeModelContainer()
