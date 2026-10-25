@@ -23,6 +23,7 @@ actor ExplorationFogTileProvider {
     private struct Entry { let data: Data; var access: UInt64 }
     private let cache: ExplorationRenderTileCache
     private let mergedCache: ExplorationMergedCache
+    private let hierarchy: ExplorationRenderHierarchy
     private let capacity: Int
     private var images: [Key: Entry] = [:]
     private var access: UInt64 = 0
@@ -36,7 +37,9 @@ actor ExplorationFogTileProvider {
         capacity: Int = 96,
         style: ExplorationFogPresentationStyle = .default
     ) {
-        cache = ExplorationRenderTileCache(hierarchy: ExplorationRenderHierarchy(rootURL: rootURL), capacity: capacity)
+        let hierarchy = ExplorationRenderHierarchy(rootURL: rootURL)
+        self.hierarchy = hierarchy
+        cache = ExplorationRenderTileCache(hierarchy: hierarchy, capacity: capacity)
         mergedCache = ExplorationMergedCache(rootURL: rootURL, shardStore: ExplorationShardFileStore(rootURL: rootURL))
         self.capacity = max(1, capacity)
         self.style = style
@@ -69,6 +72,9 @@ actor ExplorationFogTileProvider {
         let dimension = 1 << zoom
         let x = ((rawX % dimension) + dimension) % dimension
         let y = min(max(rawY, 0), dimension - 1)
+        if zoom >= 13 {
+            try await backfillVisibleRenderTileIfNeeded(x: x, y: y, z: zoom, generation: generation)
+        }
         let key = Key(z: zoom, x: x, y: y, flight: includeFlights)
         access &+= 1
         if var entry = images[key] {
@@ -96,6 +102,45 @@ actor ExplorationFogTileProvider {
     }
 
     private struct Selection { let mask: Data?; let crop: CGRect }
+
+    /// Older prepared installs may have canonical merged blocks but no render
+    /// pyramid yet. Materialize only the requested neighborhood tile from
+    /// those blocks; never enumerate the source history when opening the map.
+    private func backfillVisibleRenderTileIfNeeded(x: Int, y: Int, z: Int, generation: UInt64) async throws {
+        let renderID: ExplorationRenderTileID
+        let blockOriginX: Int
+        let blockOriginY: Int
+        let blockSide: Int
+        if z <= 16 {
+            let level = 16 - z
+            renderID = ExplorationRenderTileID(level: UInt8(level), x: UInt32(x), y: UInt32(y))
+            blockSide = 1 << level
+            blockOriginX = x * blockSide
+            blockOriginY = y * blockSide
+        } else {
+            let extra = z - 16
+            blockOriginX = x >> extra
+            blockOriginY = y >> extra
+            blockSide = 1
+            renderID = ExplorationRenderTileID(level: 0, x: UInt32(blockOriginX), y: UInt32(blockOriginY))
+        }
+        if try await cache.read(renderID) != nil { return }
+        try check(generation)
+
+        var blockIDs = [FogBlockID]()
+        blockIDs.reserveCapacity(blockSide * blockSide)
+        for offsetY in 0..<blockSide {
+            for offsetX in 0..<blockSide {
+                blockIDs.append(FogBlockID(x: UInt32(blockOriginX + offsetX), y: UInt32(blockOriginY + offsetY)))
+            }
+        }
+        let existing = try await mergedCache.renderBlocks(blockIDs)
+        try check(generation)
+        guard !existing.isEmpty else { return }
+        try await hierarchy.rebuild(affectedBlocks: existing.keys, cache: mergedCache)
+        try check(generation)
+        await cache.removeAll()
+    }
 
     private func coverageFor(x: Int, y: Int, z: Int, includeFlights: Bool, generation: UInt64) async throws -> Selection {
         if z > 16 {
